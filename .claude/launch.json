@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "trading-card-generator",
+      "runtimeExecutable": "/Users/shawnmichael/Claude/dev.sh",
+      "runtimeArgs": [],
+      "port": 5173
+    }
+  ]
+}
