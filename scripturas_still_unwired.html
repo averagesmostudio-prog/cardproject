@@ -1,0 +1,383 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Still Unwired</title>
+<style>
+  :root {
+    --bg: #f6f1e6;
+    --bg-raise: #fffdf8;
+    --ink: #26211a;
+    --ink-soft: #6b6255;
+    --ink-faint: #948a7a;
+    --line: #e0d6c2;
+    --line-soft: #ece4d2;
+    --accent: #9c6b1f;
+    --accent-ink: #ffffff;
+    --accent-tint: #f1e2c4;
+    --done-bg: #e7efdf;
+    --done-ink: #3f6b32;
+    --done-line: #cfe0c1;
+    --blocked-bg: #eee9e2;
+    --blocked-ink: #6b6255;
+    --blocked-line: #ddd4c0;
+    --ambig-bg: #fbe9e2;
+    --ambig-ink: #a1502e;
+    --ambig-line: #f0cdb9;
+    --code-bg: #efe6d2;
+    --shadow: 0 1px 2px rgba(38,33,26,0.06), 0 8px 24px rgba(38,33,26,0.05);
+    --c-bleeding: #a3382e;
+    --c-faithless: #7a7267;
+    --c-formless: #5b4a86;
+    --c-living: #4a7c3f;
+    --c-shifting: #3568a8;
+    --c-timeless: #b3891f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1b1712;
+      --bg-raise: #241f18;
+      --ink: #f1e9d8;
+      --ink-soft: #c3b8a2;
+      --ink-faint: #8d8271;
+      --line: #3a3226;
+      --line-soft: #2d271e;
+      --accent: #d3a14a;
+      --accent-ink: #211a0e;
+      --accent-tint: #362a17;
+      --done-bg: #24301f;
+      --done-ink: #a8cf95;
+      --done-line: #3a4a30;
+      --blocked-bg: #2a251d;
+      --blocked-ink: #b0a690;
+      --blocked-line: #3a3226;
+      --ambig-bg: #33221a;
+      --ambig-ink: #e39a72;
+      --ambig-line: #4a3225;
+      --code-bg: #2a2318;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.25);
+      --c-bleeding: #d97567;
+      --c-faithless: #a89e8e;
+      --c-formless: #a494d6;
+      --c-living: #8fc17f;
+      --c-shifting: #7fabe0;
+      --c-timeless: #e3b862;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #1b1712;
+    --bg-raise: #241f18;
+    --ink: #f1e9d8;
+    --ink-soft: #c3b8a2;
+    --ink-faint: #8d8271;
+    --line: #3a3226;
+    --line-soft: #2d271e;
+    --accent: #d3a14a;
+    --accent-ink: #211a0e;
+    --accent-tint: #362a17;
+    --done-bg: #24301f;
+    --done-ink: #a8cf95;
+    --done-line: #3a4a30;
+    --blocked-bg: #2a251d;
+    --blocked-ink: #b0a690;
+    --blocked-line: #3a3226;
+    --ambig-bg: #33221a;
+    --ambig-ink: #e39a72;
+    --ambig-line: #4a3225;
+    --code-bg: #2a2318;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.25);
+    --c-bleeding: #d97567;
+    --c-faithless: #a89e8e;
+    --c-formless: #a494d6;
+    --c-living: #8fc17f;
+    --c-shifting: #7fabe0;
+    --c-timeless: #e3b862;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", system-ui, sans-serif;
+    font-size: 15.5px;
+    line-height: 1.55;
+    padding-inline: max(20px, env(safe-area-inset-left, 0px));
+    padding-block: 40px 64px;
+  }
+  .wrap { max-width: 820px; margin: 0 auto; }
+
+  h1, h2, h3 { font-family: "Fraunces", Georgia, serif; text-wrap: balance; margin: 0; }
+  code, .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+
+  header.page { margin-bottom: 34px; }
+  .eyebrow {
+    font-size: 11.5px; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase;
+    color: var(--accent); margin-bottom: 10px;
+  }
+  h1 { font-size: 34px; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 10px; }
+  .dek { color: var(--ink-soft); font-size: 16px; max-width: 64ch; }
+
+  .stat-row {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+    margin: 26px 0 36px;
+  }
+  .stat {
+    background: var(--bg-raise); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px 16px; box-shadow: var(--shadow);
+  }
+  .stat .n { font-family: "Fraunces", serif; font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .stat .l { font-size: 12px; color: var(--ink-soft); margin-top: 2px; }
+
+  section { margin-bottom: 40px; }
+  section > h2 {
+    font-size: 21px; font-weight: 600; margin-bottom: 6px; display: flex; align-items: baseline; gap: 10px;
+  }
+  .section-note { color: var(--ink-soft); font-size: 14px; margin-bottom: 16px; max-width: 64ch; }
+
+  .done-list {
+    display: flex; flex-wrap: wrap; gap: 7px;
+  }
+  .chip {
+    background: var(--done-bg); color: var(--done-ink); border: 1px solid var(--done-line);
+    border-radius: 999px; padding: 5px 12px; font-size: 13.5px; font-weight: 500;
+  }
+
+  .card {
+    background: var(--bg-raise); border: 1px solid var(--line); border-radius: 12px;
+    padding: 16px 18px; margin-bottom: 12px; box-shadow: var(--shadow);
+  }
+  .card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; }
+  .card-title { font-family: "Fraunces", serif; font-weight: 600; font-size: 16.5px; }
+  .tag {
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 3px 9px; border-radius: 999px; white-space: nowrap;
+  }
+  .tag.blocked { background: var(--blocked-bg); color: var(--blocked-ink); border: 1px solid var(--blocked-line); }
+  .tag.ambiguous { background: var(--ambig-bg); color: var(--ambig-ink); border: 1px solid var(--ambig-line); }
+  .tag.partial { background: var(--accent-tint); color: var(--accent); border: 1px solid var(--line); }
+  .tag.done { background: var(--done-bg); color: var(--done-ink); border: 1px solid var(--done-line); }
+
+  .cardtext {
+    font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: var(--ink-soft);
+    background: var(--code-bg); border-radius: 6px; padding: 9px 11px; margin: 8px 0;
+    white-space: pre-wrap; line-height: 1.5;
+  }
+  .why { font-size: 14px; color: var(--ink); }
+  .why b { font-weight: 600; }
+
+  .closed-note {
+    background: var(--done-bg); border: 1px solid var(--done-line); color: var(--done-ink);
+    border-radius: 12px; padding: 14px 18px; font-size: 14px;
+  }
+
+  /* -- Full-audit gap list ------------------------------------------- */
+  .audit-intro {
+    background: var(--bg-raise); border: 1px solid var(--line); border-radius: 12px;
+    padding: 16px 18px; margin-bottom: 22px; box-shadow: var(--shadow); font-size: 14px; color: var(--ink-soft);
+  }
+  .audit-intro b { color: var(--ink); }
+  .set-grid {
+    display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-bottom: 28px;
+  }
+  .set-pill {
+    background: var(--bg-raise); border: 1px solid var(--line); border-radius: 10px;
+    padding: 10px 8px; text-align: center; box-shadow: var(--shadow);
+    border-top: 3px solid var(--pc, var(--accent));
+  }
+  .set-pill .n { font-family: "Fraunces", serif; font-weight: 600; font-size: 19px; font-variant-numeric: tabular-nums; }
+  .set-pill .l { font-size: 10.5px; color: var(--ink-soft); margin-top: 1px; letter-spacing: 0.01em; }
+
+  .set-block { margin-bottom: 30px; }
+  .set-head {
+    display: flex; align-items: center; gap: 9px; margin-bottom: 4px;
+  }
+  .set-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--pc, var(--accent)); flex: none; }
+  .set-head h3 { font-size: 17px; font-weight: 600; }
+  .set-head .set-tally { font-size: 12.5px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+  .set-body {
+    background: var(--bg-raise); border: 1px solid var(--line); border-radius: 12px;
+    box-shadow: var(--shadow); overflow: hidden;
+  }
+  .gap-row { padding: 12px 16px; border-bottom: 1px solid var(--line-soft); }
+  .gap-row:last-child { border-bottom: none; }
+  .gap-row .gap-name { font-weight: 600; font-size: 14.5px; }
+  .gap-row .gap-clause {
+    font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--ink-soft);
+    background: var(--code-bg); border-radius: 5px; padding: 6px 9px; margin: 6px 0; white-space: pre-wrap; line-height: 1.45;
+  }
+  .gap-row .gap-why { font-size: 13px; color: var(--ink-soft); }
+
+  footer {
+    margin-top: 44px; padding-top: 20px; border-top: 1px solid var(--line);
+    color: var(--ink-faint); font-size: 13px;
+  }
+
+  @media (max-width: 640px) {
+    .set-grid { grid-template-columns: repeat(3, 1fr); }
+  }
+  @media (max-width: 520px) {
+    .stat-row { grid-template-columns: repeat(2, 1fr); }
+    h1 { font-size: 27px; }
+  }
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<div class="wrap">
+  <header class="page">
+    <div class="eyebrow">Two fix waves, then your own rulings — 33 gaps closed total</div>
+    <h1>Still Unwired</h1>
+    <p class="dek">The full re-audit against the live code found 86 real gaps across 70 cards. 22 of the straightforward ones closed in the first fix wave; you then answered the 9 card-specific questions from the "needs your call" list, and all 9 are built and tested. What's left below is genuinely down to two things: a handful of cards still needing a real new subsystem (a continuous board-wide aura; a "becomes a face-up Prophecy" conversion), and the rest are just plain unbuilt — no more silent typos or swallowed clauses hiding in the list.</p>
+  </header>
+
+  <div class="stat-row">
+    <div class="stat"><div class="n">34</div><div class="l">Closed across all rounds</div></div>
+    <div class="stat"><div class="n">52</div><div class="l">Gaps still open</div></div>
+    <div class="stat"><div class="n">48</div><div class="l">Cards touched by them</div></div>
+    <div class="stat"><div class="n">998</div><div class="l">Tests passing</div></div>
+  </div>
+
+  <section>
+    <h2>Landed this round</h2>
+    <div class="card">
+      <div class="card-head"><span class="card-title">Deja Vu</span><span class="tag done">Done</span></div>
+      <div class="cardtext">Return target Being that you control with cost (X) to your hand, then Summon it without paying its summoning cost
+Pay (2) additional Timeless Essence to target a Deity.</div>
+      <div class="why">Your four rulings, all built: the (X) in Deja Vu's own printed cost is the target's own total casting cost, read back at cast time — the first card whose own cost genuinely widens based on which target gets picked. <code>toGameCard</code> was silently dropping X-cost pips entirely before this (a real, pre-existing gap this card exposed); fixed with a new <code>xCostColor</code> marker. Only Beings (and Deities, with their own +2 Timeless surcharge) the player can actually afford the combined cost for are ever offered as legal targets. Casting it pays nothing up front — the whole combined cost is paid once a target is chosen, then that Being is returned and immediately resummoned on the exact same tile for free, unconditional and un-stoppable per your ruling, retriggering When Summoned like any real summon.</div>
+    </div>
+    <div class="card">
+      <div class="card-head"><span class="card-title">Immen Gorta's own summoning cost</span><span class="tag done">Done</span></div>
+      <div class="cardtext">As an additional cost to summon, Sacrifice (2) Beings.</div>
+      <div class="why">The last piece of Immen Gorta — everything about its board behavior (the Shift, the loop, the damage) was already built. Never offered at all without 2 of your own Beings already on board to pay it with. The normal Formless summoning cost is paid first, then clicking a highlighted Being sacrifices it — one at a time, same board-native click as every other target choice in the game — until 2 are picked, then Immen Gorta is placed for real and its own When Summoned fires.</div>
+    </div>
+    <div class="card">
+      <div class="card-head"><span class="card-title">UI gap found and fixed along the way</span><span class="tag done">Done</span></div>
+      <div class="cardtext">shift-destination, shift-return, shift-from-purgatory-destination, force-shift-target,
+copy-opponent-effect, give-different-typed-buff, udarik-shift-target,
+echoes-boundless-shift-instead</div>
+      <div class="why">While wiring up Deja Vu's own click-to-target picker, found that every one of these — real, working, fully tested at the engine level since the Shift round — had no actual button or highlight in the app itself. They'd have silently stalled a real game the moment a human player hit one. All eight now click the same way every other board choice does.</div>
+    </div>
+    <div class="card">
+      <div class="card-head"><span class="card-title">22 gaps from the re-audit, closed in the same pass</span><span class="tag done">Done</span></div>
+      <div class="cardtext">Imneyat Dryad, Samara Seed, Seed of Divinity, Melting Clock, Canopic Jar (1st ability), Saan tachīan Hunger,
+Onagīous Hunger, Pangs of Hunger, Cycle of Hunger, Cursed Commission, Smite, Locust swarm, Cutlass,
+Blooming Vine (token), Void Channeler, For the Greater Good, Erroneous Evocation, Book of Mahatzu,
+Skeptical Scrawling, Seasons of Regrowth, Rejuvinating Waters, Festival of Monatssa</div>
+      <div class="why">The ones with no genuinely new subsystem needed — a typo tolerated, a regex reordered or widened, a cost that was silently free now actually enforced, a flat amount that's now a real scaled count. Full breakdown in RULES.md's own "Re-audit round" section. Two small pieces of shared engine infrastructure came out of this batch: a new Armament reaction point (`triggerOnAttachedBeingDied`, wired into all four real death paths) for Cutlass, and Depart/a Prophecy's own flip-trigger lines now run the card's own name-substitution first (same as When Summoned/onMove already did), which is what let Locust swarm and Smite drop in with no bespoke pattern of their own.</div>
+    </div>
+    <div class="card">
+      <div class="card-head"><span class="card-title">9 more, after your own rulings</span><span class="tag done">Done</span></div>
+      <div class="cardtext">Boknea Druid, Vaneach Hunger, Vicious Vittles, Envoy of the Hungers, Grand Germination,
+Conscription, Planchette, Brick, Blood Rites</div>
+      <div class="why">Every card-specific question from the last list, answered and built in the same pass. A few produced real new shared primitives: `placeBeingOnBoard` can now Dryad-attach directly on summon, not just on move (Boknea Druid); a new `SUMMON_AS_PROPHECY` action places a card straight into the Ethereal Realm from hand (Vaneach Hunger); a new granted-Martyr primitive lets a ground Relic hand an ability to whatever Being shares its tile (Planchette); and a new `choose-x-value` pendingChoice lets a caster freely pick a number and pay it, rather than deriving X from a target or a board count (Blood Rites) — the search itself reuses the *existing* costFilter search mechanism (Death's Decanter), not a new one. Full breakdown in RULES.md's own "Second wave" section.</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>The re-audit</h2>
+    <p class="section-note">Grouped by Effigy color the same way the card set itself is. Each entry is the exact clause that doesn't do anything yet and why — a missing pattern, a phrasing the regex doesn't reach, or a clause silently dropped after an earlier one in the same sentence already matched. This is a punch list, not a priority order; nothing here needs a ruling from you first, they're all straightforward "go build it" gaps.</p>
+    <div class="set-grid">
+      <div class="set-pill" style="--pc:var(--c-bleeding)"><div class="n">10</div><div class="l">Bleeding</div></div>
+      <div class="set-pill" style="--pc:var(--c-faithless)"><div class="n">5</div><div class="l">Faithless</div></div>
+      <div class="set-pill" style="--pc:var(--c-formless)"><div class="n">6</div><div class="l">Formless</div></div>
+      <div class="set-pill" style="--pc:var(--c-living)"><div class="n">9</div><div class="l">Living</div></div>
+      <div class="set-pill" style="--pc:var(--c-shifting)"><div class="n">8</div><div class="l">Shifting</div></div>
+      <div class="set-pill" style="--pc:var(--c-timeless)"><div class="n">14</div><div class="l">Timeless + tokens</div></div>
+    </div>
+
+    <div class="audit-intro">
+      One false alarm worth naming so it doesn't get re-flagged: the audit's Timeless pass questioned whether <b>Deja Vu</b>'s Deity surcharge is actually enforced before a Deity gets offered as a target. It is — <code>dejaVuCandidates</code> only ever offers a Deity when the combined cost including the +2 Timeless surcharge is payable, confirmed by its own test above.
+    </div>
+
+    <div class="set-block">
+      <div class="set-head" style="--pc:var(--c-bleeding)"><span class="set-dot"></span><h3>Bleeding</h3><span class="set-tally">10 gaps</span></div>
+      <div class="set-body">
+        <div class="gap-row"><div class="gap-name">Blood Rites</div><div class="gap-clause">Until the end of turn, each Bleeding Essence in its cost may be paid with (10) lifespan instead.</div><div class="gap-why">No pattern for "pay with Lifespan instead" exists — its own "Add an Armament that costs (X)" clause is done.</div></div>
+        <div class="gap-row"><div class="gap-name">Kalmahka</div><div class="gap-clause">Armaments you control are 3/1 Relic - Armaments with "Animated. Attached Being has +0/+0" and lose all other text.</div><div class="gap-why">A continuous board-wide aura; no such mechanism exists yet (its own "Gain (1) Time Counter" line is fine).</div></div>
+        <div class="gap-row"><div class="gap-name">Metal Worker</div><div class="gap-clause">Once per turn, you may Pay (1) Bleeding Essence: The next Relic you summon this turn costs (-2) Faithless.</div><div class="gap-why">The comma after "turn" breaks the once-per-turn parser — this ability is never even captured, let alone offered.</div></div>
+        <div class="gap-row"><div class="gap-name">Sha-KaRah</div><div class="gap-clause">Pay (5) Lifespan to move an adjacent Armament one tile in any direction.</div><div class="gap-why">No unconditional "Pay Lifespan to X" shape exists (only a "you may pay" variant) — never parsed into any field.</div></div>
+        <div class="gap-row"><div class="gap-name">Smithing Tools</div><div class="gap-clause">Engage a Being, Gain (1) Forge Counter.</div><div class="gap-why">"Engage a Being" (not "Engage:") fails every Engage-family pattern — dropped entirely, not even offered.</div></div>
+        <div class="gap-row"><div class="gap-name">Smithing Tools</div><div class="gap-clause">Engage, Remove (X) Forge Counters: Add an Armament from deck to hand with conjuring cost (X)</div><div class="gap-why">Relic-level Counters aren't modeled as a spendable cost yet — a real, somewhat bigger gap.</div></div>
+        <div class="gap-row"><div class="gap-name">Strike the Ore</div><div class="gap-clause">Engage a Being you control: Draw (1) card.</div><div class="gap-why">The cost is unenforced — resolves as a free draw every time.</div></div>
+        <div class="gap-row"><div class="gap-name">Tactical Withdraw</div><div class="gap-clause">All Beings move backwards if possible.</div><div class="gap-why">No pattern for a board-wide forced backward move.</div></div>
+        <div class="gap-row"><div class="gap-name">Tactical Withdraw</div><div class="gap-clause">If no Beings move then each player may return a Being they control to their hand.</div><div class="gap-why">No pattern for this conditional fallback.</div></div>
+        <div class="gap-row"><div class="gap-name">Vadē Rah</div><div class="gap-clause">Engage, Sacrifice the Being on this tile: add a Rhak-tùrin Deity to hand from deck that shares a type with the sacrificed Being.</div><div class="gap-why">Needs a Relic and a Being sharing one board tile — this engine's one-occupant-per-cell board can't represent that yet.</div></div>
+      </div>
+    </div>
+
+    <div class="set-block">
+      <div class="set-head" style="--pc:var(--c-faithless)"><span class="set-dot"></span><h3>Faithless</h3><span class="set-tally">5 gaps</span></div>
+      <div class="set-body">
+        <div class="gap-row"><div class="gap-name">Appease the Masses</div><div class="gap-clause">All cards cost (-1) Faithless.</div><div class="gap-why">A continuous cost-reduction aura — no such mechanism exists yet.</div></div>
+        <div class="gap-row"><div class="gap-name">Armor Animus</div><div class="gap-clause">Martyr: Being this is attatched to gains "Depart: Summon this in the Mortal Realm engaged".</div><div class="gap-why">No mechanism grants a Depart ability the way a granted Engage already works.</div></div>
+        <div class="gap-row"><div class="gap-name">Collapsing Bridge</div><div class="gap-clause">Engage: Remove (1) Crossing Counter, you may summon a Being on a tile that Collapsing Bridge points to.</div><div class="gap-why">A bare counter-removal pattern matches the prefix and returns — the summon half is silently dropped.</div></div>
+        <div class="gap-row"><div class="gap-name">False Testament</div><div class="gap-clause">When conjured you may have this enter with up to (5) Time Counters.</div><div class="gap-why">There's no "When conjured" trigger point for a Prophecy's own text at all yet.</div></div>
+        <div class="gap-row"><div class="gap-name">Passing Doubt</div><div class="gap-clause">At the end of your turn target Doubt you control is dealt (1) Lifespan Damage</div><div class="gap-why">Entirely unparsed — no keyword field captures this phrasing.</div></div>
+      </div>
+    </div>
+
+    <div class="set-block">
+      <div class="set-head" style="--pc:var(--c-formless)"><span class="set-dot"></span><h3>Formless</h3><span class="set-tally">6 gaps</span></div>
+      <div class="set-body">
+        <div class="gap-row"><div class="gap-name">By Teeth and bounds</div><div class="gap-clause">If you control more Beings than your opponent: sacrifice a Hunger, then add Immen Gorta from deck to hand. If less: draw (2) cards. If tied: choose one.</div><div class="gap-why">No pattern compares Being counts between players or supports a tied "choose one" branch.</div></div>
+        <div class="gap-row"><div class="gap-name">Delectible Deviant</div><div class="gap-clause">Martyr: Hungers you control gain +1/+0 until the end of your turn.</div><div class="gap-why">No pattern for "&lt;Typing&gt;s you control gain +S/+L" — only single-target buffs exist.</div></div>
+        <div class="gap-row"><div class="gap-name">Illegible Grimoire</div><div class="gap-clause">Flip a coin, if heads draw (1) card, if tails Pay (3) Lifespan.</div><div class="gap-why">The only coin-flip pattern is hardcoded to a different card's damage wording.</div></div>
+        <div class="gap-row"><div class="gap-name">Legion's Onset</div><div class="gap-clause">Pay (X) Lifespan, then Summon a Vassal token, for every (5) Lifespan paid.</div><div class="gap-why">No pattern for a variable-Lifespan payment scaling a token count.</div></div>
+        <div class="gap-row"><div class="gap-name">Midnight Mass</div><div class="gap-clause">Sacrifice target Being this points to: Invoke a Demon with equal Strength on a tile this points to.</div><div class="gap-why">Neither the pointed-sacrifice cost nor an Invoke-with-matching-Strength shape exists.</div></div>
+        <div class="gap-row"><div class="gap-name">Scā-vuhk Hunger</div><div class="gap-clause">sacrifice this and create (2) Scā-vuhk Hunger tokens</div><div class="gap-why">Token-creation patterns require "summon," not "create" — and this token has no registry entry yet either.</div></div>
+      </div>
+    </div>
+
+    <div class="set-block">
+      <div class="set-head" style="--pc:var(--c-living)"><span class="set-dot"></span><h3>Living</h3><span class="set-tally">9 gaps</span></div>
+      <div class="set-body">
+        <div class="gap-row"><div class="gap-name">Growth Spurt</div><div class="gap-clause">Beings you control have +1/+0, if any of those beings are TreeFolk, they gain +2/+0 instead.</div><div class="gap-why">A continuous board-wide aura — no such mechanism exists yet.</div></div>
+        <div class="gap-row"><div class="gap-name">HeartWood Locket</div><div class="gap-clause">Martyr: Until end of turn attached Being gains: "Damage dealt to this Being is dealt directly to it's controller instead".</div><div class="gap-why">No matching pattern, and an attached Armament's own Martyr keyword isn't even scanned for activation yet.</div></div>
+        <div class="gap-row"><div class="gap-name">Natures Bounty</div><div class="gap-clause">TreeFolk, Vine, and Seeds you control gain: "Engage: add (1) Living".</div><div class="gap-why">No mechanism grants an Engage ability to a whole group of typings at once.</div></div>
+        <div class="gap-row"><div class="gap-name">Propagate</div><div class="gap-clause">If you control a TreeFolk, draw (1) Card.</div><div class="gap-why">Never reached — a different, unconditioned pattern matches the card's second line first.</div></div>
+        <div class="gap-row"><div class="gap-name">Propagate</div><div class="gap-clause">If you control a Vine, add a TreeFollk to hand from your Purgatory.</div><div class="gap-why">The condition is never checked, and the CSV's own typo ("TreeFollk") means the search would find nothing anyway.</div></div>
+        <div class="gap-row"><div class="gap-name">The Roots Remember</div><div class="gap-clause">If there are (0) Time Counters on this conjure a (Living) Prophecy from your Purgatory.</div><div class="gap-why">No matching pattern (its own "Gain (1) Time Counter" line is fine).</div></div>
+        <div class="gap-row"><div class="gap-name">White Whisker</div><div class="gap-clause">Sacrifice this when you summon a Familiar.</div><div class="gap-why">No reactive "on your own future summon" trigger exists — silently dropped with no log at all.</div></div>
+        <div class="gap-row"><div class="gap-name">Witching Well</div><div class="gap-clause">Engage: Flip a coin if heads draw (1) card, if tails look at the top card of your opponents deck, you may have them shuffle.</div><div class="gap-why">No coin-flip pattern for this shape — the generic draw pattern fires first, so it unconditionally draws a card with no coin flip at all.</div></div>
+        <div class="gap-row"><div class="gap-name">Crathea</div><div class="gap-clause">When summoned create a face up Blooming Life token or a Withering Life token.</div><div class="gap-why">Neither token exists in the registry, and neither's own board-wide aura text has an implementation either.</div></div>
+      </div>
+    </div>
+
+    <div class="set-block">
+      <div class="set-head" style="--pc:var(--c-shifting)"><span class="set-dot"></span><h3>Shifting</h3><span class="set-tally">8 gaps</span></div>
+      <div class="set-body">
+        <div class="gap-row"><div class="gap-name">Balance the Scales</div><div class="gap-clause">Sacrifice a Being: Each opponent sacrifices a Being</div><div class="gap-why">The cost omits "you control" and the effect says "Each opponent" rather than the recognized "target opponent" — matches nothing.</div></div>
+        <div class="gap-row"><div class="gap-name">Blood Moon</div><div class="gap-clause">Whenever a Being dies it's controller gives a different target Being +1/+1</div><div class="gap-why">No pattern recognizes this reactive shape (its own "Gain (1) Time Counter" line is fine).</div></div>
+        <div class="gap-row"><div class="gap-name">Canopic Jar</div><div class="gap-clause">Engage: Remove (4) Crossing Counters Shuffle a Being from Purgatory into it's owners deck, they draw (1) card.</div><div class="gap-why">The cost/Engage order is reversed and the shuffle+draw shape doesn't match anything.</div></div>
+        <div class="gap-row"><div class="gap-name">Engrave</div><div class="gap-clause">Beings you control gain "Depart: Summon a Bag o' Bones token".</div><div class="gap-why">No mechanism grants an ability to every Being a player controls at once.</div></div>
+        <div class="gap-row"><div class="gap-name">May Break my Bones</div><div class="gap-clause">Choose a Being this points to, destroy it and Summon a Bag o' Bones token on that tile.</div><div class="gap-why">No pattern for this destroy-and-summon-on-that-tile combo.</div></div>
+        <div class="gap-row"><div class="gap-name">Mirage Visage</div><div class="gap-clause">Choose (2) Beings this points to, become Favored</div><div class="gap-why">No pattern for a pointed, multi-target Favored grant.</div></div>
+        <div class="gap-row"><div class="gap-name">Shovel</div><div class="gap-clause">Engage: Sacrifice Shovel, then reveal the top (3) cards of your deck, you may add any Relics revealed to hand, shuffle the others back.</div><div class="gap-why">"Sacrifice Shovel" uses its own printed name instead of "this," and the reveal-top-3-Relics shape has no pattern either way.</div></div>
+        <div class="gap-row"><div class="gap-name">Willing Sacrifice</div><div class="gap-clause">Until end of turn target Being gains: "Martyr: Craft (1) Effigy".</div><div class="gap-why">No mechanism grants a Martyr ability to a target (same gap as Planchette/HeartWood Locket above).</div></div>
+      </div>
+    </div>
+
+    <div class="set-block">
+      <div class="set-head" style="--pc:var(--c-timeless)"><span class="set-dot"></span><h3>Timeless + tokens</h3><span class="set-tally">14 gaps</span></div>
+      <div class="set-body">
+        <div class="gap-row"><div class="gap-name">Afterimage</div><div class="gap-clause">Whenever target Being moves this turn, summon an Afterimage token on the tile it moved from.</div><div class="gap-why">Still open from before — no "watch a chosen target's moves for the rest of the turn" mechanism exists.</div></div>
+        <div class="gap-row"><div class="gap-name">Chronostasis</div><div class="gap-clause">Before drawing a card(s) that player may reveal the top card of their deck, they may shuffle.</div><div class="gap-why">No matching pattern.</div></div>
+        <div class="gap-row"><div class="gap-name">Delay</div><div class="gap-clause">Negate the Summoning of target Being, it conjures as a face up Prophecy instead and gains...</div><div class="gap-why">No "negate a summon, convert to a face-up Prophecy" mechanism exists yet.</div></div>
+        <div class="gap-row"><div class="gap-name">Waning Words</div><div class="gap-clause">Target Conjuring becomes a Prophecy and gains: (2) Time Counters, "If this has at least (1) Time Counter its effects are negated"</div><div class="gap-why">Same missing conversion mechanism as Delay.</div></div>
+        <div class="gap-row"><div class="gap-name">Rewrite the Past</div><div class="gap-clause">Negate a Prophecy and flip it face down, then add (2) Time Counters to it.</div><div class="gap-why">No "negate and flip face down" pattern exists.</div></div>
+        <div class="gap-row"><div class="gap-name">Prophesize</div><div class="gap-clause">The next Being you summon is conjured as a face up Prophecy with (2) Time Counters...</div><div class="gap-why">No matching delayed-replacement mechanism.</div></div>
+        <div class="gap-row"><div class="gap-name">Exactly on TIme</div><div class="gap-clause">Add a Timless Being that costs (3) or more from deck to hand.</div><div class="gap-why">The deck search has no cost-filter parsing — searches for the literal phrase and never matches a real card.</div></div>
+        <div class="gap-row"><div class="gap-name">Hurry Up and Wait</div><div class="gap-clause">Modulate (-1) and Modulate (+1).</div><div class="gap-why">Only the first Modulate clause in a line is ever resolved — the second is silently dropped.</div></div>
+        <div class="gap-row"><div class="gap-name">Horologist's Apprentice</div><div class="gap-clause">Gain (1) Time Counter whenever a Time Counter is removed from a Prophecy you control.</div><div class="gap-why">No pattern matches this exact phrasing (distinct from two similar-but-different patterns that do exist).</div></div>
+        <div class="gap-row"><div class="gap-name">Horologist's Apprentice</div><div class="gap-clause">Once per turn remove (3) Time Counters: Shuffle a random card from hand into deck, then draw (1) Card.</div><div class="gap-why">The colon isn't handled as a split point — the shuffle half is silently dropped (moot anyway until the gap above is fixed).</div></div>
+        <div class="gap-row"><div class="gap-name">Time Capsule</div><div class="gap-clause">Whenever you Modulate (-1) except due to the Modulate Step, add (1) Time Counter to this.</div><div class="gap-why">No pattern for this exact shape (a similar "+N/+N" variant exists for a different card, but not this one).</div></div>
+        <div class="gap-row"><div class="gap-name">Time Keeper</div><div class="gap-clause">Engage: Modulate (±1) a target this points to.</div><div class="gap-why">The generic Modulate resolver offers every Time-Counter permanent the player owns — the Arrow-targeting restriction is unenforced.</div></div>
+        <div class="gap-row"><div class="gap-name">Blooming Life / Withering Life (tokens)</div><div class="gap-clause">Beings you control have +1/+1. / Beings you don't control have -1/-1.</div><div class="gap-why">Neither token is ever created (also flagged under Crathea above), and their own board-wide auras have no implementation.</div></div>
+        <div class="gap-row"><div class="gap-name">AfterImage (token)</div><div class="gap-clause">When this Being has (0) Time Counters on it, sacrifice it.</div><div class="gap-why">No generic "hits 0 Time Counters → auto-sacrifice" mechanism for a Being exists, and the token is never created (see Afterimage above).</div></div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    Every gap above was checked directly against the live parser and reducer, not against a prior status doc — several previously-assumed-fine cards turned out to have a silent gap once the exact CSV text was run through the exact regex. All 968 tests still pass; lint and build are clean.
+  </footer>
+</div>
+
+</body></html>

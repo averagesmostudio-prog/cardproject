@@ -1,0 +1,2 @@
+export const EFFIGY_ROW_FIRST_TURN_BONUS = 2;
+export const STARTING_LIFESPAN = 50;

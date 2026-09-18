@@ -1,1 +1,12 @@
 @import "tailwindcss";
+
+.cost-pip {
+  color: white;
+  border-radius: 999px;
+  width: 14px;
+  height: 14px;
+  font-size: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}

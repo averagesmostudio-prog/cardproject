@@ -5,7 +5,7 @@ function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
     height: 900,
-    title: 'Trading Card Generator',
+    title: 'Scripturas Alpha',
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,

@@ -7,4 +7,7 @@ export default defineConfig({
   // Relative asset paths so the built index.html works when opened via
   // file:// inside Electron, not just from a server root.
   base: './',
+  server: {
+    port: process.env.PORT ? Number(process.env.PORT) : 5173,
+  },
 })

@@ -1,0 +1,463 @@
+Card Name,Card Typing,Effigy Costs,Casting Cost,Text Box,Strength,Lifespan,Timer,Arrows (Clockwise top center = 1),Set,Effigy type,Rarity,Watch
+AmaTangi ,"Turanga, Being","1 Faithless, 1 Bleeding",2,"""Perceived as weak for releasing their inner spirits, they have been cast out to wander the wilderness"" .",0,3,XXX,"2, 3, 7, 8",1,Bleeding,C,0
+Anahk-sha,"Giant, Being","2 Faithless, 1 Bleeding",3,"Does not Disengage during start of turn.
+Once per turn Pay (1) Bleeding Essence: Disengage.",4,4,XXX,"1, 4, 6",1,Bleeding,C,0
+Ay-gruhda,"Turanga, Being",2 Bleeding,2,Engage: Move target Armament you control to a tile this points to.,2,1,XXX,"1, 3, 7",1,Bleeding,U,0
+Blacksmithing,Conjuring,"1 Faithless, 1 Bleeding",2,Add an Armament to hand from deck.,XXX,XXX,XXX,XXX,1,Bleeding,R,0
+Blood Rites,Conjuring,"X, Bleeding",X,"Add an Armament that costs (X) from deck to hand.
+Until the end of turn, each Bleeding Essence in its cost may be paid with (10) lifespan instead.",XXX,XXX,XXX,XXX,1,Bleeding,R,1
+Book of Mahatzu,Relic,"1 Faithless, 1 Bleeding",2,"Engage: Discard a Spirit, add a Turanga to hand from your Purgatory.
+Martyr: Add a Spirit to hand from deck.
+
+""The illustrations are so life like, I want to make a catalogue raisonne out of it."" Great Great Great Grand Son of Mahatzu  ",XXX,XXX,XXX,XXX,1,Bleeding,R,0
+Cobra,"Serpent, Being","1 Faithless, 1 Bleeding",2,"Depart: Summon a Snake Skin token on this tile.
+(1 cost - Relic - Armament token - Being gains +0/+2).",1,2,XXX,1,1,Bleeding,C,0
+Conscription,Prophecy,2 Bleeding,2,"All Beings move forward if possible. Any that move do not disengage during disengage step. 
+If none move, choose two Beings they Engage in combat.",XXX,XXX,2,XXX,1,Bleeding,R,1
+Crucible,Relic,2 Bleeding,2,"When Summoned gain (2) Forge Counters. 
+Remove (1) Forge Counter: Engage then add an Armament to hand from your Purgatory.",XXX,XXX,XXX,XXX,1,Bleeding,R,1
+Cursed Commission,Prophecy,1 Bleeding,1,"Summon a Cursed Cutlass token on a tile this points to.
+(Cost 2 Bleeding - Relic - Armament-  Animated Being gains +1/+1).",XXX,XXX,2,5,1,Bleeding,C,0
+Cutlass,"Relic, Armament",2 Bleeding,2,"Attached Being has +1/+0
+When the attached Being dies sacrifice this and summon a Cursed Cutlass token on this tile.",XXX,XXX,XXX,XXX,1,Bleeding,C,0
+Dancing Swords,"Relic, Armament",1 Bleeding,1,"Animated. (While in the Mortal Realm this is treated as a Being. Other Beings may still move on top of this Armament. Any effects that target either a Being or Armament may target this while in play)
+Being gains +1/+1.",1,1,XXX,"1, 2, 8",1,Bleeding,U,1
+Darmah-Triya ,"Turanga, Being",2 Bleeding,2,Gains +0/+3 if you control a Turanaga other than Darmah-Triya.,1,2,XXX,1,1,Bleeding,C,0
+Darmah-Triya Bracers,"Relic, Armament","1 Faithless, 1 Bleeding",2,"Attached Being has: Engage: ""Deal (2) Damage to this, then add (1) Bleeding Essence"". 
+
+""My Flesh for My people, My Blood for my Deity""",XXX,XXX,XXX,XXX,1,Bleeding,C,0
+Desperate Finale,Conjuring,4 Bleeding,4,"As an additonal cost to conjure: Pay Lifespan equal to the Lifespan of target engaged Being you control.
+That Being fights without engaging. 
+Sacrifice it at the end of the turn.",XXX,XXX,XXX,XXX,1,Bleeding,U,1
+Feathers of the Fallen ,"Relic, Armament",1 Bleeding,1,"When summoned gain (2) Crossing Counters.
+ Engage: Remove (1) Crossing Counter, then move attached Being one tile in any direction.",XXX,XXX,XXX,XXX,1,Bleeding,R,0
+For the Greater Good ,"Ethereal, Conjuring",1 Bleeding,1,Discard a Being: Draw one card. If you discarded a Turanga draw one additional card.  ,XXX,XXX,XXX,XXX,1,Bleeding,C,0
+Forge Master ,"Giant, Being","1 Faithless, 2 Bleeding",3,"Engage: Sacrifice an Armament, then draw one card.",2,2,XXX,"1, 5",1,Bleeding,U,0
+Goblin,"Goblin, Being",1 Bleeding,1,"""Scurrying between and below others, many don't even notice them stealing and collecting their scraps"".",0,1,XXX,"1, 3",1,Bleeding,C,0
+Kalmahka,Prophecy,2 Bleeding,2,"Gain (1) Time Counter
+Armaments you control are 3/1 Relic - Armaments with ""Animated. Attached Being has +0/+0"" and lose all other text",XXX,XXX,3,XXX,1,Bleeding,Sacred,0
+Little Giant,"Giant, Being",2 Bleeding,2,"""He's not your regular moron...."" ",2,2,XXX,1,1,Bleeding,C,0
+Lotus,Relic,3 Bleeding,3,"Once per turn, when a Turanga you control dies: Add a Spirit from deck to hand. 
+Once per turn, when a Spirit you control dies: Add a Turanga from deck to hand.",XXX,XXX,XXX,XXX,1,Bleeding,U,0
+Mahka-Rahva,"Turanga, Being, Deity",3 Bleeding,3,"All Armaments you control move to the tile this is summoned on.
+ When summoned this Diety immediately moves without engaging.",4,4,XXX,"1, 2, 3, 4, 5, 6, 7, 8",1,Bleeding,Sacred,0
+Mahka-Rahva's Tiger Skin,"Relic, Armament",2 Bleeding,2,Sacrifice this to give attached being a Favored Counter until the end of turn.,XXX,XXX,XXX,XXX,1,Bleeding,Sacred,0
+Metal Worker,"Human, Being",3 Bleeding,3,"Once per turn, you may Pay (1) Bleeding Essence: The next Relic you summon this turn costs (-2) Faithless.",2,2,XXX,1,1,Bleeding,U,0
+Monstrous Worm,"Serpent, Being","2 Faithless, 1 Bleeding",3,"""At what size does a worm become something else something more slithery?""  - Vermeologist",3,3,XXX,1,1,Bleeding,C,0
+Peaceful Protestor,"Turanga, Being","2 Faithless, 1 Bleeding",3,"Can not attack.
+
+""He passes on the fist, all four of them.""",0,4,XXX,"2, 3, 7, 8",1,Bleeding,C,0
+Persitent Recruit,"Turanga, Being",1 Bleeding,1,Persist,1,1,XXX,1,1,Bleeding,C,0
+Prepare for Battle,Conjuring,1 Bleeding,1,Target Being you control moves to a tile with an Armament on it.,XXX,XXX,XXX,XXX,1,Bleeding,U,1
+Rhak-tùrin Altar,Altar,2 Bleeding,2,"As an aditional cost to Conjure: Deal (3) Damage to a Turanga you control.
+Craft (1) additional Effigy on your turn.
+(Conjures in the Effigy Zone)",XXX,XXX,XXX,XXX,1,Bleeding,U,0
+Rhak-tùrin Zealot,"Human, Being",1 Bleeding,1,Engage: Add (1) Bleeding Essence then deal (1) Damage to this.,1,2,XXX,1,1,Bleeding,C,0
+Rusted Rapier,"Relic, Armament","1 Faithless, 1 Bleeding",2,Being has +1/+0.,XXX,XXX,XXX,XXX,1,Bleeding,C,0
+Scrap Shot,Conjuring,2 Bleeding,2,"Sacrifice an Armament, then deal damage equal to it's total cost to any target.",XXX,XXX,XXX,XXX,1,Bleeding,U,0
+Scrap Smith,"Goblin, Being","2 Faithless, 2 Bleeding",4,"Once Per turn shuffle an Armament into deck from your Purgatory, then add (1) Bleeding Essence.",2,2,XXX,1,1,Bleeding,U,0
+Seasoned Forge Master ,"Being, Giant","2 Faithless, 2 Bleeding",4,Once per turn Sacrifice an Armament: Draw (1) card.,3,3,XXX,"3, 5, 7, 8, 6",1,Bleeding,R,0
+Sha-KaRah,"Turanga, Being",2 Bleeding,2,Pay (5) Lifespan to move an adjacent Armament one tile in any direction.,1,2,XXX,"1, 5",1,Bleeding,U,1
+Sharpshoot,"Ethereal, Conjuring",1 Bleeding,1,"Deal (1) damage to any target.
+
+""Loose!""",XXX,XXX,XXX,XXX,1,Bleeding,C,1
+Sluggish Giant,"Giant, Being","2 Faithless, 2 Bleeding",4,Just a few MASSIVE steps behind.,3,3,XXX,1,1,Bleeding,C,0
+Smelt,Conjuring,1 Bleeding,1,Sacrifice a non Armament Relic: Add (1) Forge Counter to target Relic,XXX,XXX,XXX,XXX,1,Bleeding,C,
+Smite,Prophecy,1 Bleeding,1,Destroy Being Smite points to (Opponent does not take lifespan damage from it dying).,XXX,XXX,2,1,1,Bleeding,C,0
+Smith Assistant ,"Goblin, Being","1 Faithless, 1 Bleeding",2,Engage: Move an Armament in any direction. ,1,2,XXX,1,1,Bleeding,U,0
+Smithing Tools,Relic,2 Bleeding,2,"Engage a Being, Gain (1) Forge Counter.
+Engage, Remove (X) Forge Counters: Add an Armament from deck to hand with conjuring cost (X)",XXX,XXX,XXX,XXX,1,Bleeding,U,1
+Spirit of War,"Spirit, Being",1 Bleeding,1,"Whenever a different Being you control Fights, gain +1/+0 until the end of turn.",0,2,XXX,"2, 5, 8",1,Bleeding,U,0
+Strike the Ore,Conjuring,1 Bleeding,1,Engage a Being you control: Draw (1) card.,XXX,XXX,XXX,XXX,1,Bleeding,C,0
+Tactical Withdraw,Prophecy,2 Bleeding,2,"All Beings move backwards if possible.
+If no Beings move then each player may return a Being they control to their hand.",XXX,XXX,2,XXX,1,Bleeding,R,0
+Tiny Forge Master ,"Human, Being",1 Bleeding,1,"When summoned sacrifice an Armament, then draw (1) card.",1,1,XXX,1,1,Bleeding,C,0
+Vadē Rah,Relic,3 Bleeding,3,"If this is engaged at the end of the turn sacrifice it.
+Engage, Sacrifice the Being on this tile: add a Rhak-tùrin Deity to hand from deck that shares a type with the sacrificed Being. 
+ Beings may move across Vadē Rah.",XXX,XXX,XXX,XXX,1,Bleeding,U,0
+Venomous Viper,"Serpent, Being",3 Bleeding,3,Engage: Target Being has (-X/-0) strength until end of turn where (X) is Venomous Viper's Strength.,0,2,XXX,"1, 4, 6",1,Bleeding,C,0
+Vyu-bhata,"Ethereal, Conjuring","1 Faithless, 3 Bleeding",4,"Give target Being you control (+1/+1), reconjure this for each adjacent Being you control.",XXX,XXX,XXX,XXX,1,Bleeding,R,0
+Wounded Turanga,"Turanga, Being",1 Bleeding,1,When summoned deal (2) Damage to Wounded Turanga.,2,4,XXX,"1, 3, 5",1,Bleeding,C,0
+Acrobatic Escape,"Ethereal, Conjuring",3 Faithless,3,"Engage target Being you control: Move it, then move it again.",XXX,XXX,XXX,XXX,1,Faithless,U,1
+All or nothing ,Conjuring,4 Faithless,4,"Discard your hand and Craft (3) Effigies.
+ At the start of your next turn draw (1) additional card. 
+Your Turn Ends.",XXX,XXX,XXX,XXX,1,Faithless,R,0
+Animate,Conjuring,1 Faithless,1,"Until end of turn target Relic becomes a 1/1 Armament and Being, it can move any direction.",XXX,XXX,XXX,"3, 7",1,Faithless,U,0
+Appease the Masses,Prophecy,3 Faithless,3,"Gain (1) Time Counter
+All cards cost (-1) Faithless.",XXX,XXX,1,XXX,1,Faithless,R,0
+Armor Animus,"Relic, Armament",2 Faithless,2,"Martyr: Being this is attatched to gains ""Depart: Summon this in the Mortal Realm engaged"".",XXX,XXX,XXX,XXX,1,Faithless,R,0
+Author ,"Human, Being",2 Faithless,2,When summoned add a Prophecy to hand from deck. ,0,2,XXX,1,1,Faithless,U,0
+Blasphemy,Conjuring,2 Faithless,2,Destroy a Prophecy.,XXX,XXX,XXX,XXX,1,Faithless,U,0
+Brick,"Relic, Armament",1 Faithless,1,"Being gains: 
+""Engage: Deal (1) Damge to target Being, then move Brick to the tile occupied by the targeted Being"".
+ 
+""When Life deals you a bad hand. Throw it at the opponent"" -  Ken the Gambler",XXX,XXX,XXX,XXX,1,Faithless,C,0
+Broken Broom,"Relic, Armament",0,0,Being gains +0/+0.,XXX,XXX,XXX,XXX,1,Faithless,C,0
+Charge Forward,Prophecy,1 Faithless,1,Modulate (-1).,XXX,XXX,2,XXX,1,Faithless,C,0
+Collapsing Bridge,Relic,2 Faithless,2,"When summoned gain (2) Crossing Counters.
+Engage: Remove (1) Crossing Counter, you may summon a Being on a tile that Collapsing Bridge points to.",XXX,XXX,XXX,"1, 2, 8",1,Faithless,U,0
+Convenient Corrosion  ,Conjuring,2 Faithless,2,Destroy an Armament.,XXX,XXX,XXX,XXX,1,Faithless,U,0
+Conversion,"Ethereal, Conjuring",2 Faithless,2,Add (1) Essence of any type.,XXX,XXX,XXX,XXX,1,Faithless,C,0
+Desecration,Conjuring,3 Faithless,3,Destroy a Relic.,XXX,XXX,XXX,XXX,1,Faithless,U,0
+Divine Winds,"Ethereal, Conjuring",2 Faithless,2,Move target Being (1) tile in any direction.,XXX,XXX,XXX,XXX,1,Faithless,U,0
+Drown out the Screams ,"Ethereal, Conjuring",2 Faithless,2,Target Non Deity Being loses all abilities until end of turn. ,XXX,XXX,XXX,XXX,1,Faithless,U,0
+Effigial Conservator ,"Human, Being",2 Faithless,2,"Engage: Target Effigy that you control Engages, then add (1) Essence of its typing.",0,2,XXX,1,1,Faithless,C,0
+Faithless Altar,Altar,3 Faithless,3,"If you control only Faithless Permaments: Craft (1) additional Effigy on your turn
+(Conjures in the Effigy Zone).",XXX,XXX,XXX,XXX,1,Faithless,U,0
+Faithless Invocation,Conjuring,3 Faithless,3,Invoke a Faithless Relic Card that costs (2) or less.,XXX,XXX,XXX,XXX,1,Faithless,R,0
+False Testament ,Prophecy,1 Faithless,1,"When conjured you may have this enter with up to (5) Time Counters.
+ Craft (1) Effigy.",XXX,XXX,X,XXX,1,Faithless,Sacred,0
+Fidian Nol,"Human, Being",2 Faithless,2,During Combat if the opposing Being is not Faithless it has (-1) Strength.,1,2,XXX,"2, 8",1,Faithless,R,0
+Forgotten Monument,Relic,3 Faithless,3,Engage: Add (1) Faithless Essence,XXX,XXX,XXX,XXX,1,Faithless,C,0
+Gargantuan hammer,"Relic, Armament",3 Faithless,3,Being gains +6/-3.,XXX,XXX,XXX,XXX,1,Faithless,U,0
+Ghoul,"Undead, Being",1 Faithless,1,"He didn't believe in any afterlife, so he simply didn't go to any.",1,1,XXX,"1, 5",1,Faithless,C,0
+Gutter Rat,"Rat, Being, Familiar",1 Faithless,1,"""The gutters ebb and flow and its not from the water"" - Street Sweeper",1,1,XXX,1,1,Faithless,C,0
+Happy Hammer,"Relic, Armament",2 Faithless,2,"Whenever a Being is summoned under your control, move and attach Happy Hammer to that Being. 
+Being gains +3/+0.",XXX,XXX,XXX,XXX,1,Faithless,R,0
+Hermit,"Unknown, Being",5 Faithless,5,"""He rarely speaks, but when he does, he laughs and asks who he is, like he doesn't remember his own name.""",0,5,XXX,"1, 2, 3, 4, 5, 6, 7, 8",1,Faithless,R,0
+Imp ,"Imp, Being, Familiar",2 Faithless,2,"""Stupid humans so easiy fooled...I mean Meow""",2,1,XXX,"1, 4, 6",1,Faithless,C,0
+Intervene ,Conjuring,2 Faithless,2,"Target Being becomes Favored until end of turn
+ (Gains a Favor Counter. The next time this Being would take damage remove the Favor Counter instead).",XXX,XXX,XXX,XXX,1,Faithless,U,0
+Lighten the Load,Conjuring,0,0,Discard a card the next card you play this turn costs (-1) Faithless.,XXX,XXX,XXX,XXX,1,Faithless,U,0
+Lingering Doubt,"Null, Being",3 Faithless,3,At the end of your turn gain +1/+1 for each other Doubt you control.,2,2,XXX,"1, 3, 5, 7",1,Faithless,Sacred,1
+Marionette Doll,"Spirit, Being",3 Faithless,3,"Engage: Target a Being you don't control, then copy it's Engage ability.",1,1,XXX,"1, 3, 7",1,Faithless,C,0
+Moment of Doubt,"Ethereal, Conjuring",4 Faithless,4,"Target Being gains (1) Time Counter and ""Can not move while this being has at least (1) Time Counter"".",XXX,XXX,XXX,XXX,1,Faithless,R,0
+Passing Doubt,"Null, Being",2 Faithless,2,At the end of your turn target Doubt you control is dealt (1) Lifespan Damage,2,2,XXX,"2, 8",1,Faithless,C,0
+Priestly Practitioner,"Human, Being",2 Faithless,2,Engage: Restore (2) Lifespan.,0,2,XXX,"1, 3, 5",1,Faithless,U,1
+Reveler ,"Human, Being",1 Faithless,1,"Can not move.
+Whenever this moves craft an Effigy.",1,1,XXX,"1, 4, 3, 5",1,Faithless,C,0
+Revoke,Conjuring,2 Faithless,2,Return target Non-Deity Being you control to your hand. Revoke can not target a Faithless Being.,XXX,XXX,XXX,XXX,1,Faithless,C,0
+Roll Back,Prophecy,1 Faithless,1,Modulate (+1).,XXX,XXX,2,XXX,1,Faithless,C,0
+Scrap Collector ,"Goblin, Being",2 Faithless,1,Engage: Shuffle up to (2) Armaments into your deck from Purgatory.,0,1,XXX,"1, 3, 5",1,Faithless,C,0
+Scrap removal,"Ethereal, Conjuring",2 Faithless,2,Discard a Relic: Draw (2) cards.,XXX,XXX,XXX,XXX,1,Faithless,C,0
+Skeptic,"Human, Being",2 Faithless,2,Depart: Add a Passing Doubt to hand.,0,2,XXX,"1, 5",1,Faithless,C,0
+Skeptical Scrawling,Prophecy,3 Faithless,3,"Discard (1) Card, then return a Null Being From Purgatory to hand.
+
+""Everytime she felt close to something great that feeling would creep back in""",XXX,XXX,1,XXX,1,Faithless,C,0
+Spirit Guide,"Spirit, Being",1 Faithless,1,Depart: Move target Being you control forward. ,0,3,XXX,1,1,Faithless,C,0
+Surveyor,"Human, Being",2 Faithless,2,When summoned add an Altar to hand from deck. ,1,2,XXX,"2, 7",1,Faithless,U,1
+Temple of Dubiety,Relic,3 Faithless,3,"Engage: Shuffle a Faithless Being into deck from your Purgatory, then if you control only Faithless Cards draw (1) Card.",XXX,XXX,XXX,XXX,1,Faithless,Sacred,0
+Thespian,"Human, Being",3 Faithless,3,"When summoned this Being's Strength and Lifespan becomes equal to target Being you control. 
+When this Being dies you lose (4) Lifespan.",0,1,XXX,1,1,Faithless,R,1
+Training dummy,"Relic, Being",0,0,Can not attack.,0,3,XXX,1,1,Faithless,C,0
+Vaticinator,"Human, Being",1 Faithless,1,When summoned you may target a Prophecy and reveal it without triggering it. Return it Face down afterwards. ,0,2,XXX,"2, 8",1,Faithless,C,0
+Winged Pair of dice ,"Bird, Being",1 Faithless,1,"""Basically an auto include…"" - Alpha Builder ",1,1,XXX,XXX,1,Faithless,C,0
+Zealot,"Human, Being",2 Faithless,1,If you control only Faithless permaments you may Engage: Add (1) Faithless Essence.,1,1,XXX,1,1,Faithless,C,0
+Ambiguity,"Ethereal, Conjuring",2 Formless,2,"Flip a coin, If heads deal (1) damage to an enemy, if tails target opponent deals (1) damage where ever they want
+""Was that an I or a l""  - Warlock Initiate",XXX,XXX,XXX,XXX,1,Formless,C,0
+By Teeth and bounds,Prophecy,2 Formless,2,"If you control more Beings than your opponent: sacrifice a Hunger, then add Immen Gorta from deck to hand.
+If you control less beings than your opponent: draw (2) cards.
+If it is tied: choose one.",XXX,XXX,3,XXX,1,Formless,R,0
+Cannibalize,Conjuring,"2 Faithless, 1 Formless",3,Sacrifice target Hunger: Hungers you control disengage.,XXX,XXX,XXX,XXX,1,Formless,R,0
+Chains of the Unbound ,Relic,"1 Faithless, 2 Formless",3,Martyr: Target Being an opponent controls Shifts (1).,XXX,XXX,XXX,XXX,1,Formless,C,0
+Cro-āsik Hunger,"Hunger, Being",3 Formless,3,"When summoned you may sacrifice a Prophecy you control, then destroy target non Diety Being (Lifespan damage is not dealt)",1,2,XXX,"1, 3, 6",1,Formless,U,0
+Cycle of Hunger ,Conjuring,"1 Faithless, 1 Formless",2,"Shuffle (2) Hungers into your deck from your Purgatory, then draw (1) card.",XXX,XXX,XXX,XXX,1,Formless,U,0
+Death's Decanter,Relic,2 Formless,2,"Gain (1) Crossing Counter whenever a Being Dies. 
+Remove (X) Crossing Counters: Sacrifice this Relic, then add a Formless Being with Conjuring cost (X) from your Purgatory to hand.",XXX,XXX,XXX,XXX,1,Formless,C,0
+Defective Demon,"Demon, Being",1 Formless,1,When Defective Demon moves sacrifice it.,2,2,XXX,"1, 2, 8",1,Formless,C,0
+Degrisch Vassal,"Demon, Being",3 Formless,3,"When this Being deals damage to an opponent, prevent that damage and craft (X) Effigies where (X) is the damage that would have been dealt. ",0,2,XXX,1,1,Formless,C,0
+Delectible Deviant,"Human, Being",1 Formless,1,Martyr: Hungers you control gain +1/+0 until the end of your turn.,0,2,XXX,"1, 7",1,Formless,C,0
+Diablerie,Conjuring,"1 Faithless, 2 Formless",3,"Each Player may move any number of Beings they control (in any direction), any Beings that move lose half their lifespan rounded up.",XXX,XXX,XXX,XXX,1,Formless,C,0
+Echoes of the Boundless,"Spirit, Being","2 Faithless, 2 Formless",4,Whenever another Being dies it's controller may pay its Summoning cost to Shift (1) instead of sending it to Purgatory. Damage is still dealt from it dying.,0,3,XXX,"2, 3, 7, 8",1,Formless,Sacred,0
+Envoy of the Hungers,"Human, Being",3 Formless,3,"Engage: Deal (1) damage to this, then switch this Being with a Hunger you control.",0,3,XXX,"1, 4, 6",1,Formless,C,0
+Erroneous Evocation ,Conjuring,"1 Faithless, 2 Formless",3,"Add a Demon Being from deck to hand, your opponent summons (1) Vassal token on any tile they control. 
+""It's pronounced vo-KAH-ray...""",XXX,XXX,XXX,XXX,1,Formless,U,0
+Formless Fangs,"Hunger, Being",2 Formless,2,Any Being dealt damage by this Shifts (2).,0,2,XXX,"1, 5",1,Formless,C,0
+Hirath Hunger,"Hunger, Being",4 Formless,4,"Can not move.
+Shift (2).",2,6,XXX,"2, 4, 5, 6, 8",1,Formless,C,0
+Illegible Grimoire,Relic,1 Formless,2,"Pay (1) Formless, Engage: Flip a coin, if heads draw (1) card, if tails Pay (3) Lifespan.",XXX,XXX,XXX,XXX,1,Formless,C,0
+"Immen Gorta, the Boundless Hunger","Hunger, Being, Deity",5 Formless,5,"As an additional cost to summon, Sacrifice (2) Beings.
+Shift (1): ""At the end of your turn, this loses (2) Time Counters""
+When this moves into the Mortal Realm, deal (1) damage to any target.",0,8,XXX,"1, 2, 3, 4, 5, 6, 7, 8",1,Formless,Sacred,0
+Imp-practical Joker,"Imp, Being, Familiar",2 Formless,2,"When summoned draw (1) card, then discard (1) card at random.",3,2,XXX,"1, 3, 7",1,Formless,C,0
+Lamtukka Gentleman,"Demon, Being",2 Formless,2,When summoned you may pay (3) Lifespan to give a different demon or imp you control +1/+1,2,1,XXX,"7, 5",,Formless,U,0
+Legion's Onset,Prophecy,"1 Faithless, 2 Formless",3,"Pay (X) Lifespan, then Summon a Vassal token, for every (5) Lifespan paid.",XXX,XXX,2,XXX,1,Formless,R,1
+Len-dīach Hunger,"Hunger, Being","1 Faithless, 1 Formless",2,Persist.,2,1,XXX,"1, 3, 4",1,Formless,C,0
+Lesser Summoning Circle,Relic,2 Formless,2,"Pay (5) Lifespan, Engage: you may Summon a Demon, Imp or Null Being directly on this tile, when you do sacrifice Lesser Summoning Circles.
+Beings may move across this Relic.",XXX,XXX,XXX,XXX,1,Formless,U,0
+Midnight Mass ,Prophecy,"1 Faithless, 2 Formless",3,Sacrifice target Being this points to: Invoke a Demon with equal Strength on a tile this points to.,XXX,XXX,2,"5, 6",1,Formless,U,1
+Mouth of Madness,Relic,3 Formless,3,If a Being moves into the Mortal Realm during End Phase it Shifts (1).,XXX,XXX,XXX,XXX,1,Formless,R,0
+NamKaranian Altar,Altar,2 Formless,2,"As an additional cost to Conjure, discard a card at random 
+Craft (1) additional Effigy on your turn.
+(Conjures in the Effigy Zone).",XXX,XXX,XXX,XXX,1,Formless,U,0
+NamKaranian Zealot,"Human, Being",1 Formless,1,"Pay (2) Lifespan, Engage: Add (1) Formless Essence.",1,2,XXX,1,1,Formless,C,0
+Onagīous Hunger,"Hunger, Being",2 Formless,2,"Engage: Discard a Hunger, then draw (1) card.",0,2,XXX,"3, 7",1,Formless,U,0
+Ounati Hunger,"Hunger, Being",1 Formless,1,"Shift (1).
+When this moves into the Mortal Realm give a different Hunger you control +1/+1.",0,2,XXX,"8, 3",1,Formless,U,0
+Pangs of Hunger,Prophecy,2 Formless,2,Deal (2) damage to all Beings.,XXX,XXX,3,XXX,1,Formless,U,1
+Planchette,Relic,3 Formless,3,"At the end of your turn lose Lifespan equal to the Lifespan of the Being on this tile.
+Being gains ""Martyr: Summon an Undead or Demon Being from your Purgatory on this tile"".
+Beings may move across this.",XXX,XXX,XXX,XXX,1,Formless,U,0
+Ravenous Lamtukka,"Demon, Being","1 Faithless, 3 Formless",4,Whenever you pay Lifespan gain +1/+1.,2,2,XXX,"2, 5",1,Formless,R,0
+Saan tachīan Hunger,"Hunger, Being",1 Formless,1,Pay (2) Formless Essence: Gain +1/+1.,1,2,XXX,"1, 3, 7",1,Formless,R,0
+Sanative Siphon,Relic,1 Formless,1,"Gain (1) Crossing Counter whenever a Being you control Shifts.
+Remove (X) Crossing Counters, Engage: Restore (X) Lifespan to target.",XXX,XXX,XXX,XXX,1,Formless,C,0
+Scā-vuhk Hunger,"Hunger, Being",2 Formless,2,"Shift (1): ""At the end of your turn remove (1) Time Counter from this""
+When this moves into the Mortal Realm, sacrifice this and create (2) Scā-vuhk Hunger tokens.",0,3,XXX,1,1,Formless,R,0
+Shifting Shade,"Spirit, Being",2 Formless,2,"Shift (1).
+(Engage: Move this onto a tile in the Ethereal Realm, it becomes a Prophecy, then gains (1) Time Counter and ""When this has (0) Time Counters on it move it onto a tile in the Mortal Realm Engaged""; While it is a Prophecy it loses all other text and typings.).",1,2,XXX,"1, 5",1,Formless,C,0
+Simple Summoner,"Human, Being","1 Faithless, 1 Formless",2,Engage: Your next Being this turn costs (-1) Formless to Summon.,0,2,XXX,1,1,Formless,U,0
+Something Something Water Horse,"Hunger, Being","1 Faithless, 3 Formless",4,"""The Oath says I can't explain"" - Hippocrates.",3,4,XXX,1,1,Formless,C,0
+Terranean Gates,Relic,3 Formless,3,If a Being moves into the Ethereal Realm during End Phase it loses (2) Time Counters,XXX,XXX,XXX,XXX,1,Formless,R,0
+Thōgrakin Hunger,"Hunger, Being",1 Formless,1,"Whenever a Being you control Shifts, except during the end step, add (1) Formless Essence.",0,3,XXX,"3, 7",1,Formless,U,0
+Tiarlish Hunger,"Hunger, Being","2 Faithless, 2 Formless",4,"Shift (1).
+When this moves into the Mortal Realm copy the effect(s) of target Being an opponent controls until the end of your next turn.",1,2,XXX,"2, 8",1,Formless,C,0
+Údarik Hunger,"Hunger, Being","1 Faithless, 2 Formless",3,"Engage: Target Being you control Shifts (1), then loses (1) Time Counter; if it moves into the Mortal Realm this turn Disengage it. This ability can not target a Being named Udarik Hunger.",0,1,XXX,"2, 3, 5, 7",1,Formless,R,0
+Unruly Fiend,"Demon, Being",2 Formless,2,"When Unruly Fiend attacks you lose (X) Lifespan where (X) is it's current strength
+Depart: Discard a card at random.",4,1,XXX,"1, 3, 5",1,Formless,U,0
+Vaneach Hunger,"Hunger, Being",2 Formless,2,"You may pay an additional (1) Formless to summon ""Prophetic Hunger"" in the Ethereal Realm with (1) Time Counter.
+Shift (1).",2,2,XXX,"1, 4, 6",1,Formless,C,0
+Vassal ,"Demon, Being",2 Formless,2,"""Demons only exist in Fairy Tales not a world of Scieince and Steel!!"" - The skeptics last words. ",2,2,XXX,"1, 7",1,Formless,C,0
+Vassal Matriach,"Demon, Being","2 Faithless, 4 Formless",6,Depart: You may pay (5) Lifespan to Summon (2) Vassal tokens.,4,5,XXX,"1, 3",1,Formless,Sacred,0
+Vassal Vessel,"Human, Being","2 Faithless, 1 Formless",3,"Depart: Summon a Vassal token.
+
+""Oh no my meat suit is rotting again!""",0,4,XXX,1,1,Formless,C,0
+Vicious Vittles,"Relic, Being",2 Formless,2,"Engage: As an additional cost to summon your next Hunger this turn, sacrifice this and summon the hunger on this tile.
+Beings may move across this.",0,3,XXX,"2, 8",1,Formless,C,0
+Void Channeler ,"Human, Being",3 Formless,3,"Gain (1) Crossing Counter each time you Conjure.
+Remove (3) Crossing Counters, Engage: Add a Formless Being to hand from deck.",0,4,XXX,"1, 3, 7",1,Formless,U,0
+Wretched Remnants,Relic,1 Formless,1,Once per turn when a Being you control dies you may have this Relic gain its effect(s) until end of turn. ,XXX,XXX,XXX,XXX,1,Formless,C,0
+  Sporangium,"Seed, Being",1 Living,1,"When a Being with Dryad moves onto this, summon a 0/2 Vine token on a tile this points to.",0,1,X,"1, 3, 7",1,Living,C,
+Aerate,Conjuring,"1 Faithless, 1 Living",2,"Reveal the top (3) cards of your deck, you may add any Seed Beings revelaed in this way to hand, then shuffle your deck.",XXX,XXX,XXX,XXX,1,Living,C,0
+Arbosalis Altar,Altar,3 Living,3,"Craft (1) additional Effigy on your turn
+(Conjures in the Effigy Zone).",XXX,XXX,XXX,XXX,1,Living,U,0
+Arbosalis Zealot,"Human, Being",2 Living,2,Engage: Add (1) Living Essence.,1,1,XXX,1,1,Living,C,0
+Blooming Seed,"Seed, Being",0,0,"Pay (1) Living: Add (1) Growth Counter.
+Remove (1) Growth Counter: Sacrifice this, summon (1) Blooming Vine Token (0/3 Being - vine token with ""Engage: Add (1) Living"") on any tile this points to.",0,2,XXX,1,1,Living,C,0
+Boknea Druid,"TreeFolk, Being","1 Faithless, 2 Living",3,"Dryad.
+This may be summoned directly onto another TreeFolk, Vine, or Seed.",1,2,XXX,"1, 3, 5",1,Living,U,0
+Boknean Wine,"Ethereal, Conjuring",2 Living,2,"Engage target being, it has +2/+0 until end of turn.",XXX,XXX,XXX,XXX,1,Living,U,0
+Classic Familiar ,"Cat, Being, Familiar","1 Faithless, 1 Living",2,"Depart: Invoke (Add to hand, then summon/conjure) White Whisker.",2,2,XXX,"1, 5, 7",1,Living,U,0
+Crathea,"TreeFolk, Being, Deity","2 Faithless, 6 Living",8,"When summoned create a face up Blooming Life token (0 cost - Divine Prophecy - 3T ""Beings you control have +1/+1"") or a Withering Life token (0 cost - Divine Prophecy - 3T - ""Beings you don't control have -1/-1"").",3,5,XXX,"1, 2, 3, 4, 5, 6, 7, 8",1,Living,Sacred,1
+Crathean Cultivator,"TreeFolk, Being","2 Faithless, 2 Living",4,Engage: Invoke a Seed on target tile this points to.,2,2,XXX,"1, 2, 8",1,Living,C,0
+Crawling Growth,"Ethereal, Conjuring",1 Living,1,Summon a 0/2 Vine token on an empty tile adjacent to another Vine you control.,XXX,XXX,XXX,XXX,1,Living,C,0
+Dendrify,"Ethereal, Conjuring",2 Living,2,Target Being loses all abilities and becomes a 0/5 TreeFolk Being until end of turn.,XXX,XXX,XXX,XXX,1,Living,R,0
+Dryad,"TreeFolk, Being",2 Living,2,"Dryad (May move onto another TreeFolk, Vine, or Seed.
+This has that Beings Strength and Lifespan while attached).",1,3,XXX,1,1,Living,C,0
+Elderflower Ancient,"TreeFolk, Being","1 Faithless, 3 Living",4,"Depart: Restore (6) Lifespan or Summon (2) Blooming Vine tokens  (0/3 Being - Vine token with ""Engage: Add (1) Living"").",1,4,XXX,"1, 3, 7",1,Living,R,0
+Farm hand ,"Human, Being",1 Living,1,"When summoned reveal the top of your deck, if it is a Seed Being add it to hand.
+
+""Sometimes you reap what you sow""",1,1,XXX,"1, 5",1,Living,C,0
+Festival of Monatssa,Prophecy,"2 Faithless, 2 Living",4,Draw (1) Card for each Being you control with Dryad.,XXX,XXX,1,XXX,1,Living,U,0
+Grand Germination,Prophecy,2 Living,2,Trigger all Martyr abilities on Seeds you control ignoring costs.,XXX,XXX,3,XXX,1,Living,R,0
+Green thumbed Gardener,"Human, Being","1 Faithless, 2 Living",3,When summoned add (1) Growth Counter to a Seed this points to.,1,2,XXX,"1, 3, 5",1,Living,U,0
+Greenseer ,"Human, Being","1 Faithless, 2 Living",3,Once per turn target Familiar becomes Favored until end of turn. ,2,3,XXX,"2, 5, 8",1,Living,R,0
+Greenseer's assistant,"Human, Being",2 Living,2,When a Familiar is summoned under your control draw (1) card.,1,2,XXX,"1, 3",1,Living,U,0
+Growth Spurt,Prophecy,2 Living,2,"Gain (1) Time Counter
+Beings you control have +1/+0, if any of those beings are TreeFolk, they gain +2/+0 instead.",XXX,XXX,3,XXX,1,Living,C,0
+HeartWood Locket,"Relic, Armament",2 Living,2,"Martyr: Until end of turn attached Being gains: ""Damage dealt to this Being is dealt directly to it's controller instead"".",XXX,XXX,XXX,XXX,1,Living,R,0
+Hoarder,"Human, Being, Familiar",2 Living,2,Each time this moves create a Rat token on the tile it moved from.,2,2,XXX,"1, 3, 5, 7",1,Living,R,0
+Imneyat Dryad,"TreeFolk, Being","1 Faithless, 2 Living",3,"Dryad
+When Imneyat Druid moves Summon (1) 0/2 Vine token on the tile it moved from.",1,3,XXX,"1, 3, 5",1,Living,C,0
+Impatient Imp,"Imp, Being, Familiar",1 Living,1,"When summoned deal (1) damage to it. 
+Martyr: Deal (1) damage to target Being.",1,1,XXX,"1, 2, 3, 4, 5, 6, 7, 8",1,Living,C,0
+Jirahperā ,"TreeFolk, Being",4 Living,4,"Dryad.
+When summoned you may summon (2) 0/2 Vine tokens on tiles Jirahperā points to.",2,2,XXX,"2, 3, 7, 8",1,Living,U,0
+Kernel,"Seed, Being",0,1,"Pay (2) Living: Add (1) Growth Counter.
+Remove (1) Growth Counter: Sacrifice this, Invoke a Treefolk with cost (2) or less summon it on a tile this points to.",0,3,XXX,"1, 3, 7",1,Living,C,0
+Lumbering Leadwood,"TreeFolk, Being",4 Living,4,"Can not attack.
+Depart: Add a Seed Being to hand from your Purgatory ",0,8,XXX,1,1,Living,C,0
+Menagerie Mistress,"Human, Being",2 Living,2,"While you control an Imp, Cat, and a Rat, Menagerie Mistress has +3/+6.",1,3,XXX,"1, 4, 6",1,Living,R,0
+Mischief of Rats,"Rat, Being, Familiar","1 Faithless, 2 Living",3,This has +1/+1 for each other Rat you have in play.,2,2,XXX,"2, 3, 7, 8",1,Living,R,0
+Natures Bounty,Prophecy,2 Living,2,"Gain (1) Time Counter
+TreeFolk, Vine, and Seeds you control gain: ""Engage: add (1) Living"".",XXX,XXX,3,XXX,1,Living,U,0
+Nursery Attendant ,"TreeFolk, Being","2 Faithless, 2 Living",4,Seed Beings that Nursery Attendant Points to cost (-1) Living to activate.,2,2,XXX,"1, 3, 5",1,Living,C,0
+Propagate,Conjuring,"1 Faithless, 2 Living",3,"If you control a TreeFolk, draw (1) Card.
+If you control a Vine, add a TreeFollk to hand from your Purgatory. 
+If you control both you may do both.",XXX,XXX,XXX,XXX,1,Living,U,0
+Pruning Sheers,Relic,2 Living,3,"Engage: Sacrifice a TreeFolk, Vine, or Seed you control that costs (2) or less, then gain (5) Lifespan.",XXX,XXX,XXX,XXX,1,Living,C,0
+Quake Goliath ,"Giant, Being","2 Faithless, 3 Living",5,When summoned deal (1) Damage to all other Beings.,3,3,XXX,1,1,Living,R,0
+Ravenous Growth,"Ethereal, Conjuring","1 Faithless, 2 Living",2,Summon a 0/2 Vine token on target empty tile you control.,XXX,XXX,XXX,1,1,Living,C,0
+Rejuvinating Waters,Relic,3 Living,3,"Enters with (2) Growth Counters.
+Remove (1) Growth Counter, Engage: Gain (2) Lifespan for each TreeFolk, Vine, and Seed you control.",XXX,XXX,XXX,XXX,1,Living,U,1
+Roots of Eternity,"TreeFolk, Being","1 Faithless, 2 Living",3,"Once per turn you may sacrifice a Vine token, summon this from Purgatory on the tile that the sacrificed vine token was on ",2,2,XXX,"1, 3, 7",1,Living,C,1
+Samara Seed,"Seed, Being",1 Living,1,"Pay (1) Living: Add (1) Growth Counter. 
+ Remove (4) Growth Counters, Martyr: Invoke a TreeFolk with cost (4) or less on a tile this points to.",0,3,XXX,"2, 8, 5",1,Living,U,0
+Sapling,"TreeFolk, Being",2 Living,2,"Whenever you Martyr a Seed, Craft (1) Effigy.",1,2,XXX,1,1,Living,C,0
+Seasons of Regrowth,Prophecy,4 Living,4,Discard your hand then draw cards equal to the number of cards that you discarded.,XXX,XXX,1,XXX,1,Living,Sacred,1
+Seed of Divinity,"Seed, Being",0,1,"Pay (2) Living: Add (1) Growth Counter. 
+ Remove (3) Growth Counters, Martyr: Add a Living Deity to hand from your deck",0,3,XXX,XXX,1,Living,Sacred,0
+Spreading Roots,Conjuring,"1 Faithless, 2 Living",3,Summon (2) 0/2 vine being tokens on tiles you control.,XXX,XXX,XXX,XXX,1,Living,C,0
+Stray,"Cat, Being, Familiar",1 Living,1,Martyr: Add a Familiar to hand from deck.,1,1,XXX,1,1,Living,U,0
+The Roots Remember,Prophecy,"2 Faithless, 2 Living",4,"Gain (1) Time Counter.
+ If there are (0) Time Counters on this conjure a (Living) Prophecy from your Purgatory.",XXX,XXX,1,XXX,1,Living,U,1
+Tiarlish Magic,Conjuring,1 Living,1,Craft (1) Effigy.,XXX,XXX,XXX,XXX,1,Living,C,0
+Tilled Fields,Relic,"1 Faithless, 2 Living",3,"Pay (1) Living Essence, Engage: Until end of turn Plants summoned on this tile come in Disengaged.
+If this is Engaged at the end of the turn, sacrifice it.
+Beings may move across this Relic.",XXX,XXX,XXX,XXX,1,Living,C,0
+Transplant,"Ethereal, Conjuring",2 Living,2,"Engage target Treefolk, move it (1) tile in any direction.",XXX,XXX,XXX,XXX,1,Living,U,0
+White Whisker ,Relic,2 Living,2,"Engage: Add a Familiar to hand from deck. 
+Sacrifice this when you summon a Familiar.",XXX,XXX,XXX,XXX,1,Living,C,0
+Witching Well,Relic,"2 Faithless, 1 Living",3,"Engage: Flip a coin if heads draw (1) card, if tails look at the top card of your opponents deck, you may have them shuffle.",XXX,XXX,XXX,XXX,1,Living,C,0
+Al khali the Empty,Prophecy,1 Shifting,1,Summon a Shifting Sands token on all tiles this points to. ,XXX,XXX,2,"1, 5, 6",1,Shifting,R,0
+Antiquities Dealer ,"Human, Being",3 Shifitng,3,Once per turn sacrifice a Relic: Craft (1) Effigy.,0,3,XXX,"1, 3, 7",1,Shifting,R,0
+Bag o' Bones,Relic,1 Shifting,1,Matyr,XXX,XXX,XXX,XXX,1,Shifting,C,0
+Balance the Scales,Prophecy,1 Shifting,1,Sacrifice a Being: Each opponent sacrifices a Being,XXX,XXX,2,XXX,1,Shifting,C,0
+Blood Moon ,Prophecy,1 Shifting,2,"Gain (1) Time Counter
+Whenever a Being dies it's controller gives a different target Being +1/+1",XXX,XXX,2,XXX,1,Shifting,R,0
+Bone collector,"Undead, Being","1 Faithless, 1 Shifting",2,"When summoned, summon a Bag o' Bones token (1 cost Relic - Martyr.).",3,2,XXX,"1, 3, 7",1,Shifting,C,0
+Canopic Jar,Relic,"1 Faithless, 1 Shifting",2,"Whenever a Being dies add (1) Crossing Counter to this.
+Engage: Remove (4) Crossing Counters Shuffle a Being from Purgatory into it's owners deck, they draw (1) card.",XXX,XXX,XXX,XXX,1,Shifting,C,0
+Careless IkVarem  ,"Lycan, Being","1 Faithless, 2 Shifitng",3,Depart: Target Being you control becomes Favored.,2,2,XXX,"8, 3",1,Shifting,C,0
+Cemetery Physician,"Undead, Being","1 Faithless, 2 Shifitng",3,Once per turn sacrifice (X) Bag o' Bones: Summon a Being from your Purgatory with cost (X).,2,5,XXX,"1, 5",1,Shifting,U,0
+Claws of Onoushara,Relic,3 Shifitng,3,"Engage: Sacrifice a Being on this tile, then draw cards equal to it's Lifespan.
+Beings may move across this.",XXX,XXX,XXX,XXX,1,Shifting,Sacred,1
+Cookie,"Dog, Being","1 Faithless, 1 Shifting",2,"Engage: Summon a Bag o' Bones token (1 cost Relic - Martyr).
+
+""Man's Best Friend, wether the man is alive, dead or even undead""",1,2,XXX,"1, 2, 7",1,Shifting,R,0
+Crumbling Sphinx,"Relic, Being",1 Shifting,1,Engage: Deal (1) Lifespan Damage to a Being you control and (1) to a different Being.,2,1,XXX,1,1,Shifting,C,0
+Death's Howl,Conjuring,2 Shifitng,2,Sacrifice (X) Beings: Add (X) Shifting Essence where (X) is the number of Beings sacrificed.,XXX,XXX,XXX,XXX,1,Shifting,U,0
+Deossification,Conjuring,2 Shifitng,2,Discard (X) Bag o' Bones: Draw (X) Cards.,XXX,XXX,XXX,XXX,1,Shifting,C,0
+"Ditch Digger ""Steve""","Human, Being",1 Shifting,1,Depart: Summon a Bag o' Bones token (1 cost Relic - Martyr).,1,2,XXX,"1, 5",1,Shifting,C,0
+Dust to Dust,Conjuring,"2 Faithless, 3 Shifitng",5,"All Beings are sent to Purgatory. Each player Crafts (1) Effigy card for each Being they controlled. 
+Your turn ends.",XXX,XXX,XXX,XXX,1,Shifting,R,1
+Engrave,"Ethereal, Conjuring",2 Shifitng,2,"Beings you control gain ""Depart: Summon a Bag o' Bones token"".",XXX,XXX,XXX,"1, 2",1,Shifting,U,0
+Favorite Son,"Human, Being",1 Shifting,1,When summoned become Favored (Gains a Favor Counter. The next time this Being would take damage remove the Favor Counter instead).,1,1,XXX,1,1,Shifting,C,1
+Ferryman's Boat,Relic,2 Shifitng,2,"When summoned gain (2) Crossing Counters.
+Remove (1) Crossing Counter, Engage: Sacrifice a Being on a tile this points to.",XXX,XXX,XXX,"1, 5",1,Shifting,C,0
+Fetch,Conjuring,2 Shifitng,2,"Add a Bag o' Bones to hand from your Purgatory, if you control Cookie you may add an Undead instead.
+
+""Who's a good boy helping dig up all these graves""",XXX,XXX,XXX,XXX,1,Shifting,C,0
+Fleeting Auspice,"Ethereal, Conjuring",3 Shifitng,3,All Beings become Favored until end of turn.,XXX,XXX,XXX,XXX,1,Shifting,R,0
+Grave robber,"Human, Being",3 Shifitng,3,"Engage: Add a Bag o' Bones token (1 cost Relic - Martyr.) to hand.
+Martyr: Summon an Undead Being on this tile from your Purgatory.",2,4,XXX,"1, 4, 6",1,Shifting,R,0
+IkVarem  ,"Lycan, Being","2 Faithless, 2 Shifitng",4,When summoned target Being you control becomes Favored until end of turn.,3,2,XXX,"1, 4, 6",1,Shifting,U,0
+Kalduran Altar,Altar,2 Shifitng,2,"As an additional cost to conjure, send the top (3) cards of your deck to your Purgatory.
+ Craft (1) additional Effigy on your turn
+(Conjures in the Effigy Zone).",XXX,XXX,XXX,XXX,1,Shifting,U,0
+Kalduran Zealot,"Human, Being",1 Shifting,1,If you control a non Armament Relic you may Engage: Add (1) Shifting Essence.,1,2,XXX,1,1,Shifting,C,0
+Kendasha,"Spirit, Being","1 Faithless, 1 Shifting",2,Depart: Deal (1) damage to target Being.,3,1,XXX,"2, 7",1,Shifting,C,0
+Locust swarm ,"Insect, Being","1 Faithless, 2 Shifitng",3,Depart: Locust Swarm Shifts (3).,2,3,XXX,1,1,Shifting,U,0
+Martyrdom,Conjuring,1 Shifting,1,Sacrifice target Being add (2) Shifting Essence.,XXX,XXX,XXX,XXX,1,Shifting,C,1
+Mausoleum Gates,Relic,4 Shifitng,4,"Enters with (2) Crossing Counters.
+Remove (1) Crossing Counter, then Engage: You may summon Undead from your Purgatory until the end of your turn.",XXX,XXX,XXX,XXX,1,Shifting,U,0
+May Break my Bones,Prophecy,1 Shifting,1,"Choose a Being this points to, destroy it and Summon a Bag o' Bones token (1 cost Relic - Martyr.) on that tile.",XXX,XXX,2,"1, 4, 6",1,Shifting,C,0
+Mirage Visage ,Prophecy,1 Shifting,1,"Choose (2) Beings this points to, become Favored",XXX,XXX,2,"1, 4, 6",1,Shifting,C,0
+Monumental Mason,"Giant, Being","1 Faithless, 2 Shifitng",3,"If you conjure a non Armament Relic on a tile this points to, Craft an Effigy.",1,3,XXX,"1, 3, 5, 7",1,Shifting,U,0
+My Body as a Shield,"Ethereal, Conjuring",1 Shifting,1,Sacrifice a Being you control: Target being becomes Favored until end of turn.,XXX,XXX,XXX,XXX,1,Shifting,U,0
+One Above All,"Ethereal, Conjuring",2 Shifitng,2,Target Being becomes Favored.,XXX,XXX,XXX,XXX,1,Shifting,U,0
+Onoushara,"Lycan, Being, Deity",4 Shifitng,4,"When Onoushara is summoned all Beings lose -1/-1. Onoushara gains +1/+1 for each Being affected. 
+Whenever a Being you control dies, Onoushara gains +1/+1.",2,2,XXX,"1, 2, 3, 4, 5, 6, 7, 8",1,Shifting,Sacred,0
+Osteomancer,"Human, Being",3 Shifitng,3,"Engage, Sacrfiice a Bag o' Bones: Add an Undead to hand from your Purgatory
+Engage, Sacrifice an Undead: Summon a different Undead from your Purgatory.",3,3,XXX,"2, 3, 5, 8",1,Shifting,Sacred,0
+Plague doctor ,"Undead, Being","1 Faithless, 2 Shifitng",3,"Engage: Until the end of turn, target Being has -1/-1 for each Being that died under your control this turn.",2,1,XXX,"1, 2, 8",1,Shifting,C,1
+Read the Bones,"Ethereal, Conjuring",2 Shifitng,2,"Look at the top (X) cards of your deck where (X) is the number of Undead in your Purgatory, then put them back in any order you like or shuffle.",XXX,XXX,XXX,XXX,1,Shifting,C,0
+Restless Dead,"Undead, Being",1 Shifting,1,Restless Dead has +2/+0 until end of turn for each Being that died under your control this turn.,1,2,XXX,1,1,Shifting,C,0
+Return the Favor,Conjuring,"1 Faithless, 1 Shifting",2,Until the end of the turn whenever a Being you control loses a Favored Counter a different Being becomes Favored.,XXX,XXX,XXX,XXX,1,Shifting,C,0
+Ritual Executioner,"Human, Being",1 Shifting,1,Engage: Sacrifice target Being you control.,1,3,XXX,"1, 8",1,Shifting,R,0
+Scarab,"Insect, Being",2 Shifitng,2,Depart: Target Being gains a -1/-1 Counter.,2,1,XXX,"1, 3, 5",1,Shifting,C,0
+Shifting Sands,Relic,1 Shifting,1,"When summoned gain (2) Crossing Counters. 
+Engage: Remove (1) Crossing Counter, then move target Being you control to this tile. 
+Beings may move across Shfting Sands.",XXX,XXX,XXX,XXX,1,Shifting,U,0
+Shovel ,"Relic, Armament",1 Shifting,1,"Being gains: ""Engage: Sacrifice Shovel, then reveal the top (3) cards of your deck, you may add any Relics revealed to hand, shuffle the others back into your deck"".",XXX,XXX,XXX,XXX,1,Shifting,C,0
+Skeletal Colossus ,"Undead, Being","3 Faithless, 2 Shifitng",5,Costs (-1) Faithless for each Bag o' Bones you control.,5,5,XXX,"1, 2, 5, 8",1,Shifting,U,0
+Skeleton Key,Relic,1 Shifting,1,Burn (2) Shifting: Trigger the Depart of a Being you control.,XXX,XXX,XXX,XXX,1,Shifting,U,1
+Strike Down,"Ethereal, Conjuring",2 Shifitng,2,"Destroy target blocking Being, its controller is not dealt damage when it dies; the attacking Being deals no damage.",XXX,XXX,XXX,XXX,1,Shifting,U,0
+Temple Guardian,"Cat, Being, Familiar","1 Faithless, 1 Shifting",2,Has (+1) Lifespan for each Non Armament Relic you control.,1,1,XXX,"7, 2",1,Shifting,C,0
+Venefica,"Undead, Being",3 Shifitng,3,"When summoned target opponent sacrifices a Being but takes no Lifespan damage from it.  
+
+""At least you get to pick your poison""",2,3,XXX,1,1,Shifting,R,0
+Willing Sacrifice ,"Ethereal, Conjuring",2 Shifitng,2,"Until end of turn target Being gains: ""Martyr: Craft (1) Effigy"".",XXX,XXX,XXX,XXX,1,Shifting,U,0
+Afterimage,"Ethereal, Conjuring","1 Faithless, 2 Timeless",3,"Whenever target Being moves this turn, summon an Afterimage token on the tile it moved from.
+(Afterimage 0 Cost 0/3 - Temporal Being
+ When Summoned gain (2) Time Counters.
+When this has (0) Time Counters on it, sacrifice it).",XXX,XXX,XXX,XXX,1,Timeless,C,0
+Chronostasis,Prophecy,3 Timeless,3,"Gain (2) Time Counters. 
+Before drawing a card(s) that player may reveal the top card of their deck, they may shuffle.",XXX,XXX,3,XXX,1,Timeless,U,0
+Clock Tower Custodian,"Gnome, Being",1 Timeless,1,When summoned if you control a Prophecy draw (1) card.,1,3,XXX,"1, 5",1,Timeless,C,0
+Daylight Savings  ,Prophecy,1 Timeless,1,"Gain (3) Time Counters. 
+Draw three Cards.
+You do not draw during the start of your turn.",XXX,XXX,4,XXX,1,Timeless,C,0
+Deja Vu,"Ethereal, Conjuring","X, 2 Timeless",4,"Return target Being that you control with cost (X) to your hand, then Summon it without paying its summoning cost
+Pay (2) additional Timeless Essence to target a Deity.",XXX,XXX,XXX,XXX,1,Timeless,R,0
+Delay,"Ethereal, Conjuring",3 Timeless,3,"Negate the Summoning of target Being, it conjures as a face up Prophecy instead and gains: (2) Time Counters, ""If this has at least (1) Time Counter its effects are negated. When it has (0) TIme Counters Summon it in the Mortal Realm",XXX,XXX,XXX,XXX,1,Timeless,U,0
+Dial of Metatoris,Relic,1 Timeless,1,Engage: Modulate (±1) on a target you control,XXX,XXX,XXX,XXX,1,Timeless,Sacred,0
+Distant Debator,"Human, Being",1 Timeless,1,"When revealed on the top of your deck, you may engage a non Deity Being in the Mortal Realm until your next turn.",1,1,XXX,"1, 4, 6",1,Timeless,C,0
+Echo chamber,Conjuring,"1 Faithless, 2 Timeless",3,"Move target Being you control in any direction, then move target Being an opponent controls in any direction. ",XXX,XXX,2,XXX,1,Timeless,R,0
+Eònion Altar,Altar,1 Timeless,1,"When conjured gain (3) Time Counters. 
+If this has (0) Time Counters: Craft (1) additional Effigy on your turn.
+(Conjures in the Effigy Zone).",XXX,XXX,XXX,XXX,1,Timeless,U,0
+Eònion Zealot,"Human, Being",1 Timeless,1,Once per turn when a Time Counter is removed from a Prophecy you control add (1) Timeless Essence.,1,2,XXX,1,1,Timeless,C,0
+Equanimity,Conjuring,3 Timeless,3,"Deal (1) damage to each Being and your Lifespan, repeat for each Time Counter on a Prophecy that you control.
+No damage is dealt from any Beings that die.",XXX,XXX,XXX,XXX,1,Timeless,R,1
+Exactly on TIme,Prophecy,"1 Faithless, 2 Timeless",3,Add a Timless Being that costs (3) or more from deck to hand.,XXX,XXX,2,XXX,1,Timeless,R,0
+Foresight ,Conjuring,1 Timeless,1,Look at the top card of an opponents deck. You may have them shuffle.,XXX,XXX,XXX,XXX,1,Timeless,C,0
+Freeze Frame,"Ethereal, Conjuring",2 Timeless,2,"Target Engaged Being gains: (2) Time Counters and ""While this has at least (1) Time Counter, it does not Disengage during Disengage step""",XXX,XXX,XXX,XXX,1,Timeless,U,0
+Horological Horror,"Temporal, Being",3 Timeless,3,"(X) is equal to the total number of Time Counters you control.
+When this dies you take (5) Lifespan Damage",X,X,XXX,"1, 3, 4, 5, 6, 7",1,Timeless,R,0
+Horologist’s Apprentice,"Human, Being",2 Timeless,2,"Gain (1) Time Counter whenever a Time Counter is removed from a Prophecy you control.
+Once per turn remove (3) Time Counters: Shuffle a random card from hand into deck, then draw (1) Card.",0,2,XXX,"1, 3, 5",1,Timeless,U,0
+Hourglass,Relic,1 Timeless,1,"Whenever a Time Counter is removed from a Prophecy you control add it to this. 
+Engage: Remove (5) Time Counters, then draw (2) cards.",XXX,XXX,XXX,XXX,1,Timeless,U,0
+Humble Contrarian,"Human, Being","1 Faithless, 1 Timeless",3,"When summoned reveal the top card of each deck, the player who has the lowest cost card draws it. If it is tied each player draws.",2,2,XXX,8,1,Timeless,C,0
+Hurry Up and Wait,Conjuring,"1 Faithless,  3 Timeless",3,"Modulate (-1) and Modulate (+1).
+This may only target Time Counters that you control.",XXX,XXX,XXX,XXX,2,Timeless,C,0
+Infinite Divisibility,"Ethereal, Conjuring",1 Timeless,3," Shuffle your hand into your deck, then draw half that many cards rounded up.",XXX,XXX,XXX,XXX,1,Timeless,C,0
+Inquisitive Prodigy,"Human, Being",1 Timeless,1,"When summoned look at the top card of your deck, then you may shuffle or put it back on top.
+
+""What?How?Why?""",1,1,XXX,1,1,Timeless,C,0
+Instigator,"Human, Being",2 Timeless,2,"When summoned, engage target non Deity Being, until the start of your next turn it gains ""This does not disengage during Disengage Step"".",1,2,XXX,"2, 8",1,Timeless,C,0
+Massive Mage,"Giant, Being",4 Timeless,4,"When summoned if you control a Prophecy deal (4) damage to target Being.
+
+""Larger Mage Larger Fireball""",2,4,XXX,1,1,Timeless,U,0
+Medium Mage,"Human, Being","1 Faithless, 2 Timeless",3,When summoned if you control a Prophecy deal (3) damage to target Being.,1,3,XXX,"1, 5",1,Timeless,C,0
+Melting Clock,Relic,"1 Faithless, 1 Timeless",2,"Engage: Shuffle a Prophecy card into deck from your Purgatory. 
+Pay (1) Timeless Essence, Martyr: Add a Being to hand from your Purgatory.",XXX,XXX,XXX,XXX,1,Timeless,C,0
+MetaToris,"Temporal, Being, Deity",3 Timeless,3,"Twice per turn Modulate (±1). 
+When summoned Shuffle (3) cards into deck from your Purgatory (can not target MetaToris) or draw (3) Cards.",3,4,XXX,"1, 2, 3, 4, 5, 6, 7, 8",1,Timeless,Sacred,0
+Mini Mage,"Gnome, Being",2 Timeless,2,When summoned if you control a Prophecy deal (2) damage to target Being.,0,2,XXX,"1, 5",1,Timeless,C,0
+Minute-taur,"Temporal, Being","2 Faithless, 1 Timeless",3,"At the start of your turn move forward.
+At the end of your turn move backward.
+
+""Time charges blindly forward...and sometimes also backwards"" ",4,1,XXX,"1, 5",1,Timeless,C,0
+Modulate,Conjuring,"2 Faithless, 2 Timeless",4,"Modulate (±1)
+(Oracle)",X,X,XXX,XXX,2,Timeless,C,0
+Orbital Acceleration,Prophecy,1 Timeless,1,"All players draw a card. 
+Craft (1) Effigy.
+You may Modulate (-1).",XXX,XXX,4,XXX,1,Timeless,C,0
+Pause,"Ethereal, Conjuring",2 Timeless,2,"During the next Modulate Step, Time Counters are not removed.",XXX,XXX,XXX,XXX,1,Timeless,U,0
+Pompous Contrarian,"Human, Being","1 Faithless, 1 Timeless",3,When summoned reveal the top card of each deck.The player who has the highest cost card draws it. If it is tied each player draws,2,2,XXX,2,1,Timeless,C,0
+Prophesize,"Ethereal, Conjuring",2 Timeless,2,"The next Being you summon is conjured as a face up Prophecy with (2) Time Counters and ""if this has (0) Time Counters move it to the Mortal Realm"" It has all other effects negated while a Prophecy.",XXX,XXX,XXX,XXX,1,Timeless,U,0
+Recollect,Prophecy,"1 Faithless, 2 Timeless",3,"Choose target Being this points to, it is returned to it’s owner’s hand, It’s owner Crafts Effigies equal to its cost.",XXX,XXX,2,"1, 4, 6",1,Timeless,U,0
+Regress,"Ethereal, Conjuring","1 Faithless, 1 Timeless",2,Target Being's Strength becomes (0) until end of turn.,XXX,XXX,XXX,XXX,1,Timeless,U,0
+Rewrite the Past,"Ethereal, Conjuring","1 Faithless, 2 Timeless",3,"Negate a Prophecy and flip it face down, then add (2) Time Counters to it.",XXX,XXX,XXX,XXX,1,Timeless,U,0
+Seeress,"Human, Being",1 Timeless,1,"When summoned look at the top (2) cards of your deck, return them in the same order.",1,1,XXX,"2, 7",1,Timeless,C,0
+Singularity ,"Temporal, Being","12 Faithless, 1 Timeless",13,"Costs (-1) Faithless for each Time Counter that you control. 
+Singularity has -X/-X where X equals the number of Time Counters that you control. 
+ 
+""What happens when the clock strikes 13? -horologist’s apprentice""",13,13,XXX,1,1,Timeless,Sacred,0
+Sneaky Peek,"Gnome, Being","2 Faithless, 1 Timeless",3,"When summoned, if you control a Prophecy, reveal the top card of your deck.",1,2,XXX,"1, 8",1,Timeless,C,
+Soulless Scissors ,"Relic, Armament",2 Timeless,2,"Animated.
+Attached Being gains: ""Engage: Modulate (±1)"".",1,2,XXX,"2, 4, 6, 8",1,Timeless,C,0
+Temporal Anomaly ,"Temporal, Being",2 Timeless,2,"This gains +1/+1 whenever you Modulate (±1) except due to the Modulate Step,",1,1,XXX,"1, 2, 7",1,Timeless,R,1
+The Fountain,Relic,2 Timeless,3,You take (1) less Lifespan Damage during the Down Tick Step,XXX,XXX,XXX,XXX,1,Timeless,R,1
+The Persistence of Memory,Prophecy,3 Timeless,4,"Gain (2) Time Counters. 
+Beings do not enter the Mortal Realm engaged. 
+
+Memory for some, Motivation for others",XXX,XXX,3,XXX,1,Timeless,R,0
+Time Capsule,Relic,"1 Faithless, 2 Timeless",3,"Whenever you Modulate (-1) except due to the Modulate Step, add (1) Time Counter to this.
+Martyr: Modulate (+1), then repeat for each Time Counter on this.",XXX,XXX,XXX,XXX,1,Timeless,U,0
+Time Keeper,"Human, Being","1 Faithless, 1 Timeless",2,Engage: Modulate (±1) a target this points to.,1,3,XXX,"1, 2, 8",1,Timeless,C,0
+Timeline Tinker,"Gnome, Being",2 Timeless,2,Whenever you conjure a Prophecy craft (1) Effigy.,0,1,XXX,"2, 8",1,Timeless,R,0
+Waning Words,"Ethereal, Conjuring",3 Timeless,3,"Target Conjuring becomes a Prophecy and gains: (2) Time Counters, ""If this has at least (1) Time Counter its effects are negated""",XXX,XXX,XXX,XXX,1,Timeless,U,0
+Weaver,"Temporal, Being",2 Timeless,2,"When summoned draw (2) cards, then put (1) card from hand on the bottom of deck.",1,3,XXX,"2, 5, 7, 8",1,Timeless,U,0
+Oracle of Eonia,"Human, Being","1 Faithless, 1 Timeless",2,"Engage: Reveal the top card of your deck, then you may sacrifice this and draw a card. ",0,3,XXX,"2, 3, 7, 8",,,C,0
+Snake Skin,"Relic, Armament, Token",1 Bleeding,1,Being gains +0/+2,XXX,XXX,XXX,XXX,,Bleeding,,
+Cursed Cutlass,"Relic, Armament, Token",2 Bleeding,2,"Animated
+ Being gains +1/+1",XXX,XXX,XXX,2,,Bleeding,,
+Vassal ,"Being, Token",2 Formless,2,"""Demons only exist in Fairy Tales not a world of Scieince and Steel!!"" - The skeptics last words ",2,2,XXX,"1,7",,Formless,,
+Scā-vuhk Hunger,"Being, Hunger, Token",2 Formless,2,"Shift (1): ""At the end of your turn remove (1) Time Counter from this""
+When this moves into the Mortal Realm, sacrifice this and create (2) Scā-vuhk Hunger tokens.",0,3,XXX,1,,Formless,,
+Blooming Vine ,"Being, Vine, Token",1 Living,1,Engage: Add (1) Living Essence,0,3,XXX,1,,Living,,
+Vine ,"Being, Vine, Token",1 Living,1,,0,2,XXX,1,,Living,,
+Blooming Life,"Prophecy, Token",0,0,"Gain (3) Time Counters
+Beings you control have +1/+1",XXX,XXX,3,XXX,,Living,,
+Withering Life,"Prophecy, Token",0,,"Gain (3) Time Counters
+Beings you don't control have -1/-1",XXX,XXX,3,XXX,,Living,,
+Bag o' Bones,"Relic, Token",1 Shifting,1,Martyr,XXX,XXX,XXX,XXX,,Shifting,,
+Shifting Sands,"Relic, Token",1 Shifting,1,"When summoned gain (2) Crossing Counters. 
+Engage: Remove (1) Crossing Counter, then move target Being you control to this tile. 
+Beings may move across Shfting Sands.",XXX,XXX,XXX,XXX,,Shifting,,
+Favor Counter,Token,1 Shifting,1,The next time this Being would take damage remove this Favor Counter instead,XXX,XXX,XXX,XXX,,Shifting,,
+AfterImage,"Being, Temporal, Token",1 Timeless,1,"When this Being has (0) Time Counters on it, sacrifice it.",0,3,XXX,XXX,,Timeless,,
+Rat,"Being, Rat, Familiar, Token",1 Living,1,,1,1,XXX,1,,Living,,

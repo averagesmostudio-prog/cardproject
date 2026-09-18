@@ -1,6 +1,6 @@
 {
-  "name": "trading-card-generator",
-  "productName": "Trading Card Generator",
+  "name": "scripturas-alpha",
+  "productName": "Scripturas Alpha",
   "private": true,
   "version": "1.0.0",
   "type": "module",
@@ -9,6 +9,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "oxlint",
+    "test": "vitest run",
     "preview": "vite preview",
     "electron:dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && electron .\"",
     "dist:mac": "npm run build && electron-builder --mac --dir"
@@ -31,11 +32,12 @@
     "postcss": "^8.5.26",
     "tailwindcss": "^4.3.3",
     "vite": "^8.2.2",
+    "vitest": "^3.2.4",
     "wait-on": "^9.1.0"
   },
   "build": {
-    "appId": "local.tradingcardgenerator.app",
-    "productName": "Trading Card Generator",
+    "appId": "local.scripturasalpha.app",
+    "productName": "Scripturas Alpha",
     "directories": {
       "output": "release"
     },
