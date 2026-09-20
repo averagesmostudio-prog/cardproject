@@ -184,6 +184,25 @@ function ShiftVortex({ seq }) {
   );
 }
 
+// Depart's own trigger flash (useStagedBoard.js > useDepartFlash) — like
+// MartyrGlow below, the dying Being is already gone from the tile by the
+// time this can fire, so it washes the bare tile itself (a bone/ash grey,
+// distinct from Martyr's red and Shift's purple) with two crossed bone
+// bars layered on top, reading specifically as "Departed" rather than a
+// generic death. One shot, keyed on `seq`, same shape as the others above.
+function DepartBones({ seq }) {
+  if (!seq) return null;
+  return (
+    <>
+      <div key={`depart-glow-${seq}`} className="absolute inset-0 z-[25] rounded pointer-events-none depart-bones-glow" />
+      <div key={`depart-bones-${seq}`} className="absolute inset-0 z-[26] pointer-events-none depart-bones-pop">
+        <div className="depart-bone depart-bone-a" />
+        <div className="depart-bone depart-bone-b" />
+      </div>
+    </>
+  );
+}
+
 function EffigyZoneBreakdown({ pool }) {
   const counts = {};
   pool.forEach(e => { counts[e.effigyType] = (counts[e.effigyType] || 0) + 1; });
@@ -213,7 +232,7 @@ function EffigyZoneBreakdown({ pool }) {
   );
 }
 
-export default function Board({ state, displayBoard, flashes, lastAttack, lastMartyr, lastEngageGlow, vortexCells, viewerId, highlightCells, selectedCell, toggledCells, respondingCellId, onCellClick, onCellDoubleClick, borderImages, borderImagesLoaded, artImages, artBorderImages, artImagesLoaded, fontLoaded }) {
+export default function Board({ state, displayBoard, flashes, lastAttack, lastMartyr, lastEngageGlow, vortexCells, departCells, viewerId, highlightCells, selectedCell, toggledCells, respondingCellId, onCellClick, onCellDoubleClick, borderImages, borderImagesLoaded, artImages, artBorderImages, artImagesLoaded, fontLoaded }) {
   const rows = [];
   // `displayBoard` (useStagedBoard.js) is a momentarily-lagged view of
   // state.board for a Being that just took damage or died — falls back to
@@ -273,6 +292,9 @@ export default function Board({ state, displayBoard, flashes, lastAttack, lastMa
       // `vortexCells` (useStagedBoard.js > useShiftVortex) — a fresh Shift
       // just landed on this specific Ethereal Realm tile.
       const shiftVortexSeq = vortexCells?.[id];
+      // `departCells` (useStagedBoard.js > useDepartFlash) — a Depart-
+      // keyword Being just died on this specific tile.
+      const departSeq = departCells?.[id];
 
       cells.push(
         <div
@@ -287,6 +309,7 @@ export default function Board({ state, displayBoard, flashes, lastAttack, lastMa
           {isMartyred && (
             <div key={`martyr-${lastMartyr.seq}`} className="absolute inset-0 z-[25] rounded pointer-events-none martyr-glow" />
           )}
+          <DepartBones seq={departSeq} />
           {occupant?.type === 'being' && (
             <div
               key={isAttacking ? `atk-${lastAttack.seq}` : undefined}

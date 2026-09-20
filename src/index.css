@@ -147,6 +147,59 @@
   animation: shift-vortex-spin 900ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+/* Board.jsx > isDeparted (useStagedBoard.js > useDepartFlash) — Depart
+   (RULES.md > Keywords) fires when a Being with the keyword dies, so by
+   the time this plays the tile is already empty (or holding whatever the
+   Depart effect itself placed there) — same "wash the bare tile" shape
+   martyr-glow above uses, just a bone/ash grey instead of Martyr's red,
+   with two crossed bone bars layered on top so it reads specifically as
+   "Departed" rather than a generic death. One shot, keyed on `seq`. */
+@keyframes depart-bones-glow {
+  0% { opacity: 0; }
+  25% { opacity: 1; }
+  70% { opacity: 0.85; }
+  100% { opacity: 0; }
+}
+.depart-bones-glow {
+  background: radial-gradient(circle, rgba(87,79,65,0.55) 0%, rgba(54,49,40,0.32) 55%, rgba(54,49,40,0) 78%);
+  animation: depart-bones-glow 1000ms ease-out both;
+}
+@keyframes depart-bones-pop {
+  0% { transform: scale(0.4) rotate(-8deg); opacity: 0; }
+  35% { transform: scale(1.08) rotate(2deg); opacity: 1; }
+  70% { transform: scale(1) rotate(0deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0deg); opacity: 0; }
+}
+.depart-bones-pop {
+  animation: depart-bones-pop 1000ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.depart-bone {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 52%;
+  height: 8px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #d8cdb4, #fbf7ea 50%, #d8cdb4);
+  box-shadow: 0 0 0 1.5px rgba(74,59,42,0.6) inset, 0 1px 2px rgba(0,0,0,0.35);
+}
+.depart-bone::before,
+.depart-bone::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: inherit;
+  box-shadow: 0 0 0 1.5px rgba(74,59,42,0.6) inset;
+  transform: translateY(-50%);
+}
+.depart-bone::before { left: -3px; }
+.depart-bone::after { right: -3px; }
+.depart-bone-a { transform: translate(-50%, -50%) rotate(45deg); }
+.depart-bone-b { transform: translate(-50%, -50%) rotate(-45deg); }
+
 /* Match.jsx > useTurnBanner — a "Your Turn"/"Opponent's Turn" announcement
    at the start of each turn: a soft radial glow behind a pill banner,
    both popping in with a slight overshoot then holding before fading, in

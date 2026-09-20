@@ -286,3 +286,73 @@ export const useShiftVortex = (board) => {
 
   return vortexCells;
 };
+
+const DEPART_BONES_MS = 1000;
+
+// Board.jsx's Depart bones flash — like Shift above, there's no single
+// dispatched action type to key off: a Depart-keyword Being can die to
+// combat, Martyr, a damage effect, and dozens of other resolution paths,
+// all of which funnel into logDepartIfPresent (actions.js). Unlike Shift
+// though, that function's own footprint isn't visible on `board` at all —
+// by the time it runs the dying Being is already gone (its own `cellId`
+// param documents this), so a board diff alone can only say "a Being left
+// this tile," not "...and it was a Depart." logDepartIfPresent always logs
+// the literal line "<card>'s Depart triggers." right before actually
+// resolving the effect (skipped, with a different log line, when a
+// concurrent pendingChoice blocks it — see its own comment), so this
+// combines both signals: diff the board for a cellId whose Being vanished
+// since the last render (same "vacated" shape diffBoardDamage's death
+// branch already detects), then cross-check the log for that exact
+// vacated card's own "Depart triggers" line among the messages added since
+// the last render, to confirm this specific vacancy really was a Depart
+// and not just an ordinary death.
+export const useDepartFlash = (board, log) => {
+  const prevBoardRef = useRef(board);
+  const prevLogLenRef = useRef(log.length);
+  const [departCells, setDepartCells] = useState({});
+  const timersRef = useRef({});
+
+  useEffect(() => {
+    const prevBoard = prevBoardRef.current;
+    const prevLogLen = prevLogLenRef.current;
+    prevBoardRef.current = board;
+    prevLogLenRef.current = log.length;
+    if (prevBoard === board && log.length === prevLogLen) return undefined;
+
+    const newMessages = log.slice(prevLogLen).map(entry => entry.message);
+    if (newMessages.length === 0) return undefined;
+
+    const freshCellIds = [];
+    Object.entries(prevBoard || {}).forEach(([cellId, occupant]) => {
+      if (occupant?.type !== 'being') return;
+      const current = board?.[cellId];
+      const stillThere = current?.type === 'being' && current.card.instanceId === occupant.card.instanceId;
+      if (stillThere) return;
+      const escapedName = occupant.card.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const triggeredRe = new RegExp(`^${escapedName}'s Depart triggers\\.$`);
+      if (newMessages.some(m => triggeredRe.test(m))) freshCellIds.push(cellId);
+    });
+    if (freshCellIds.length === 0) return undefined;
+
+    setDepartCells(prev => {
+      const next = { ...prev };
+      freshCellIds.forEach(cellId => { next[cellId] = (next[cellId] || 0) + 1; });
+      return next;
+    });
+    freshCellIds.forEach(cellId => {
+      if (timersRef.current[cellId]) clearTimeout(timersRef.current[cellId]);
+      timersRef.current[cellId] = setTimeout(() => {
+        setDepartCells(prev => {
+          const { [cellId]: _dropped, ...rest } = prev;
+          return rest;
+        });
+        delete timersRef.current[cellId];
+      }, DEPART_BONES_MS);
+    });
+    return undefined;
+  }, [board, log]);
+
+  useEffect(() => () => { Object.values(timersRef.current).forEach(clearTimeout); }, []);
+
+  return departCells;
+};
