@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   validateMainDeck, validateEffigyDeck, buildMainDeckList, buildEffigyDeckList,
   drawCard, MAIN_DECK_SIZE, EFFIGY_DECK_SIZE, MAX_COPIES, MAX_DEITY_COPIES,
-  autoBuildMainDeckEntries, autoBuildEffigyCounts, randomEffigyColor, resolvePreconEntries,
+  autoBuildMainDeckEntries, autoBuildEffigyCounts, randomEffigyColor, resolveDeckEntries,
 } from './deck.js';
 
 const card = (overrides = {}) => ({ id: 'c1', name: 'Card', isDeity: false, ...overrides });
@@ -105,7 +105,7 @@ describe('autoBuildMainDeckEntries (AI mono-color deck)', () => {
   });
 });
 
-describe('resolvePreconEntries', () => {
+describe('resolveDeckEntries', () => {
   const being = (overrides = {}) => ({
     id: 'b', kind: 'being', isDeity: false, isToken: false,
     castingCost: { faithless: 1, colored: {} }, ...overrides,
@@ -117,7 +117,7 @@ describe('resolvePreconEntries', () => {
 
   it('falls back to a plain mono-color Effigy Deck (autoBuildEffigyCounts) when the precon prints none of its own', () => {
     const precon = { color: 'bleeding', entries: [{ name: 'Alpha One', count: 3 }] };
-    const { entries, effigyCounts, warnings } = resolvePreconEntries(pool, precon);
+    const { entries, effigyCounts, warnings } = resolveDeckEntries(pool, precon);
     expect(warnings).toEqual([]);
     expect(entries).toEqual([{ card: pool[0], count: 3 }]);
     expect(effigyCounts).toEqual(autoBuildEffigyCounts('bleeding'));
@@ -128,14 +128,14 @@ describe('resolvePreconEntries', () => {
       color: 'formless', entries: [{ name: 'Alpha One', count: 2 }, { name: 'Beta One', count: 1 }],
       effigyCounts: { formless: 8, timeless: 7 },
     };
-    const { effigyCounts } = resolvePreconEntries(pool, precon);
+    const { effigyCounts } = resolveDeckEntries(pool, precon);
     expect(effigyCounts).toEqual({ formless: 8, timeless: 7 });
     expect(validateEffigyDeck(effigyCounts)).toEqual([]);
   });
 
   it('skips a missing card with a warning rather than throwing', () => {
     const precon = { color: 'bleeding', entries: [{ name: 'Nonexistent Card', count: 2 }] };
-    const { entries, warnings } = resolvePreconEntries(pool, precon);
+    const { entries, warnings } = resolveDeckEntries(pool, precon);
     expect(entries).toEqual([]);
     expect(warnings[0]).toMatch(/Nonexistent Card.*skipped/);
   });

@@ -1,22 +1,23 @@
 import React, { useState } from 'react';
 import { Layers } from 'lucide-react';
-import { EFFIGY_TYPE_COLORS } from '../../lib/cardData.js';
-import { PRECON_DECKS } from '../decks/precons.js';
-import { resolvePreconEntries, validateMainDeck } from '../engine/deck.js';
+import { resolveDeckEntries, validateMainDeck } from '../engine/deck.js';
+import { buildDeckLibraryList, toDeckSeed } from '../../lib/deckLibrary.js';
+import DeckLibraryGrid from './DeckLibraryGrid.jsx';
 
-// The "Play a Game" landing screen: ready-to-play precons (unique icon +
-// color per deck, from precons.js) that jump straight to the coin flip,
-// plus a plain "Import / Build a Custom Deck" option below that routes
-// into the existing DeckImport → DeckBuilder flow unchanged.
-export default function PreconSelect({ pool, onStart, onCustom, onBack, competitiveMode, onToggleCompetitiveMode, aiDifficulty, onChangeAiDifficulty }) {
+// The "Play a Game" landing screen: the Library's full deck list (precons +
+// anything saved — DeckLibraryGrid) that jumps straight to the coin flip on
+// pick, or edits a copy first (into DeckBuilder) without ever mutating a
+// precon in place, plus a plain "Import / Build a Custom Deck" option below
+// that routes into the existing DeckImport → DeckBuilder flow unchanged.
+export default function PreconSelect({ pool, onStart, onCustom, onEdit, onBack, competitiveMode, onToggleCompetitiveMode, aiDifficulty, onChangeAiDifficulty }) {
   const [error, setError] = useState(null);
 
-  const handlePick = (precon) => {
-    const { entries, effigyCounts, warnings } = resolvePreconEntries(pool, precon);
+  const handlePick = (deck) => {
+    const { entries, effigyCounts, warnings } = resolveDeckEntries(pool, deck.raw);
     const mainErrors = validateMainDeck(entries);
     if (mainErrors.length > 0) {
       setError(
-        `"${precon.name}" couldn't be built from the loaded card set` +
+        `"${deck.name}" couldn't be built from the loaded card set` +
         (warnings.length > 0 ? `: ${warnings.join(' ')}` : '.')
       );
       return;
@@ -24,6 +25,8 @@ export default function PreconSelect({ pool, onStart, onCustom, onBack, competit
     setError(null);
     onStart({ entries, effigyCounts });
   };
+
+  const handleEdit = (deck) => onEdit(toDeckSeed(deck));
 
   return (
     <div className="min-h-screen bg-black p-8">
@@ -91,28 +94,8 @@ export default function PreconSelect({ pool, onStart, onCustom, onBack, competit
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 mb-6">
-          {PRECON_DECKS.map((precon) => {
-            const accent = EFFIGY_TYPE_COLORS[precon.color] || '#9c6b1f';
-            const Icon = precon.icon;
-            return (
-              <button
-                key={precon.id}
-                onClick={() => handlePick(precon)}
-                className="flex flex-col items-center gap-3 p-7 bg-white rounded-xl shadow hover:shadow-lg transition-shadow border-2"
-                style={{ borderColor: accent }}
-              >
-                <span
-                  className="w-14 h-14 rounded-full flex items-center justify-center"
-                  style={{ backgroundColor: `${accent}22` }}
-                >
-                  <Icon className="w-7 h-7" style={{ color: accent }} />
-                </span>
-                <span className="text-lg font-semibold text-stone-800">{precon.name}</span>
-                <span className="text-xs text-stone-500">{precon.tagline}</span>
-              </button>
-            );
-          })}
+        <div className="mb-6">
+          <DeckLibraryGrid decks={buildDeckLibraryList()} onPick={handlePick} onEdit={handleEdit} />
         </div>
 
         {error && (

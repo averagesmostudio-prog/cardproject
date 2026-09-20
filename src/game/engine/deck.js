@@ -132,13 +132,14 @@ export const autoBuildEffigyCounts = (color) => {
   return counts;
 };
 
-// Resolves a preloaded deck's plain name+count list (precons.js) against a
-// loaded card pool — the same exact-then-case-insensitive name lookup
-// DeckBuilder's own manual "Import Deck List" already uses, so a precon
-// behaves exactly like a hand-picked deck once resolved (and degrades the
-// same way — a missing/ineligible card is skipped with a warning, not a
-// thrown error — if a custom CSV doesn't happen to carry every card in it).
-export const resolvePreconEntries = (pool, precon) => {
+// Resolves a preloaded or saved deck's plain name+count list (precons.js,
+// or a Library-saved deck record — same shape) against a loaded card pool —
+// the same exact-then-case-insensitive name lookup DeckBuilder's own manual
+// "Import Deck List" already uses, so either one behaves exactly like a
+// hand-picked deck once resolved (and degrades the same way — a
+// missing/ineligible card is skipped with a warning, not a thrown error —
+// if a custom CSV doesn't happen to carry every card in it).
+export const resolveDeckEntries = (pool, precon) => {
   const eligible = pool.filter(c => PHASE1_PLAYABLE_KINDS.includes(c.kind) && !c.isToken);
   const warnings = [];
   const entries = [];

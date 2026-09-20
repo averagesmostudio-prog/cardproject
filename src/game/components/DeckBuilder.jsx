@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Minus, Upload, Search, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, Minus, Upload, Search, X, ChevronLeft, ChevronRight, Save } from 'lucide-react';
 import { EFFIGY_COLORS, EFFIGY_TYPE_COLORS, getBorderTypeForCard, resolveCardArt, totalCastingCost } from '../../lib/cardData.js';
 import { parseDeckImport } from '../../lib/deckExport.js';
+import { saveDeck, updateDeck } from '../../lib/deckLibrary.js';
 import { renderCardOnCanvas, DEFAULT_POSITIONS } from '../../lib/cardRender.js';
 import { useCardFont, useBorderImages, useCardArtImages } from '../../lib/useCardAssets.js';
 import {
   PHASE1_PLAYABLE_KINDS, MAIN_DECK_SIZE, MAX_COPIES, MAX_DEITY_COPIES,
-  EFFIGY_DECK_SIZE, validateMainDeck, validateEffigyDeck,
+  EFFIGY_DECK_SIZE, validateMainDeck, validateEffigyDeck, resolveDeckEntries,
 } from '../engine/deck.js';
 import CardThumbnail from './CardThumbnail.jsx';
 
@@ -53,7 +54,7 @@ const filterCards = (cards, search) => {
   }));
 };
 
-export default function DeckBuilder({ pool, onStart, onBack }) {
+export default function DeckBuilder({ pool, seedDeck, onStart, onSaveComplete, onBack }) {
   const eligible = useMemo(
     () => pool.filter(c => PHASE1_PLAYABLE_KINDS.includes(c.kind) && !c.isToken),
     [pool]
@@ -64,7 +65,27 @@ export default function DeckBuilder({ pool, onStart, onBack }) {
     EFFIGY_COLORS.forEach(color => { c[color] = 0; });
     return c;
   });
+  const [deckName, setDeckName] = useState(seedDeck?.sourceName || '');
+  const [saveStatus, setSaveStatus] = useState('');
   const [importWarnings, setImportWarnings] = useState([]);
+
+  // Pre-populates once from a Library pick (precon or saved deck) — still
+  // fully editable afterward. Runs again if seedDeck's identity changes
+  // (a fresh "New Deck" passes null and clears back to empty) or once the
+  // pool actually finishes loading (Library.jsx loads it async on mount).
+  useEffect(() => {
+    if (!seedDeck) return;
+    if (pool.length === 0) return;
+    const { entries: resolved, effigyCounts: resolvedEffigy, warnings } = resolveDeckEntries(pool, {
+      entries: seedDeck.entries, effigyCounts: seedDeck.effigyCounts, color: seedDeck.color,
+    });
+    const nextCounts = {};
+    resolved.forEach(({ card, count }) => { nextCounts[card.id] = count; });
+    setCounts(nextCounts);
+    setEffigyCounts(resolvedEffigy);
+    if (warnings.length > 0) setImportWarnings(warnings);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seedDeck, pool]);
   const [search, setSearch] = useState('');
   const [viewMode, setViewMode] = useState('list'); // 'list' | 'visual' | 'deck'
   const [sortBy, setSortBy] = useState('none'); // 'none' | 'name' | 'effigyType' | 'cost'
@@ -230,6 +251,24 @@ export default function DeckBuilder({ pool, onStart, onBack }) {
   const setEffigyDirect = (color, value) => {
     const n = Math.max(0, Math.floor(Number(value)) || 0);
     setEffigyCounts(prev => ({ ...prev, [color]: n }));
+  };
+
+  // Flattens {card,count} to the plain {name,count} shape precons.js and a
+  // saved-deck record both store, so it round-trips through
+  // resolveDeckEntries unchanged the next time this deck is picked or
+  // edited — same shape buildDeckExport's own JSON export uses.
+  const flatEntries = () => entries.map(({ card, count }) => ({ name: card.name, count }));
+
+  const handleSaveNew = () => {
+    const saved = saveDeck({ name: deckName, entries: flatEntries(), effigyCounts });
+    setSaveStatus(`Saved to Library as "${saved.name}".`);
+    onSaveComplete?.();
+  };
+
+  const handleUpdate = () => {
+    const updated = updateDeck(seedDeck.sourceId, { name: deckName, entries: flatEntries(), effigyCounts });
+    setSaveStatus(`Updated "${updated.name}" in the Library.`);
+    onSaveComplete?.();
   };
 
   if (eligible.length === 0) {
@@ -488,13 +527,62 @@ export default function DeckBuilder({ pool, onStart, onBack }) {
           )}
         </div>
 
-        <button
-          onClick={() => onStart({ entries, effigyCounts })}
-          disabled={!canStart}
-          className="w-full py-3 bg-stone-800 text-white rounded-lg font-medium disabled:opacity-30"
-        >
-          Start Match vs. AI
-        </button>
+        <div className="bg-white rounded-lg shadow p-4 mb-6">
+          <h2 className="font-semibold text-stone-700 mb-3">Save to Library</h2>
+          <div className="flex items-center gap-2 mb-3">
+            <input
+              type="text"
+              value={deckName}
+              onChange={(e) => { setDeckName(e.target.value); setSaveStatus(''); }}
+              placeholder="Name this deck…"
+              className="flex-1 px-3 py-1.5 text-sm border border-stone-300 rounded focus:outline-none focus:ring-1 focus:ring-stone-400"
+            />
+          </div>
+          {!canStart && (
+            <p className="text-xs text-stone-400 mb-2">Fix the errors above before saving.</p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            {seedDeck?.source === 'saved' ? (
+              <>
+                <button
+                  onClick={handleUpdate}
+                  disabled={!canStart}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-stone-800 text-white rounded-lg text-sm font-medium disabled:opacity-30"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  Update
+                </button>
+                <button
+                  onClick={handleSaveNew}
+                  disabled={!canStart}
+                  className="px-4 py-2 border border-stone-300 rounded-lg text-sm font-medium text-stone-700 disabled:opacity-30"
+                >
+                  Save As New
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={handleSaveNew}
+                disabled={!canStart}
+                className="inline-flex items-center gap-1.5 px-4 py-2 bg-stone-800 text-white rounded-lg text-sm font-medium disabled:opacity-30"
+              >
+                <Save className="w-3.5 h-3.5" />
+                Save to Library
+              </button>
+            )}
+          </div>
+          {saveStatus && <p className="text-xs text-emerald-700 mt-2">{saveStatus}</p>}
+        </div>
+
+        {onStart && (
+          <button
+            onClick={() => onStart({ entries, effigyCounts })}
+            disabled={!canStart}
+            className="w-full py-3 bg-stone-800 text-white rounded-lg font-medium disabled:opacity-30"
+          >
+            Start Match vs. AI
+          </button>
+        )}
       </div>
 
       {previewIndex !== -1 && previewSource[previewIndex] && (() => {

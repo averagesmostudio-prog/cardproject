@@ -8,7 +8,7 @@ import { createInitialState } from '../engine/actions.js';
 import {
   buildMainDeckList, buildEffigyDeckList,
   autoBuildMainDeckEntries, autoBuildEffigyCounts, randomEffigyColor,
-  resolvePreconEntries, validateMainDeck,
+  resolveDeckEntries, validateMainDeck,
 } from '../engine/deck.js';
 import { PRECON_DECKS } from '../decks/precons.js';
 
@@ -26,7 +26,7 @@ const pickAiDeck = (pool, aiDifficulty) => {
     const tierDecks = PRECON_DECKS.filter((p) => p.aiDifficulty === aiDifficulty);
     const shuffled = [...tierDecks].sort(() => Math.random() - 0.5);
     for (const precon of shuffled) {
-      const { entries, effigyCounts } = resolvePreconEntries(pool, precon);
+      const { entries, effigyCounts } = resolveDeckEntries(pool, precon);
       if (validateMainDeck(entries).length === 0) return { entries, effigyCounts };
     }
   }
@@ -40,6 +40,9 @@ export default function GameApp({ onExitToMenu }) {
   const [matchState, setMatchState] = useState(null);
   const [matchKey, setMatchKey] = useState(0);
   const [lastConfig, setLastConfig] = useState(null);
+  // Set when DeckBuilder should open pre-populated from a Library pick
+  // (precon or saved deck) instead of empty — see PreconSelect's onEdit.
+  const [seedDeck, setSeedDeck] = useState(null);
   // Casual (default) leaves the Ethereal Conjuring reactive window
   // (Match.jsx) open indefinitely, same as before this toggle existed.
   // Competitive turns on its 20s-then-10s auto-decline timer.
@@ -102,7 +105,8 @@ export default function GameApp({ onExitToMenu }) {
       <PreconSelect
         pool={pool}
         onStart={handleStart}
-        onCustom={() => setScreen('build')}
+        onCustom={() => { setSeedDeck(null); setScreen('build'); }}
+        onEdit={(seed) => { setSeedDeck(seed); setScreen('build'); }}
         onBack={onExitToMenu}
         competitiveMode={competitiveMode}
         onToggleCompetitiveMode={setCompetitiveMode}
@@ -112,7 +116,7 @@ export default function GameApp({ onExitToMenu }) {
     );
   }
   if (screen === 'build') {
-    return <DeckBuilder pool={pool} onStart={handleStart} onBack={() => setScreen('select')} />;
+    return <DeckBuilder pool={pool} seedDeck={seedDeck} onStart={handleStart} onBack={() => setScreen('select')} />;
   }
   if (screen === 'coinflip') {
     // key forces a fresh flip (and fresh random caller) on every rematch.

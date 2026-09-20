@@ -217,7 +217,7 @@ function SettingsModal({ onClose }) {
   );
 }
 
-export default function Landing({ onSelectGenerator, onSelectGame, onSelectPack }) {
+export default function Landing({ onSelectLibrary, onSelectGame, onSelectPack }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   return (
@@ -261,12 +261,12 @@ export default function Landing({ onSelectGenerator, onSelectGame, onSelectPack 
             <span className="text-xs text-stone-400">Build a deck and play against the AI</span>
           </button>
           <button
-            onClick={onSelectGenerator}
+            onClick={onSelectLibrary}
             className="flex flex-col items-center gap-3 p-8 bg-white rounded-xl shadow hover:shadow-lg transition-shadow border border-stone-200"
           >
             <InkwellQuillIcon className="h-24 w-auto" />
-            <span className="text-lg font-semibold text-stone-800">Build</span>
-            <span className="text-xs text-stone-400">Design and export card art from a CSV</span>
+            <span className="text-lg font-semibold text-stone-800">Library</span>
+            <span className="text-xs text-stone-400">Manage decks, browse precons, and design card art</span>
           </button>
         </div>
       </div>
