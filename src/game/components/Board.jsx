@@ -4,6 +4,7 @@ import { effectiveStrength } from '../../game/engine/combat.js';
 import { animatedTopEntry, actorView } from '../../game/engine/actions.js';
 import { EFFIGY_COLORS, EFFIGY_TYPE_COLORS } from '../../lib/cardData.js';
 import CardTile from './CardTile.jsx';
+import CardThumbnail from './CardThumbnail.jsx';
 
 const cellOwner = (id, cellMap) => {
   if (id === cellMap.A) return 'A';
@@ -229,6 +230,41 @@ function ModulateHourglass({ seq }) {
   );
 }
 
+// Board.jsx's Deity-summon cinematic (useStagedBoard.js > useDeitySummonCinematic)
+// — a Deity landing gets a grander drop-in-and-land moment than a plain
+// Being's instant appearance: a full-portrait CardThumbnail (the same
+// off-board frame the mulligan screen's own hover preview uses — Match.jsx,
+// not CardTile's compact on-board one) falls in oversized, bounces to rest,
+// then fades to reveal the tile's own already-present CardTile underneath.
+// Rendered ABOVE the occupant (z-[40], comfortably clear of every other
+// per-cell overlay's z-index but still below CardTile's own fixed z-[70]
+// hover popup) rather than replacing it, so there's no gap/placeholder
+// state to manage — the real compact tile is already there the whole time,
+// just briefly covered. `overflow-visible` (unlike the other one-shot
+// overlays here) is deliberate: the oversized falling card is meant to
+// spill past the tile's own bounds while it's still falling. One shot,
+// keyed on `seq`, gold/amber to read as "legendary" — a color no other
+// keyword effect on this board uses.
+function DeitySummonCinematic({ seq, card, borderImages, borderImagesLoaded, artImages, artBorderImages, artImagesLoaded, fontLoaded }) {
+  if (!seq) return null;
+  return (
+    <div key={`deity-${seq}`} className="absolute inset-0 z-[40] flex items-center justify-center pointer-events-none overflow-visible">
+      <div className="deity-summon-impact absolute inset-0 rounded" />
+      <div className="deity-summon-card-fall w-24">
+        <CardThumbnail
+          card={card}
+          borderImages={borderImages}
+          borderImagesLoaded={borderImagesLoaded}
+          artImages={artImages}
+          artBorderImages={artBorderImages}
+          artImagesLoaded={artImagesLoaded}
+          fontLoaded={fontLoaded}
+        />
+      </div>
+    </div>
+  );
+}
+
 function EffigyZoneBreakdown({ pool }) {
   const counts = {};
   pool.forEach(e => { counts[e.effigyType] = (counts[e.effigyType] || 0) + 1; });
@@ -258,7 +294,7 @@ function EffigyZoneBreakdown({ pool }) {
   );
 }
 
-export default function Board({ state, displayBoard, flashes, lastAttack, lastMartyr, lastEngageGlow, vortexCells, departCells, lastModulate, viewerId, highlightCells, selectedCell, toggledCells, respondingCellId, onCellClick, onCellDoubleClick, borderImages, borderImagesLoaded, artImages, artBorderImages, artImagesLoaded, fontLoaded }) {
+export default function Board({ state, displayBoard, flashes, lastAttack, lastMartyr, lastEngageGlow, vortexCells, departCells, lastModulate, deityCells, viewerId, highlightCells, selectedCell, toggledCells, respondingCellId, onCellClick, onCellDoubleClick, borderImages, borderImagesLoaded, artImages, artBorderImages, artImagesLoaded, fontLoaded }) {
   const rows = [];
   // `displayBoard` (useStagedBoard.js) is a momentarily-lagged view of
   // state.board for a Being that just took damage or died — falls back to
@@ -324,6 +360,9 @@ export default function Board({ state, displayBoard, flashes, lastAttack, lastMa
       // `lastModulate` (useGameEngine.js) — a Time Counter on this specific
       // tile's occupant was just Modulated.
       const modulateSeq = lastModulate?.cellId === id ? lastModulate.seq : null;
+      // `deityCells` (useStagedBoard.js > useDeitySummonCinematic) — a
+      // Deity just landed on this specific tile.
+      const deityEntry = deityCells?.[id];
 
       cells.push(
         <div
@@ -340,6 +379,18 @@ export default function Board({ state, displayBoard, flashes, lastAttack, lastMa
           )}
           <DepartBones seq={departSeq} />
           <ModulateHourglass seq={modulateSeq} />
+          {deityEntry && (
+            <DeitySummonCinematic
+              seq={deityEntry.seq}
+              card={deityEntry.card}
+              borderImages={borderImages}
+              borderImagesLoaded={borderImagesLoaded}
+              artImages={artImages}
+              artBorderImages={artBorderImages}
+              artImagesLoaded={artImagesLoaded}
+              fontLoaded={fontLoaded}
+            />
+          )}
           {occupant?.type === 'being' && (
             <div
               key={isAttacking ? `atk-${lastAttack.seq}` : undefined}

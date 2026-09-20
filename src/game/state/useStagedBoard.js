@@ -356,3 +356,63 @@ export const useDepartFlash = (board, log) => {
 
   return departCells;
 };
+
+const DEITY_CINEMATIC_MS = 1200;
+
+// Board.jsx's Deity-summon cinematic — a Deity is the one card type
+// RULES.md itself singles out as "legendary/powerful" (it also skips the
+// usual summoning-sickness engage, and is the only card type with its own
+// legend rule), so this marks the moment with a grander drop-in-and-land
+// animation than a plain Being's instant appearance, instead of a new
+// staged-board placeholder (useStagedBoard above) or a seq-keyed decal
+// alone. Every real placement path — hand-cast, reanimate, Invoke,
+// Deja-Vu-style bounce-and-resummon, a sacrifice-cost resolution — funnels
+// through the reducer's own placeBeingOnBoard, so diffing the board for a
+// cellId whose occupant just became a fresh Deity instanceId (same
+// prevBoard-vs-board shape useShiftVortex already uses, not a permanent
+// "ever seen" set — a Deity can leave and return to the board more than
+// once) catches all of them by construction, the same way Shift/Depart's
+// own board diffs do. Carries the occupant's own `card` through (not just
+// a boolean), since the overlay renders a real CardThumbnail of it.
+export const useDeitySummonCinematic = (board) => {
+  const prevBoardRef = useRef(board);
+  const [deityCells, setDeityCells] = useState({});
+  const timersRef = useRef({});
+
+  useEffect(() => {
+    const prevBoard = prevBoardRef.current;
+    prevBoardRef.current = board;
+    if (prevBoard === board) return undefined;
+
+    const fresh = [];
+    Object.entries(board || {}).forEach(([cellId, occupant]) => {
+      if (occupant?.type !== 'being' || !occupant.card?.isDeity) return;
+      const prevOccupant = prevBoard?.[cellId];
+      const prevInstanceId = prevOccupant?.type === 'being' && prevOccupant.card?.instanceId;
+      if (prevInstanceId === occupant.card.instanceId) return;
+      fresh.push({ cellId, card: occupant.card });
+    });
+    if (fresh.length === 0) return undefined;
+
+    setDeityCells(prev => {
+      const next = { ...prev };
+      fresh.forEach(({ cellId, card }) => { next[cellId] = { card, seq: (next[cellId]?.seq || 0) + 1 }; });
+      return next;
+    });
+    fresh.forEach(({ cellId }) => {
+      if (timersRef.current[cellId]) clearTimeout(timersRef.current[cellId]);
+      timersRef.current[cellId] = setTimeout(() => {
+        setDeityCells(prev => {
+          const { [cellId]: _dropped, ...rest } = prev;
+          return rest;
+        });
+        delete timersRef.current[cellId];
+      }, DEITY_CINEMATIC_MS);
+    });
+    return undefined;
+  }, [board]);
+
+  useEffect(() => () => { Object.values(timersRef.current).forEach(clearTimeout); }, []);
+
+  return deityCells;
+};

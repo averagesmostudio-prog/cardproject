@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { History, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Flag, Eye, EyeOff } from 'lucide-react';
 import { useGameEngine } from '../state/useGameEngine.js';
-import { useStagedBoard, useStagedLife, useTurnBanner, useJustDrawn, useShiftVortex, useDepartFlash } from '../state/useStagedBoard.js';
+import { useStagedBoard, useStagedLife, useTurnBanner, useJustDrawn, useShiftVortex, useDepartFlash, useDeitySummonCinematic } from '../state/useStagedBoard.js';
 import { getLegalActions, effectiveEngage, animatedTopEntry, effectiveCastingCost, faithlessPaymentNeedsChoice, faithlessPaymentCandidates, searchZoneCandidates } from '../engine/actions.js';
 import { effectiveStrength } from '../engine/combat.js';
 import { STARTING_LIFESPAN } from '../engine/constants.js';
@@ -381,6 +381,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
   const justDrawnIds = useJustDrawn(state.players[HUMAN].hand);
   const vortexCells = useShiftVortex(state.board);
   const departCells = useDepartFlash(state.board, state.log);
+  const deityCells = useDeitySummonCinematic(state.board);
   const [selectedHand, setSelectedHand] = useState(null);
   const [selectedCell, setSelectedCell] = useState(null);
   // Set when the human clicks a highlighted Modulate target that offers
@@ -2715,6 +2716,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
             lastModulate={lastModulate}
             vortexCells={vortexCells}
             departCells={departCells}
+            deityCells={deityCells}
             viewerId={HUMAN}
             highlightCells={highlightCells}
             selectedCell={selectedCell}
