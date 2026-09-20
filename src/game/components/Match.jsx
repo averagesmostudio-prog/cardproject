@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { History, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Flag, Eye, EyeOff } from 'lucide-react';
 import { useGameEngine } from '../state/useGameEngine.js';
-import { useStagedBoard, useStagedLife, useTurnBanner, useJustDrawn, useShiftVortex, useDepartFlash, useDeitySummonCinematic } from '../state/useStagedBoard.js';
+import { useStagedBoard, useStagedLife, useTurnBanner, useJustDrawn, useShiftVortex, useDepartFlash, useDeitySummonCinematic, useOpenLaneStrike } from '../state/useStagedBoard.js';
 import { getLegalActions, effectiveEngage, animatedTopEntry, effectiveCastingCost, faithlessPaymentNeedsChoice, faithlessPaymentCandidates, searchZoneCandidates } from '../engine/actions.js';
 import { effectiveStrength } from '../engine/combat.js';
 import { STARTING_LIFESPAN } from '../engine/constants.js';
@@ -45,12 +45,19 @@ const lifeColor = (value) => {
 // after a direct hit to this player's Lifespan — same staged-pause /
 // starburst treatment Board.jsx's DamageFlash gives a damaged Being, just
 // sized down to sit next to a number instead of over a whole board tile.
-// `targetAction`, when set, means this life total is a legal "any target"
-// destination right now (Sharpshoot-style direct damage, restore-lifespan
-// -target) — the whole badge becomes a clickable, highlighted target
-// instead of the separate "A's Lifespan" / "B's Lifespan" buttons this
-// used to need.
-function LifeBadge({ value, flash, targetAction, onSelectTarget }) {
+// `strike` (useStagedBoard.js > useOpenLaneStrike) is a separate, coarser
+// signal: `flash` alone fires for ANY Lifespan drop, a paid cost included,
+// so it can't by itself read as "you got hit" — `strike` is set only for
+// the one case that's actually combat reaching this player's face
+// undefended (an open lane, or a Relic/inert Armament that doesn't
+// block), and drives a bigger red pulse behind the whole number plus a
+// quick jolt, layered underneath it (z-0 vs the number's own z-10) so the
+// digits stay readable through the flash. `targetAction`, when set, means
+// this life total is a legal "any target" destination right now
+// (Sharpshoot-style direct damage, restore-lifespan-target) — the whole
+// badge becomes a clickable, highlighted target instead of the separate
+// "A's Lifespan" / "B's Lifespan" buttons this used to need.
+function LifeBadge({ value, flash, strike, targetAction, onSelectTarget }) {
   return (
     <div
       className={`relative text-center leading-tight rounded-lg transition ${targetAction ? 'cursor-pointer ring-2 ring-green-400 ring-offset-2 ring-offset-black animate-pulse hover:bg-green-400/10' : ''}`}
@@ -70,8 +77,19 @@ function LifeBadge({ value, flash, targetAction, onSelectTarget }) {
           </div>
         </div>
       )}
-      <div className="text-5xl font-extrabold" style={{ color: lifeColor(value) }}>{value}</div>
-      <div className="text-xs text-stone-400 uppercase tracking-wide">Life</div>
+      {strike && (
+        <div key={`hit-${strike}`} className="absolute inset-0 z-0 flex items-center justify-center pointer-events-none">
+          <div className="w-20 h-20 rounded-full life-direct-hit-flash" />
+        </div>
+      )}
+      <div
+        key={strike ? `num-${strike}` : undefined}
+        className={`relative z-10 text-5xl font-extrabold ${strike ? 'life-direct-hit-shake' : ''}`}
+        style={{ color: lifeColor(value) }}
+      >
+        {value}
+      </div>
+      <div className="relative z-10 text-xs text-stone-400 uppercase tracking-wide">Life</div>
     </div>
   );
 }
@@ -382,6 +400,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
   const vortexCells = useShiftVortex(state.board);
   const departCells = useDepartFlash(state.board, state.log);
   const deityCells = useDeitySummonCinematic(state.board);
+  const openLaneStrikes = useOpenLaneStrike(state.log);
   const [selectedHand, setSelectedHand] = useState(null);
   const [selectedCell, setSelectedCell] = useState(null);
   // Set when the human clicks a highlighted Modulate target that offers
@@ -2702,7 +2721,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
             </div>
             <div className={`${ETHEREAL_ROW_H} flex items-center justify-start gap-2`}>
               <div className="w-14 shrink-0" />
-              <LifeBadge value={displayLifespans[AI]} flash={lifeFlashes[AI]} targetAction={playerTargetActionFor(AI)} onSelectTarget={dispatch} />
+              <LifeBadge value={displayLifespans[AI]} flash={lifeFlashes[AI]} strike={openLaneStrikes[AI]} targetAction={playerTargetActionFor(AI)} onSelectTarget={dispatch} />
             </div>
           </div>
 
@@ -2741,7 +2760,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
                 abilityActionBanners near selectedHandImmediateAction. */}
             <div className="flex-1" />
             <div className={`${ETHEREAL_ROW_H} flex items-center justify-start gap-2`}>
-              <LifeBadge value={displayLifespans[HUMAN]} flash={lifeFlashes[HUMAN]} targetAction={playerTargetActionFor(HUMAN)} onSelectTarget={dispatch} />
+              <LifeBadge value={displayLifespans[HUMAN]} flash={lifeFlashes[HUMAN]} strike={openLaneStrikes[HUMAN]} targetAction={playerTargetActionFor(HUMAN)} onSelectTarget={dispatch} />
             </div>
             <div className={`${ROW_H} flex items-center justify-start gap-2`}>
               <CardPile

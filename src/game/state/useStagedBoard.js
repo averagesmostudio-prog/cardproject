@@ -357,6 +357,64 @@ export const useDepartFlash = (board, log) => {
   return departCells;
 };
 
+const OPEN_LANE_STRIKE_MS = 500;
+
+// A regex, not a board diff: resolveAttackFrom's (actions.js) unblocked-
+// lane branch — a real open lane, or a Relic/inert Armament that doesn't
+// block either — never touches the DEFENDING side's `board` at all, so
+// there's nothing there to diff. It always logs the literal line
+// "<attacker> attacks into an open lane / past <X>, dealing <N> damage to
+// <player>." right when it actually applies that damage — and only then:
+// the same branch's Strike Down (`noDamage`) and Degrisch Vassal
+// (damage-prevented-into-Effigy) variants log different text and never
+// match this. Match.jsx's LifeBadge already gets a small damage-burst-pop
+// (useStagedLife above) for ANY Lifespan drop, cost payments included, so
+// that alone can't read as "you got hit" — this isolates the one case
+// that actually is combat reaching a player's face undefended, for a
+// bigger, more dramatic flourish reserved for just that.
+const OPEN_LANE_HIT_RE = /attacks into (?:an open lane|past .+?), dealing \d+ damage to ([AB])\.$/;
+
+export const useOpenLaneStrike = (log) => {
+  const prevLogLenRef = useRef(log.length);
+  const [strikes, setStrikes] = useState({});
+  const timersRef = useRef({});
+
+  useEffect(() => {
+    const prevLogLen = prevLogLenRef.current;
+    prevLogLenRef.current = log.length;
+    if (log.length === prevLogLen) return undefined;
+
+    const newMessages = log.slice(prevLogLen).map(entry => entry.message);
+    const hitPlayers = [];
+    newMessages.forEach(m => {
+      const match = OPEN_LANE_HIT_RE.exec(m);
+      if (match) hitPlayers.push(match[1]);
+    });
+    if (hitPlayers.length === 0) return undefined;
+
+    setStrikes(prev => {
+      const next = { ...prev };
+      hitPlayers.forEach(id => { next[id] = (next[id] || 0) + 1; });
+      return next;
+    });
+    hitPlayers.forEach(id => {
+      if (timersRef.current[id]) clearTimeout(timersRef.current[id]);
+      timersRef.current[id] = setTimeout(() => {
+        setStrikes(prev => {
+          const { [id]: _dropped, ...rest } = prev;
+          return rest;
+        });
+        delete timersRef.current[id];
+      }, OPEN_LANE_STRIKE_MS);
+    });
+    return undefined;
+  }, [log]);
+
+  useEffect(() => () => { Object.values(timersRef.current).forEach(clearTimeout); }, []);
+
+  return strikes;
+};
+
 const DEITY_CINEMATIC_MS = 1200;
 
 // Board.jsx's Deity-summon cinematic — a Deity is the one card type

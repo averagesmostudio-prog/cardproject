@@ -279,6 +279,34 @@
   animation: deity-summon-impact 1200ms ease-out both;
 }
 
+/* Match.jsx > LifeBadge "direct hit" flourish (useStagedBoard.js >
+   useOpenLaneStrike) — reserved for combat that actually reaches a
+   player's face undefended (an open lane, or a Relic/inert Armament that
+   doesn't block), never a plain Lifespan cost payment (that only ever
+   gets the existing small damage-burst-pop). A harder red pulse behind
+   the whole number, plus a quick jolt on the number itself — sized and
+   staged to read across the board rather than sit quietly in the corner
+   like the small burst does. */
+@keyframes life-direct-hit-flash {
+  0% { opacity: 0; transform: scale(0.5); }
+  30% { opacity: 0.85; transform: scale(1.3); }
+  100% { opacity: 0; transform: scale(1.6); }
+}
+.life-direct-hit-flash {
+  background: radial-gradient(circle, rgba(248,113,113,0.85) 0%, rgba(220,38,38,0.5) 45%, rgba(220,38,38,0) 75%);
+  animation: life-direct-hit-flash 500ms ease-out both;
+}
+@keyframes life-direct-hit-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-6px) rotate(-2deg); }
+  40% { transform: translateX(5px) rotate(2deg); }
+  60% { transform: translateX(-4px) rotate(-1deg); }
+  80% { transform: translateX(3px) rotate(1deg); }
+}
+.life-direct-hit-shake {
+  animation: life-direct-hit-shake 450ms ease-in-out both;
+}
+
 /* Match.jsx > useTurnBanner — a "Your Turn"/"Opponent's Turn" announcement
    at the start of each turn: a soft radial glow behind a pill banner,
    both popping in with a slight overshoot then holding before fading, in
