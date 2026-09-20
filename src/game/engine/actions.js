@@ -10030,7 +10030,19 @@ export const getLegalActions = (state, playerId) => {
     if (!moveLocked) {
       occupant.card.arrows.forEach(direction => {
         const toCellId = computeMoveDestination(playerId, cell, direction);
-        if (!toCellId || !emptyOrOwnArmamentStack(state.board[toCellId], playerId)) return;
+        if (!toCellId) return;
+        const waiting = state.board[toCellId];
+        // Dryad: mirrors MOVE_OR_ATTACK's own reducer branch (the "attaching"
+        // check there) — a Dryad Being moving onto another eligible own
+        // TreeFolk/Vine/Seed attaches instead of needing an empty/own-
+        // armament-stack destination. Without this, the reducer already
+        // allowed the move but this offer loop never surfaced it, so an
+        // occupied plant tile was never highlighted/clickable at all — a
+        // Dryad Being already carrying a mount still can't attach a SECOND
+        // one in the same move (occupant.dryadAttached), same as the
+        // reducer.
+        const attaching = !occupant.dryadAttached && dryadAttachTargetOk(waiting, playerId, occupant.card);
+        if (!emptyOrOwnArmamentStack(waiting, playerId) && !attaching) return;
         actions.push({ type: 'MOVE_OR_ATTACK', fromCellId: cell, toCellId, direction, isAttack: false });
       });
     }

@@ -1497,6 +1497,20 @@ describe('Dryad — "This Being may move onto another Being with the TreeFolk, V
     expect(next).toBe(state);
   });
 
+  it('getLegalActions actually offers the attach move — the reducer already allowed it, but the UI never surfaced an occupied-but-eligible tile as a legal destination', () => {
+    const state = baseState({ board: { r2c1: dryadBeing(), r2c2: seedBeing() }, players: { A: player(), B: player() } });
+    const legal = getLegalActions(state, 'A');
+    expect(legal).toContainEqual({ type: 'MOVE_OR_ATTACK', fromCellId: 'r2c1', toCellId: 'r2c2', direction: 3, isAttack: false });
+  });
+
+  it('getLegalActions does not offer a SECOND attach once the Dryad is already carrying a mount', () => {
+    const carrying = { ...dryadBeing(), card: { ...dryadBeing().card, arrows: [3] }, dryadAttached: { card: seedBeing().card, currentLifespan: 1, engaged: false } };
+    const anotherSeed = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'seed2#0', typing: 'Seed, Being' }), currentLifespan: 1, engaged: false };
+    const state = baseState({ board: { r2c1: carrying, r2c2: anotherSeed }, players: { A: player(), B: player() } });
+    const legal = getLegalActions(state, 'A');
+    expect(legal).not.toContainEqual(expect.objectContaining({ fromCellId: 'r2c1', toCellId: 'r2c2' }));
+  });
+
   it('leaves the attached mount behind on the origin tile when it moves away again (a mount is a shared tile position, not worn equipment)', () => {
     const carrying = { ...dryadBeing(), card: { ...dryadBeing().card, arrows: [3] }, dryadAttached: { card: seedBeing().card, currentLifespan: 1, engaged: false } };
     const state = baseState({ board: { r2c1: carrying }, players: { A: player(), B: player() } });
