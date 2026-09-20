@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { History, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Flag } from 'lucide-react';
+import { History, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Flag, Eye, EyeOff } from 'lucide-react';
 import { useGameEngine } from '../state/useGameEngine.js';
 import { useStagedBoard, useStagedLife, useTurnBanner, useJustDrawn } from '../state/useStagedBoard.js';
 import { getLegalActions, effectiveEngage, animatedTopEntry, effectiveCastingCost, faithlessPaymentNeedsChoice, faithlessPaymentCandidates, searchZoneCandidates } from '../engine/actions.js';
@@ -386,6 +386,15 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
   // sign, so a tiny inline prompt (in the Modulate banner, below) asks for
   // just that one cell instead of falling back to a full-screen modal.
   const [modulateDeltaCell, setModulateDeltaCell] = useState(null);
+  // "View Board" for the ~27 full-screen choice popups (Invoke, discard,
+  // search results, the numeric picker, ...) — those all share the exact
+  // same "fixed inset-0" wrapper, now conditionally `hidden` (not
+  // unmounted, so nothing about the choice itself is lost) while this is
+  // true. Reset to false below whenever a NEW choice opens, so hiding one
+  // choice's popup never leaves a LATER, unrelated choice silently hidden.
+  // Viewer-style popups (hand/Purgatory/armament zoom, already dismissable
+  // via their own X button) intentionally don't participate.
+  const [popupHidden, setPopupHidden] = useState(false);
   const [expandedCell, setExpandedCell] = useState(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   // `.slice(-30)` on every render would otherwise hand ActionLog a brand
@@ -444,6 +453,12 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
   // the small picker below (see dispatchWithPaymentCheck).
   const [pendingPaymentAction, setPendingPaymentAction] = useState(null); // { action, cost, cardName }
   const [selectedPaymentIds, setSelectedPaymentIds] = useState([]);
+  // popupHidden (View Board) resets whenever a NEW choice-popup-worthy
+  // state appears — covers every pendingChoice-driven popup (27 of the 27)
+  // plus the one local-state exception, pendingPaymentAction, which isn't
+  // itself a pendingChoice.
+  useEffect(() => { setPopupHidden(false); }, [state.pendingChoice]);
+  useEffect(() => { setPopupHidden(false); }, [pendingPaymentAction]);
   // A pending "search deck/Purgatory" choice defaults to showing only the
   // legal targets (the common case — usually a handful of matches); this
   // toggles to browsing every card in that zone instead, e.g. to double
@@ -1637,6 +1652,19 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
 
   return (
     <div className="h-screen bg-black p-4 flex flex-col gap-3 relative overflow-hidden">
+      {/* "View Board" — lets the player peek at the board without losing
+          (or resolving) whatever choice popup is currently open. `fixed`
+          (not `absolute`) and z-[60] so it stays clickable above every
+          popup's own z-50, regardless of which one is showing. */}
+      {(state.pendingChoice || pendingPaymentAction) && (
+        <button
+          onClick={() => setPopupHidden(h => !h)}
+          className="fixed top-4 right-4 z-[60] flex items-center gap-1.5 px-3 py-1.5 bg-stone-800 border border-stone-600 text-white rounded-lg text-xs font-semibold shadow-lg hover:bg-stone-700 transition"
+        >
+          {popupHidden ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+          {popupHidden ? 'Show Choice' : 'View Board'}
+        </button>
+      )}
       {turnBanner && (
         <div
           key={`turn-${turnBanner.seq}`}
@@ -1710,7 +1738,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
           });
         };
         return (
-          <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={() => setPendingPaymentAction(null)}>
+          <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`} onClick={() => setPendingPaymentAction(null)}>
             <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
               <div className="font-semibold text-stone-800 mb-1">
                 {pendingPaymentAction.cardName}: choose {needed} Effigy{needed === 1 ? '' : 's'} to spend
@@ -1771,7 +1799,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
         const legalIds = new Set(pendingChoiceCandidates.map(c => c.instanceId));
         const shownCards = searchShowAll ? pendingChoiceAllInZone : pendingChoiceCandidates;
         return (
-          <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
             <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
               <div className="flex items-center justify-between gap-2 mb-1">
                 <div className="font-semibold text-stone-800">
@@ -1813,7 +1841,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       })()}
 
       {pendingInvokeCardCandidates.length > 0 && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
           <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose which to invoke
@@ -1835,7 +1863,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
 
       {pendingCreateTokenChoiceCandidates.length > 0 && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
           <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose a token to create
@@ -1864,7 +1892,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
 
       {pendingBottomOfDeckCandidates.length > 0 && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
           <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose a card
@@ -1886,7 +1914,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
 
       {pendingDiscardKindDrawCandidates.length > 0 && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
           <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose a card to discard
@@ -1908,7 +1936,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
 
       {pendingDiscardTypedCandidates.length > 0 && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
           <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose a {state.pendingChoice.typing} to discard
@@ -1929,7 +1957,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
 
       {pendingDiscardCostReductionCandidates.length > 0 && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
           <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose a card to discard
@@ -1953,7 +1981,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       {pendingDiscardXNamedCandidates.length > 0 && (() => {
         const selected = state.pendingChoice.selected;
         return (
-          <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
             <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col gap-2">
               <div className="font-semibold text-stone-800 mb-1">
                 {state.pendingChoice.cardName}: choose how many {state.pendingChoice.name} to discard
@@ -1988,7 +2016,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       })()}
 
       {state.pendingChoice?.kind === 'shuffle-or-keep' && state.pendingChoice.playerId === HUMAN && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
           <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full flex flex-col gap-3">
             <div>
               <div className="font-semibold text-stone-800 mb-1">{state.pendingChoice.cardName}</div>
@@ -2013,7 +2041,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
 
       {state.pendingChoice?.kind === 'teeth-bounds-tie-choice' && state.pendingChoice.playerId === HUMAN && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
           <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full flex flex-col gap-3">
             <div>
               <div className="font-semibold text-stone-800 mb-1">{state.pendingChoice.cardName}</div>
@@ -2042,7 +2070,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
         const max = state.pendingChoice[numericChoice.max] ?? 0;
         const options = Array.from({ length: max + 1 }, (_, n) => n);
         return (
-          <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
             <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full flex flex-col gap-3">
               <p className="text-xs text-stone-500">{numericChoice.prompt(state.pendingChoice)}</p>
               <div className="flex items-center gap-2">
@@ -2066,7 +2094,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       })()}
 
       {pendingSacrificeArmamentCandidates.length > 0 && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
           <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose an Armament to sacrifice
@@ -2090,7 +2118,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       {pendingShufflePurgatoryToggleCandidates.length > 0 && (() => {
         const { selected, maxCount } = state.pendingChoice;
         return (
-          <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
             <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
               <div className="font-semibold text-stone-800 mb-1">
                 {state.pendingChoice.cardName}: choose up to {maxCount} to shuffle in
@@ -2131,7 +2159,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       })()}
 
       {pendingMoveArmamentSourceCandidates.length > 0 && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
           <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose an Armament to move
@@ -2152,7 +2180,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
 
       {pendingSacrificeArmamentDamageCandidates.length > 0 && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
           <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose an Armament to sacrifice
@@ -2175,7 +2203,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
 
       {pendingDestroyArmamentCandidates.length > 0 && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
           <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose an Armament to destroy
@@ -2196,7 +2224,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
 
       {pendingDestroyRelicCandidates.length > 0 && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
           <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose a Relic to destroy
@@ -2217,7 +2245,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
 
       {pendingSacrificeRelicCostCandidates.length > 0 && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
           <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose a Relic to sacrifice
@@ -2238,7 +2266,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
 
       {(pendingSacrificeDestroyCandidates.length > 0 || (pendingChoiceIsOptional && state.pendingChoice.kind === 'sacrifice-destroy')) && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
           <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col gap-2">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: sacrifice a Prophecy to destroy a Being?
@@ -2266,7 +2294,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
 
 
       {state.pendingChoice?.kind === 'shuffle-or-draw' && state.pendingChoice.playerId === HUMAN && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
           <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full flex flex-col gap-3">
             <div className="font-semibold text-stone-800 mb-1">{state.pendingChoice.cardName}</div>
             <div className="flex gap-2">
@@ -2288,7 +2316,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
 
       {state.pendingChoice?.kind === 'restore-or-summon-vine' && state.pendingChoice.playerId === HUMAN && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
           <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full flex flex-col gap-3">
             <div className="font-semibold text-stone-800 mb-1">{state.pendingChoice.cardName}</div>
             <div className="flex gap-2">
@@ -2310,7 +2338,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
 
       {state.pendingChoice?.kind === 'choose-essence-color' && state.pendingChoice.playerId === HUMAN && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
           <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full flex flex-col gap-3">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose a color of Essence
@@ -2447,7 +2475,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       })()}
 
       {pendingShufflePurgatoryCandidates.length > 0 && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
           <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose a card to shuffle into {state.pendingChoice.anyOwner ? "its owner's" : 'your'} deck
@@ -2468,7 +2496,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
 
       {pendingSummonFromPurgatoryCandidates.length > 0 && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
           <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose a Being to summon
@@ -2492,7 +2520,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
 
       {pendingSummonFromPurgatoryCostCandidates.length > 0 && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
           <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose a Being to summon
@@ -2516,7 +2544,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
 
       {pendingSummonDifferentTypedCandidates.length > 0 && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
           <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose a different {state.pendingChoice.typing} to summon
