@@ -62,6 +62,25 @@
   animation: card-draw-in 450ms ease-out both;
 }
 
+/* Board.jsx > isMartyred (useGameEngine.js > lastMartyr) — Martyr sacrifices
+   the Being to trigger its effect, so by the time this plays the tile is
+   already empty (or holding whatever comes next); the glow washes the bare
+   tile itself rather than the card, and plays once per activation (keyed
+   on `seq`) rather than looping the way FavoredBubble's persistent shield
+   does above. A different color (red, matching a sacrifice/death read)
+   than FavoredBubble's protective gold, so the two keyword effects never
+   look interchangeable at a glance. */
+@keyframes martyr-glow {
+  0% { opacity: 0; }
+  25% { opacity: 1; }
+  70% { opacity: 0.85; }
+  100% { opacity: 0; }
+}
+.martyr-glow {
+  background: radial-gradient(circle, rgba(220,38,38,0.7) 0%, rgba(153,27,27,0.4) 55%, rgba(153,27,27,0) 78%);
+  animation: martyr-glow 900ms ease-out both;
+}
+
 /* Board.jsx > FavoredBubble — Favored (RULES.md > Keywords) is a persistent
    "next hit is prevented" shield, not a one-off trigger, so this loops for
    as long as the Being holds it rather than playing once. Two layered

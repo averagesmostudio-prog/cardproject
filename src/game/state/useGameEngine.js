@@ -16,10 +16,21 @@ export const useGameEngine = (initialState, aiPlayer = 'B') => {
   // Board.jsx's remount-to-replay trick (keying on it) always fires.
   const attackSeqRef = useRef(0);
   const [lastAttack, setLastAttack] = useState(null);
+  // Same shape/precedent as lastAttack above, for Board.jsx's Martyr glow —
+  // keyed off the dispatched ACTIVATE_MARTYR action's own cellId rather
+  // than diffed from the resulting state, since the sacrificed Being is
+  // already gone from `board` by the time the reducer returns (nothing left
+  // there to diff against).
+  const martyrSeqRef = useRef(0);
+  const [lastMartyr, setLastMartyr] = useState(null);
   const dispatchTracked = useCallback((action) => {
     if (action?.type === 'MOVE_OR_ATTACK' && action.isAttack) {
       attackSeqRef.current += 1;
       setLastAttack({ fromCellId: action.fromCellId, toCellId: action.toCellId, seq: attackSeqRef.current });
+    }
+    if (action?.type === 'ACTIVATE_MARTYR') {
+      martyrSeqRef.current += 1;
+      setLastMartyr({ cellId: action.cellId, seq: martyrSeqRef.current });
     }
     dispatch(action);
   }, []);
@@ -47,5 +58,5 @@ export const useGameEngine = (initialState, aiPlayer = 'B') => {
     return () => clearTimeout(timer);
   }, [state, aiPlayer, dispatchTracked]);
 
-  return [state, dispatchTracked, lastAttack];
+  return [state, dispatchTracked, lastAttack, lastMartyr];
 };

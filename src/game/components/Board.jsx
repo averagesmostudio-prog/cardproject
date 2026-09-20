@@ -176,7 +176,7 @@ function EffigyZoneBreakdown({ pool }) {
   );
 }
 
-export default function Board({ state, displayBoard, flashes, lastAttack, viewerId, highlightCells, selectedCell, toggledCells, respondingCellId, onCellClick, onCellDoubleClick, borderImages, borderImagesLoaded, artImages, artBorderImages, artImagesLoaded, fontLoaded }) {
+export default function Board({ state, displayBoard, flashes, lastAttack, lastMartyr, viewerId, highlightCells, selectedCell, toggledCells, respondingCellId, onCellClick, onCellDoubleClick, borderImages, borderImagesLoaded, artImages, artBorderImages, artImagesLoaded, fontLoaded }) {
   const rows = [];
   // `displayBoard` (useStagedBoard.js) is a momentarily-lagged view of
   // state.board for a Being that just took damage or died — falls back to
@@ -221,6 +221,13 @@ export default function Board({ state, displayBoard, flashes, lastAttack, viewer
       // even for a second attack from the same cell in a row.
       const isAttacking = lastAttack?.fromCellId === id;
       const lungeOffset = isAttacking ? lungeOffsetFor(lastAttack.fromCellId, lastAttack.toCellId) : null;
+      // `lastMartyr` (useGameEngine.js) names only the sacrificed cellId —
+      // by the time ACTIVATE_MARTYR resolves, that Being is already gone
+      // from `board` (sacrificed), so this can't be read off `occupant`
+      // like most other effects; it's rendered on the bare tile itself,
+      // keyed by `seq` so a second Martyr on the same cell later in the
+      // match still replays the glow from scratch.
+      const isMartyred = lastMartyr?.cellId === id;
 
       cells.push(
         <div
@@ -232,6 +239,9 @@ export default function Board({ state, displayBoard, flashes, lastAttack, viewer
             ${isToggled ? 'ring-4 ring-red-500 ring-inset' : isRespondingTo ? 'ring-4 ring-yellow-400 ring-inset' : isHighlighted ? 'ring-2 ring-green-400 ring-inset' : 'ring-1 ring-stone-300'}
             ${isSummonCell && !occupant ? 'bg-amber-50' : ''}`}
         >
+          {isMartyred && (
+            <div key={`martyr-${lastMartyr.seq}`} className="absolute inset-0 z-[25] rounded pointer-events-none martyr-glow" />
+          )}
           {occupant?.type === 'being' && (
             <div
               key={isAttacking ? `atk-${lastAttack.seq}` : undefined}
