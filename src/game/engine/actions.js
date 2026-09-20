@@ -1,7 +1,7 @@
-import { cellId, parseCellId, ROWS, COLS, ETHEREAL_ROW, FRONT_ROW, SUMMON_CELLS, mortalCellsFor, isMortalRealm, opponentOf, computeMoveDestination, computeAttackCell, owningPlayerOfRow } from './board.js';
+import { cellId, parseCellId, ROWS, COLS, ETHEREAL_ROW, SUMMON_CELLS, mortalCellsFor, isMortalRealm, opponentOf, computeMoveDestination, computeAttackCell, owningPlayerOfRow } from './board.js';
 import { STARTING_LIFESPAN } from './constants.js';
 import { STARTING_HAND_SIZE, MULLIGAN_COST, drawCard } from './deck.js';
-import { addLog, beginTurn, endTurn, checkWin, controlsOnlyFaithlessPermanents, triggerZealotProphecyEssence, triggerHourglassCollection } from './turn.js';
+import { addLog, beginTurn, endTurn, checkWin, controlsOnlyFaithlessPermanents, triggerZealotProphecyEssence, triggerHourglassCollection, resolveEndOfTurnDamageNamedFamilyQueue } from './turn.js';
 import { resolveMutualCombat, deathDamageFor, effectiveStrength } from './combat.js';
 import { stripFlavorText, EFFIGY_COLORS, makeTemporaryEssence, totalCastingCost, createTokenCard, isFaithlessTypedCard, parseKeywords } from '../../lib/cardData.js';
 
@@ -980,31 +980,32 @@ const VYU_BHATA_RE = /^Give target Being you control\s*\(?\+1\/\+1\)?,?\s*reconj
 
 // "Destroy target blocking Being, its controller is not dealt damage when
 // it dies; the attacking Being deals no damage." (Strike Down) — "blocking
-// Being" is any Being on the OPPONENT's front row (the defender in this
-// engine's lane-based combat, confirmed by the user). The second clause
-// ("the attacking Being deals no damage") only makes sense mid-combat,
-// which this Conjuring isn't reactive to (RULES.md > Conjurings — no
-// instant-speed window yet), so only the destroy-with-no-death-damage
-// half is implemented; that gap is the same honest, already-documented
-// Conjurings limitation, not a new one. Its own castability is still gated
-// on hasAttackerAvailable below — a real combat trick like this shouldn't
-// be offered as a plain removal spell any time, only when the caster is
-// actually in a position to attack (the closest honest approximation this
-// engine's atomic (no declare-attacker/response window) combat can give to
-// "cast when a Being is attacking").
+// Being" is whichever Being currently occupies the lane a real declared
+// attack is resolving into (state.pendingResolution.kind === 'attack' —
+// see declareAttackFrom/attackPendingBlockingCell, below), not a broad
+// "any front-row Being of the opponent" approximation. Castable by EITHER
+// player during that window (confirmed with the user), not just the
+// attacker or just the defender — the blocking Being it destroys is
+// always the DEFENDER's own, regardless of who casts it. Both printed
+// clauses are real now that the attack-declaration priority window
+// exists (Phase 3 of the priority-window rework — see the approved
+// plan): the destroy-with-no-death-damage half (unchanged, via
+// destroyBeing's own no-death-damage behavior) AND "the attacking Being
+// deals no damage" (resolveAttackFrom's own `noDamage` param, set via
+// the `noDamage: true` flag this stashes onto state.pendingResolution
+// itself) — previously undocumented-gap, now closed.
 const STRIKE_DOWN_RE = /^Destroy target blocking Being,?\s*its controller is not dealt damage when it dies/i;
 
-// Whether `playerId` currently has a legal attacker available — a real
-// Being or an Animated Armament acting as one (RULES.md > Keywords >
-// Animated), unengaged, on their own front row. See STRIKE_DOWN_RE above
-// for why this gates that Conjuring's own castability.
-const hasAttackerAvailable = (board, playerId) =>
-  Object.entries(board).some(([cell, occupant]) => {
-    if (!occupant || occupant.ownerId !== playerId || parseCellId(cell).row !== FRONT_ROW[playerId]) return false;
-    if (occupant.type === 'being') return !occupant.engaged;
-    const top = animatedTopEntry(occupant);
-    return !!top && !top.engaged;
-  });
+// The board cell a real, currently-open attack-declaration window is
+// resolving into — null whenever no such window is open. Shared by Strike
+// Down's own castability gate (conjuringCastGateOk) and its resolution
+// branch (resolveOrLogEffect) so both always agree on exactly the same
+// cell.
+const attackPendingBlockingCell = (state) => {
+  const pr = state.pendingResolution;
+  if (pr?.kind !== 'attack') return null;
+  return computeAttackCell(pr.declaringPlayer, pr.fromCellId);
+};
 
 // Desperate Finale: "As an additonal cost to conjure: Pay Lifespan equal
 // to the Lifespan of target engaged Being you control." — the SAME target
@@ -2450,8 +2451,22 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
     };
     next = addLog(next, `${cardName}'s ${label} spends ${spend} ${counterType} Counter(s).`);
     const selfArrows = context.selfArrows || occupant.card?.arrows || [];
+    // A pointed tile already carrying the player's own TreeFolk/Vine/Seed
+    // is still a legal candidate here — a Dryad-keyword Being from hand
+    // can attach onto it (dryadAttachTargetOk, checked properly once a
+    // specific hand card is chosen, in both getLegalActions' own offer
+    // branch and RESOLVE_SUMMON_HAND_BEING_POINTED's reducer) — which hand
+    // card will actually be picked isn't known yet at this declare step,
+    // so this only checks the TARGET side (its own typing), not whether
+    // any hand card is actually Dryad-eligible.
     const pointedCells = [...new Set(selfArrows.map(dir => computeMoveDestination(playerId, context.selfCellId, dir)))]
-      .filter(c => c && emptyOrOwnArmamentStack(next.board[c], playerId));
+      .filter(c => {
+        if (!c) return false;
+        const there = next.board[c];
+        if (emptyOrOwnArmamentStack(there, playerId)) return true;
+        return there?.type === 'being' && there.ownerId === playerId
+          && DRYAD_ATTACH_TYPINGS.some(t => (there.card.typing || '').toLowerCase().includes(t));
+      });
     if (pointedCells.length === 0) {
       return addLog(next, `${cardName}'s ${label} has no legal tile it points to, to summon on.`);
     }
@@ -3358,9 +3373,15 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
   if (engageStatBonusMatch) {
     const strengthBonus = parseInt(engageStatBonusMatch[1], 10);
     const lifespanBonus = parseInt(engageStatBonusMatch[2], 10);
-    const candidates = Object.entries(state.board).filter(([, o]) => o?.type === 'being' && o.ownerId === playerId && !o.engaged);
+    // "Engage target being..." (Boknean Wine) — no "you control" in the
+    // printed text, unlike Acrobatic Escape/Transplant's own "Engage
+    // target Being you control"/engage-as-a-self-cost shapes. Any Being,
+    // either owner — found while designing the pre-resolution priority
+    // window (the user's own Boknean-Wine-vs-Arbosalis-Zealot example
+    // needs this to even be reachable at all, window or not).
+    const candidates = Object.entries(state.board).filter(([, o]) => o?.type === 'being' && !o.engaged);
     if (candidates.length === 0) {
-      return addLog(state, `${cardName}'s ${label} has no disengaged Being of ${playerId}'s to Engage.`);
+      return addLog(state, `${cardName}'s ${label} has no disengaged Being to Engage.`);
     }
     if (candidates.length === 1) {
       return applyEngageStatBuff(state, candidates[0][0], strengthBonus, lifespanBonus, playerId, cardName, label);
@@ -3650,17 +3671,26 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
   }
 
   if (STRIKE_DOWN_RE.test(text)) {
-    const opponentId = opponentOf(playerId);
-    const candidates = Object.entries(state.board).filter(([cell, o]) => o?.type === 'being' && o.ownerId === opponentId && parseCellId(cell).row === FRONT_ROW[opponentId]);
-    if (candidates.length === 0) {
+    // The target is always exactly ONE specific cell — whichever Being is
+    // currently blocking the real, currently-open declared attack (see
+    // attackPendingBlockingCell above) — never a broader "any front-row
+    // Being of the opponent" search, so there's no multi-candidate choice
+    // to offer here at all (unlike the old approximation this replaces).
+    // conjuringCastGateOk already refused to offer this cast at all
+    // unless a real Being sits there, but this is re-checked fresh in
+    // case the board changed between offer and resolution.
+    const blockingCell = attackPendingBlockingCell(state);
+    const blocker = blockingCell ? state.board[blockingCell] : null;
+    if (!blocker || blocker.type !== 'being') {
       return addLog(state, `${cardName}'s ${label} has no blocking Being to destroy.`);
     }
-    if (candidates.length === 1) {
-      let next = addLog(state, `${cardName}'s ${label} destroys ${candidates[0][1].card.name}.`);
-      return destroyBeing(next, candidates[0][0]);
-    }
-    let next = addLog(state, `${cardName}'s ${label} lets ${playerId} choose a blocking Being to destroy.`);
-    return { ...next, pendingChoice: { kind: 'strike-down-target', playerId, cardName, label } };
+    let next = addLog(state, `${cardName}'s ${label} destroys ${blocker.card.name} — the attacking Being will deal no damage.`);
+    next = destroyBeing(next, blockingCell);
+    // Stashed on the SAME pendingResolution the attack's own declare step
+    // already opened (never a fresh one) — resolvePendingResolution's own
+    // 'attack' kind reads this to zero out the attacker's damage once the
+    // window finally closes (see resolveAttackFrom's own `noDamage` param).
+    return { ...next, pendingResolution: { ...next.pendingResolution, noDamage: true } };
   }
 
   if (DROWN_OUT_THE_SCREAMS_RE.test(text)) {
@@ -3745,7 +3775,11 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
 
   const lscMatch = text.match(LESSER_SUMMONING_CIRCLE_RE);
   if (lscMatch && context.selfCellId) {
-    const occupant = state.board[context.selfCellId];
+    // Lesser Summoning Circle's own printed "Beings may move across this
+    // Relic" line (public/default-card-set.csv) makes it a real ground
+    // Relic (RULES.md > Being-Relic co-location) — it lives in
+    // state.groundRelics, not state.board, so that's where the flag goes.
+    const occupant = state.groundRelics[context.selfCellId];
     if (!occupant || occupant.type !== 'relic') {
       return addLog(state, `${cardName}'s ${label} has no Relic on this tile.`);
     }
@@ -3753,7 +3787,7 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
       .split(/,\s*|\s+or\s+/i)
       .map(s => s.replace(/^an?\s+/i, '').trim().toLowerCase())
       .filter(Boolean);
-    const next = { ...state, board: { ...state.board, [context.selfCellId]: { ...occupant, summonHereTypings: typings } } };
+    const next = { ...state, groundRelics: { ...state.groundRelics, [context.selfCellId]: { ...occupant, summonHereTypings: typings } } };
     return addLog(next, `${cardName}'s ${label} lets ${playerId} summon a matching Being directly onto this tile.`);
   }
 
@@ -3830,12 +3864,17 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
   }
 
   if (LEGION_ONSET_RE.test(text)) {
-    // Same "can't drop to 0" floor every other optional Lifespan cost in
-    // this file already gates an offer on (buff-ally/Mulligan) — X tops out
-    // one below the caster's own current Lifespan.
-    const maxX = Math.max(0, state.players[playerId].lifespan - 1);
-    let next = addLog(state, `${cardName}'s ${label} lets ${playerId} choose how much Lifespan to pay.`);
-    return { ...next, pendingChoice: { kind: 'legion-onset-pay-lifespan', playerId, cardName, label, maxX } };
+    // The player chooses how many Vassal tokens to summon (not a raw
+    // Lifespan amount — user ruling), capped by BOTH the same "can't drop
+    // to 0" Lifespan floor every other optional Lifespan cost in this file
+    // already gates on (buff-ally/Mulligan), and by how many empty Mortal
+    // Realm tiles are actually available to place them on — picking more
+    // imps than either allows is never offered in the first place.
+    const maxByLifespan = Math.floor(Math.max(0, state.players[playerId].lifespan - 1) / 5);
+    const maxByTiles = emptyMortalCellsFor(state.board, playerId).length;
+    const maxCount = Math.min(maxByLifespan, maxByTiles);
+    let next = addLog(state, `${cardName}'s ${label} lets ${playerId} choose how many Vassal tokens to summon.`);
+    return { ...next, pendingChoice: { kind: 'legion-onset-choose-count', playerId, cardName, label, maxCount } };
   }
 
   const destroyPointedSummonTokenMatch = text.match(DESTROY_POINTED_SUMMON_TOKEN_HERE_RE);
@@ -4311,7 +4350,11 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
   if (nextBeingCostMatch) {
     const amount = parseInt(nextBeingCostMatch[1], 10);
     const color = nextBeingCostMatch[2].toLowerCase();
-    const next = { ...state, nextBeingCostReduction: { color, amount } };
+    // Simple Summoner: engaging it more than once this turn stacks (user
+    // ruling) — a list of {color, amount} entries, each applied in
+    // effectiveCastingCost, rather than a single slot a second activation
+    // would just overwrite.
+    const next = { ...state, nextBeingCostReduction: [...(state.nextBeingCostReduction || []), { color, amount }] };
     return addLog(next, `${cardName}'s ${label} discounts ${playerId}'s next Being this turn by ${amount} ${nextBeingCostMatch[2]}.`);
   }
 
@@ -4616,6 +4659,23 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
     const player = state.players[playerId];
     const next = { ...state, players: { ...state.players, [playerId]: { ...player, lifespan: player.lifespan + amount } } };
     return addLog(next, `${cardName}'s ${label} grants ${playerId} ${amount} Lifespan (${perAmount} for each of ${count} matching Being(s)).`);
+  }
+
+  // Priestly Practitioner: "Restore (2) Lifespan." — printed with no
+  // "target" wording, but per user ruling this is a real targeted ability
+  // (any Being or player, not self-only), reusing the same
+  // 'restore-lifespan-target' choice Elderflower Ancient/Sanative Siphon
+  // already open. Every OTHER bare "gain/restore N Lifespan" card (Pruning
+  // Sheers' own post-sacrifice benefit, a per-Being-typed scaling bonus) is
+  // self-only by clear design, so this is gated on the card's own name
+  // rather than widening LIFESPAN_GAIN_RE's match for everyone.
+  if (cardName === 'Priestly Practitioner') {
+    const priestlyMatch = text.match(LIFESPAN_GAIN_RE);
+    if (priestlyMatch) {
+      const amount = parseInt(priestlyMatch[1], 10);
+      const next = addLog(state, `${cardName}'s ${label} lets ${playerId} choose who restores ${amount} Lifespan.`);
+      return { ...next, pendingChoice: { kind: 'restore-lifespan-target', playerId, cardName, label, amount } };
+    }
   }
 
   const lifespanGainMatch = text.match(LIFESPAN_GAIN_RE);
@@ -6243,11 +6303,16 @@ const dryadAttachTargetOk = (occupant, playerId, moverCard) =>
 
 // Lesser Summoning Circle: "you may Summon a Demon, Imp or Null Being
 // directly on this tile, when you do sacrifice Lesser Summoning Circles."
-// — a Relic occupant carrying `summonHereTypings` (set once its own
-// Engage resolves — see the LESSER_SUMMONING_CIRCLE_RE branch) is a legal
-// summon destination for a matching-typed Being from hand, on top of the
-// normal empty/own-armament-stack rule emptyOrOwnArmamentStack enforces —
-// placeBeingOnBoard overwriting it there IS the sacrifice.
+// — a ground Relic occupant (state.groundRelics, not state.board — see the
+// LESSER_SUMMONING_CIRCLE_RE branch) carrying `summonHereTypings` (set
+// once its own Engage resolves) is a legal summon destination for a
+// matching-typed Being from hand, on top of the normal empty/own-armament-
+// stack rule emptyOrOwnArmamentStack enforces for state.board itself
+// (the two coexist on the same tile — RULES.md > Being-Relic co-location).
+// SUMMON_BEING's own reducer case explicitly removes the ground Relic as
+// the sacrifice once placement succeeds, since overwriting a board entry
+// can no longer double as removing it the way it could when this card was
+// mistakenly treated as a normal board Relic.
 const summonHereTargetOk = (occupant, playerId, card) =>
   !!occupant && occupant.type === 'relic' && occupant.ownerId === playerId
   && (occupant.summonHereTypings || []).some(t => (card.typing || '').toLowerCase().includes(t));
@@ -6349,7 +6414,13 @@ const groundRelicEngageCostPayable = (occupant, player, playerId, cellId, board)
   const extraCost = occupant.card.keywords?.engageExtraCost;
   const coLocatedOk = !extraCost || !SACRIFICE_CO_LOCATED_BEING_RE.test(extraCost)
     || (board[cellId]?.type === 'being' && board[cellId].ownerId === playerId);
-  return counterOk && effigyOk && coLocatedOk;
+  // Lesser Summoning Circle: "Pay (5) Lifespan, Engage: ..." — same
+  // "can't drop to 0" floor ACTIVATE_ENGAGE's own lifespanCost check uses;
+  // this was missing entirely, so a ground Relic's own Lifespan-costed
+  // Engage was silently free.
+  const lifespanCost = occupant.card.keywords?.engageLifespanCost || 0;
+  const lifespanOk = player.lifespan - lifespanCost > 0;
+  return counterOk && effigyOk && coLocatedOk && lifespanOk;
 };
 
 // Removes whatever occupies `cellId` to pay a sacrifice cost — a Being
@@ -6696,6 +6767,26 @@ export const dealDamageToBeing = (state, cellId, damage) => {
       players: { ...state.players, [occupant.ownerId]: { ...owner, lifespan: owner.lifespan - damage } },
     };
     return checkWin(addLog(next, `${view.card.name}'s damage redirect sends ${damage} Lifespan damage to ${occupant.ownerId} instead.`));
+  }
+  // Favored (RULES.md > Keywords): "The next time this Being would take
+  // damage, remove the Favor Counter instead and prevent that damage." —
+  // printed with no combat-only qualifier, but the only place this was
+  // ever actually checked was resolveAttackFrom's own inline mutual-combat
+  // math (attackerFavored/defenderFavored, below). Generalized here so it
+  // also protects against a generic "deal (N) damage to target Being"
+  // effect (Medium Mage, etc.) — found while building the pre-resolution
+  // priority window, since the user's own worked example (cast One Above
+  // All to make the target Favored, preventing Medium Mage's pending
+  // damage) needs this to actually hold true, not just the window itself.
+  // An Animated Armament acting as a Being can never carry a Favor
+  // Counter in the first place (see resolveAttackFrom's own comment), so
+  // no extra type check is needed here — `favorCounter` is simply never
+  // set on one.
+  if (occupant.favorCounter) {
+    return addLog(
+      { ...state, board: { ...state.board, [cellId]: { ...occupant, favorCounter: false } } },
+      `${view.card.name}'s Favor Counter prevents ${damage} damage.`
+    );
   }
   const isBeing = occupant.type === 'being';
   const lifespanAfter = view.currentLifespan - damage;
@@ -8126,21 +8217,34 @@ const placeBeingOnBoard = (state, playerId, cellId, card) => {
   next = moveAutoAttachArmaments(next, playerId, cellId);
   next = triggerTypedSummonReactions(next, playerId, cellId, card);
   next = triggerSacrificeSelfOnSummonTyping(next, playerId, cellId, card);
-  if (card.keywords?.whenSummoned) {
-    next = addLog(next, `${card.name}'s When Summoned triggers.`);
-    const whenSummonedText = selfReferentialWhenSummonedText(card.keywords.whenSummoned, card.name);
-    next = resolveOrLogEffect(next, playerId, card.name, whenSummonedText, 'When Summoned', { selfCellId: cellId });
-  }
-  // Skipped when a When Summoned effect above already left its own
+  // Skipped when an earlier reaction above already left its own
   // pendingChoice open — this engine only ever tracks one pendingChoice at
   // a time (no queueing), so enforcing the legend rule here would silently
   // clobber that still-unresolved choice. A vanishingly rare double-edge
-  // case (a Deity whose own When Summoned needs a player choice AND
-  // immediately collides with a same-named Deity already in play); the
-  // legend rule simply isn't checked that specific turn — a known,
-  // documented gap rather than new multi-choice infrastructure.
+  // case; the legend rule simply isn't checked that specific turn — a
+  // known, documented gap rather than new multi-choice infrastructure.
   if (card.isDeity && !next.pendingChoice) {
     next = enforceDeityLegendRule(next, playerId, card.name);
+  }
+  // Medium Mage, Massive Mage, Quake Goliath, etc.: "When summoned... deal
+  // (N) damage to target Being" — deferred behind a real pre-resolution
+  // priority window (state.pendingResolution, resolved by
+  // manageReactiveWindow below) instead of resolving inline here, so the
+  // opponent gets a genuine chance to respond — e.g. cast One Above All to
+  // make the target Favored — BEFORE the trigger's own effect applies,
+  // not after. Confirmed with the user via the Medium Mage / One Above
+  // All example. Every OTHER caller of placeBeingOnBoard (Martyr
+  // reanimation, Invoke, tokens) gets the exact same deferred treatment
+  // for free, matching RULES.md's own "fires exactly the same way a
+  // normally-cast Being's would" precedent — no special-casing needed.
+  // Skipped (same documented-gap precedent as the legend-rule check just
+  // above) when a pendingChoice is already open.
+  if (card.keywords?.whenSummoned && !next.pendingChoice) {
+    const whenSummonedText = selfReferentialWhenSummonedText(card.keywords.whenSummoned, card.name);
+    next = {
+      ...next,
+      pendingResolution: { kind: 'summon-being', declaringPlayer: playerId, cellId, cardName: card.name, whenSummonedText, instanceId: card.instanceId },
+    };
   }
   return next;
 };
@@ -8608,6 +8712,9 @@ export const createInitialState = ({ mainDeckA, effigyDeckA, mainDeckB, effigyDe
   // Ethereal Conjuring reactive timing — see manageReactiveWindow, below.
   // `null | { openFor: playerId }`.
   reactiveWindow: null,
+  // A declared-but-not-yet-applied effect riding behind reactiveWindow —
+  // see resolvePendingResolution, below.
+  pendingResolution: null,
 });
 
 // -- Effigy cost payment ----------------------------------------------------
@@ -8784,7 +8891,7 @@ const dejaVuCandidates = (state, playerId, card) => {
 
 // Every additional-cost/target-availability gate a Conjuring or Ethereal
 // Conjuring's own cast can carry, beyond plain affordability (Strike Down's
-// hasAttackerAvailable, Desperate Finale's hasAffordableEngagedTarget, Deja
+// attackPendingBlockingCell, Desperate Finale's hasAffordableEngagedTarget, Deja
 // Vu's own candidate search, "Shuffle (N) <X>s..."'s fixed-count Purgatory
 // search) — shared by both getLegalActions' main-phase offer AND its
 // reactiveWindow offer (offerReactiveEngageActions/the reactiveWindow
@@ -8800,7 +8907,16 @@ const dejaVuCandidates = (state, playerId, card) => {
 // ping-pong — Strike Down/Deja Vu repeatedly "cast" but never actually
 // leaving hand).
 const conjuringCastGateOk = (state, playerId, card) => {
-  if (STRIKE_DOWN_RE.test(stripFlavorText(card.textBox) || '') && !hasAttackerAvailable(state.board, playerId)) return false;
+  // Strike Down: legal specifically during a real, currently-open attack-
+  // declaration window with an actual Being still there to destroy — not
+  // "any time playerId has an unengaged front-row Being," now that the
+  // real window this card was always waiting for exists. `playerId` here
+  // is deliberately unused for this gate — either player may cast it
+  // against the same blocking cell (confirmed with the user).
+  if (STRIKE_DOWN_RE.test(stripFlavorText(card.textBox) || '')) {
+    const blockingCell = attackPendingBlockingCell(state);
+    if (!blockingCell || state.board[blockingCell]?.type !== 'being') return false;
+  }
   if (card.keywords?.conjureCost && LIFESPAN_EQUAL_TARGET_ENGAGED_RE.test(card.keywords.conjureCost)
     && !hasAffordableEngagedTarget(state.board, state.players, playerId)) return false;
   if (card.keywords?.dejaVu && dejaVuCandidates(state, playerId, card).length === 0) return false;
@@ -8896,10 +9012,12 @@ export const effectiveCastingCost = (card, state, playerId) => {
   // getLegalActions' own affordability check, which must never mutate
   // state), applied on top of any printed costReduction above. Scoped to
   // `card.kind === 'being'` specifically — a Deity is a distinct kind in
-  // this engine, not "a Being" for this purpose.
-  if (state.nextBeingCostReduction && card.kind === 'being') {
-    cost = applyCostReduction(cost, state.nextBeingCostReduction.color, state.nextBeingCostReduction.amount);
-  }
+  // this engine, not "a Being" for this purpose. A list, not a single
+  // slot, so engaging Simple Summoner more than once this turn stacks
+  // (user ruling) instead of a second activation overwriting the first.
+  (state.nextBeingCostReduction || []).forEach(({ color, amount }) => {
+    if (card.kind === 'being') cost = applyCostReduction(cost, color, amount);
+  });
   // Metal Worker: "The next Relic you summon this turn costs (-2)
   // Faithless." — same one-shot-flag shape as Simple Summoner's own
   // nextBeingCostReduction above, just scoped to card.kind === 'relic'
@@ -9158,12 +9276,31 @@ export const getLegalActions = (state, playerId) => {
       const { allowedCells } = state.pendingChoice;
       ETHEREAL_CELLS.filter(cell => !state.board[cell] && (!allowedCells || allowedCells.includes(cell)))
         .forEach(cell => actions.push({ type: 'RESOLVE_ETHEREAL_TOKEN_LOCATION', cellId: cell }));
+    } else if (state.pendingChoice.kind === 'end-of-turn-damage-named-family-target') {
+      // Passing Doubt/Lingering Doubt (turn.js > applyEndOfTurnDamageNamedFamily)
+      // — every Being of the trigger's own name-family the controller owns
+      // is a legal target, including the trigger source itself (the
+      // printed text has no "another" qualifier).
+      const needle = state.pendingChoice.namePart.toLowerCase();
+      Object.entries(state.board)
+        .filter(([, o]) => o?.type === 'being' && o.ownerId === playerId && o.card.name.toLowerCase().includes(needle))
+        .forEach(([cell]) => actions.push({ type: 'RESOLVE_END_OF_TURN_DAMAGE_NAMED_FAMILY_TARGET', cellId: cell }));
     } else if (state.pendingChoice.kind === 'summon-hand-being-pointed') {
       const { allowedCells } = state.pendingChoice;
       const player = state.players[playerId];
-      allowedCells.filter(cell => emptyOrOwnArmamentStack(state.board[cell], playerId)).forEach(cell => {
+      // A pointed tile that already carries the player's own TreeFolk/
+      // Vine/Seed is still legal for a Dryad-keyword Being from hand — the
+      // same Dryad-attach bypass SUMMON_BEING's own legality check already
+      // grants (dryadAttachTargetOk), just threaded through here too.
+      // Dryad eligibility depends on the SPECIFIC hand card being
+      // considered (its own `dryad` keyword), not just the cell, so this
+      // checks per (cell, card) pair rather than filtering cells first.
+      allowedCells.forEach(cell => {
+        const occupant = state.board[cell];
         player.hand
-          .filter(c => c.kind === 'being' && canPayCost(player.effigyPool, effectiveCastingCost(c, state, playerId)))
+          .filter(c => c.kind === 'being'
+            && (emptyOrOwnArmamentStack(occupant, playerId) || dryadAttachTargetOk(occupant, playerId, c))
+            && canPayCost(player.effigyPool, effectiveCastingCost(c, state, playerId)))
           .forEach(c => actions.push({ type: 'RESOLVE_SUMMON_HAND_BEING_POINTED', instanceId: c.instanceId, cellId: cell }));
       });
     } else if (state.pendingChoice.kind === 'copy-engage-target') {
@@ -9276,14 +9413,12 @@ export const getLegalActions = (state, playerId) => {
       state.pendingChoice.pointedCells
         .filter(c => state.board[c]?.type === 'being')
         .forEach(c => actions.push({ type: 'RESOLVE_RECOLLECT_TARGET', cellId: c }));
-    } else if (state.pendingChoice.kind === 'strike-down-target') {
-      const opponentId = opponentOf(playerId);
-      Object.entries(state.board)
-        .filter(([cell, o]) => o?.type === 'being' && o.ownerId === opponentId && parseCellId(cell).row === FRONT_ROW[opponentId])
-        .forEach(([cell]) => actions.push({ type: 'RESOLVE_STRIKE_DOWN_TARGET', cellId: cell }));
     } else if (state.pendingChoice.kind === 'engage-buff-eot') {
+      // Boknean Wine's own printed text has no "you control" — any
+      // disengaged Being, either owner (see the resolveOrLogEffect branch
+      // that opens this choice for the full explanation).
       Object.entries(state.board)
-        .filter(([, o]) => o?.type === 'being' && o.ownerId === playerId && !o.engaged)
+        .filter(([, o]) => o?.type === 'being' && !o.engaged)
         .forEach(([cell]) => actions.push({ type: 'RESOLVE_ENGAGE_BUFF_EOT', cellId: cell }));
     } else if (state.pendingChoice.kind === 'engage-then-move') {
       const { typing } = state.pendingChoice;
@@ -9356,9 +9491,9 @@ export const getLegalActions = (state, playerId) => {
     } else if (state.pendingChoice.kind === 'choose-prophecy-timer') {
       const { maxValue } = state.pendingChoice;
       for (let value = 0; value <= maxValue; value++) actions.push({ type: 'RESOLVE_CHOOSE_PROPHECY_TIMER', value });
-    } else if (state.pendingChoice.kind === 'legion-onset-pay-lifespan') {
-      const { maxX } = state.pendingChoice;
-      for (let value = 0; value <= maxX; value++) actions.push({ type: 'RESOLVE_LEGION_ONSET_LIFESPAN', value });
+    } else if (state.pendingChoice.kind === 'legion-onset-choose-count') {
+      const { maxCount } = state.pendingChoice;
+      for (let value = 0; value <= maxCount; value++) actions.push({ type: 'RESOLVE_LEGION_ONSET_CHOOSE_COUNT', value });
     } else if (state.pendingChoice.kind === 'force-combat-select-mine') {
       Object.entries(state.board)
         .filter(([, o]) => o?.type === 'being' && o.ownerId === playerId)
@@ -9530,8 +9665,11 @@ export const getLegalActions = (state, playerId) => {
       actions.push({ type: 'RESOLVE_RESTORE_OR_SUMMON_VINE', choice: 'summon' });
     } else if (state.pendingChoice.kind === 'restore-lifespan-target') {
       // Any legal target — a Being (either owner) or either player's own
-      // Lifespan directly, uncapped (confirmed with the user: a player
-      // can be restored above their starting 50).
+      // Lifespan directly. A Being caps at its own printed Lifespan (the
+      // excess fizzles — see RESOLVE_RESTORE_LIFESPAN_TARGET), but a
+      // player is uncapped (confirmed with the user: a player can be
+      // restored above their starting 50) — either way a target already
+      // at its cap is still a legal choice, it just gains 0.
       Object.entries(state.board)
         .filter(([, o]) => o?.type === 'being' || animatedTopEntry(o))
         .forEach(([cell]) => actions.push({ type: 'RESOLVE_RESTORE_LIFESPAN_TARGET', cellId: cell }));
@@ -9703,9 +9841,11 @@ export const getLegalActions = (state, playerId) => {
         if (emptyOrOwnArmamentStack(state.board[cell], playerId)) actions.push({ type: 'SUMMON_BEING', instanceId: card.instanceId, cellId: cell });
       });
       // Lesser Summoning Circle: also offer every one of the player's own
-      // flagged Relic tiles whose required typing matches this card — legal
-      // even though it's occupied and outside the normal summon cells.
-      Object.entries(state.board).forEach(([cell, o]) => {
+      // flagged ground-Relic tiles whose required typing matches this card
+      // — legal even though state.board there is outside the normal summon
+      // cells (a ground Relic's own tile can be anywhere in the Mortal
+      // Realm, not just the home row).
+      Object.entries(state.groundRelics).forEach(([cell, o]) => {
         if (summonHereTargetOk(o, playerId, card)) actions.push({ type: 'SUMMON_BEING', instanceId: card.instanceId, cellId: cell });
       });
       // Boknea Druid: also offer every one of the player's own eligible
@@ -10191,17 +10331,69 @@ export const getLegalActions = (state, playerId) => {
   return actions;
 };
 
+// Attack declaration (Phase 3 of the priority-window rework — see the
+// approved plan): MOVE_OR_ATTACK's own normal `isAttack` branch now
+// declares first instead of calling resolveAttackFrom (below) directly —
+// validates the attacker and applies the RULES-mandated "starting an
+// attack engages it" flip immediately, then defers the actual combat
+// resolution behind a real priority window (state.pendingResolution,
+// resolved by resolvePendingResolution once the window closes). Strike
+// Down (RULES.md > Conjurings' own documented gap: "this Conjuring isn't
+// reactive to [combat]... no instant-speed window yet") finally becomes
+// legal specifically here, before combat damage lands.
+//
+// Desperate Finale's own forced attack (resolveDesperateFinale, above)
+// deliberately keeps calling resolveAttackFrom directly, bypassing this
+// declare step (and the window) entirely — same established "bypasses
+// the normal engaged gate" precedent that function already documents for
+// itself, just extended to the new window too: that forced attack was
+// never interruptible before, and making it so now would also break its
+// own immediate post-attack survival check (it reads next.board right
+// after calling resolveAttackFrom, assuming combat has already fully
+// resolved).
+const declareAttackFrom = (state, playerId, fromCellId) => {
+  const occupant = state.board[fromCellId];
+  const isBeing = occupant?.type === 'being';
+  const attackerTop = animatedTopEntry(occupant);
+  if (!occupant || occupant.ownerId !== playerId || !(isBeing || attackerTop)) return state;
+  const actorCard = isBeing ? occupant.card : attackerTop.card;
+  if (actorCard.keywords?.cannotAttack) return state; // Training dummy
+  const toCellId = computeAttackCell(playerId, fromCellId);
+  if (!toCellId) return state;
+
+  let next = {
+    ...state,
+    board: { ...state.board, [fromCellId]: writeActorState(occupant, { engaged: true }) },
+  };
+  next = addLog(next, `${playerId} declares an attack with ${actorCard.name}.`);
+  return {
+    ...next,
+    pendingResolution: { kind: 'attack', declaringPlayer: playerId, fromCellId, cardName: actorCard.name },
+  };
+};
+
 // Resolves a Being (or Animated Armament) attacking from `fromCellId` —
 // the exact logic MOVE_OR_ATTACK's own `isAttack` branch uses, factored
 // out so Desperate Finale's own "That Being fights without engaging" can
 // reuse it directly for an ALREADY-Engaged Being (bypassing
 // MOVE_OR_ATTACK's own engaged gate, which callers other than
-// MOVE_OR_ATTACK itself never see). Self-contained — re-derives everything
-// from `state`/`fromCellId` rather than taking any pre-computed locals, so
-// it's safe to call from anywhere. Returns `state` unchanged if there's no
-// real attacker at `fromCellId`, it can't attack (Training dummy's own
-// cannotAttack), or there's no attack lane (not in the front row).
-const resolveAttackFrom = (state, playerId, fromCellId) => {
+// MOVE_OR_ATTACK itself never see) — and so resolvePendingResolution's own
+// 'attack' kind can call it once a declared attack's priority window
+// closes (see declareAttackFrom above). Self-contained — re-derives
+// everything from `state`/`fromCellId` rather than taking any pre-computed
+// locals, so it's safe to call from anywhere, including fresh off a
+// possibly-changed board after a reactive response. Returns `state`
+// unchanged if there's no real attacker at `fromCellId`, it can't attack
+// (Training dummy's own cannotAttack), or there's no attack lane (not in
+// the front row). `noDamage` (Strike Down's own "the attacking Being
+// deals no damage" — see STRIKE_DOWN_RE's resolution, which stashes
+// `noDamage: true` onto the SAME pendingResolution its own declare step
+// opened) zeroes the attacker's own damage output once the lane it was
+// attacking into has already been emptied by that same Conjuring —
+// mutual combat itself is never affected (a destroyed blocker means the
+// mutual-combat branch below can't even trigger anymore; only the open-
+// lane branch needs this).
+const resolveAttackFrom = (state, playerId, fromCellId, noDamage = false) => {
   const occupant = state.board[fromCellId];
   const isBeing = occupant?.type === 'being';
   const attackerTop = animatedTopEntry(occupant);
@@ -10249,13 +10441,24 @@ const resolveAttackFrom = (state, playerId, fromCellId) => {
   if (!target || !defenderView) {
     const opponentId = playerId === 'A' ? 'B' : 'A';
     const opponent = state.players[opponentId];
-    const attackDamage = effectiveStrength(attackerView);
     board[fromCellId] = writeActorState(occupant, { engaged: true });
     const laneDesc = !target
       ? 'an open lane'
       : target.type === 'relic'
         ? `past ${target.card.name} (a Relic doesn't block)`
         : "past a freestanding Armament pile (doesn't block)";
+    // Strike Down: "the attacking Being deals no damage" — a full
+    // negation, not "0 damage that still counts as dealt," so this skips
+    // straight past Degrisch Vassal's own damage-to-Effigy conversion
+    // below too (there's no damage for it to convert). checkWin still
+    // runs for symmetry with every other branch here, though a no-damage
+    // attack can never itself be what wins the game.
+    if (noDamage) {
+      let next = addLog({ ...state, board }, `${actorCard.name} attacks into ${laneDesc}, but Strike Down negates all of its damage.`);
+      next = triggerAllyFightsReactions(next, playerId, fromCellId);
+      return checkWin(next);
+    }
+    const attackDamage = effectiveStrength(attackerView);
     // Degrisch Vassal: "When this Being deals damage to an opponent,
     // prevent that damage and craft (X) Effigies where (X) is the damage
     // that would have been dealt." — ruled: this straight-through branch
@@ -10431,13 +10634,13 @@ const gameReducerCore = (state, action) => {
     'RESOLVE_DESTROY_PERMANENT', 'RESOLVE_DESTROY_ARMAMENT', 'RESOLVE_DISCARD_KIND_DRAW', 'RESOLVE_STRENGTH_SET_EOT',
     'RESOLVE_RETURN_TO_HAND', 'RESOLVE_CHOOSE_ESSENCE_COLOR', 'RESOLVE_SACRIFICE_BEING_COST', 'RESOLVE_SACRIFICE_TYPED_COST',
     'RESOLVE_ENGAGE_BEING_COST', 'RESOLVE_GRANT_MARTYR_TARGET', 'RESOLVE_SUMMON_HAND_BEING_POINTED', 'RESOLVE_CONJURE_PROPHECY_PURGATORY',
-    'RESOLVE_CREATE_TOKEN_CHOICE', 'RESOLVE_ETHEREAL_TOKEN_LOCATION',
+    'RESOLVE_CREATE_TOKEN_CHOICE', 'RESOLVE_ETHEREAL_TOKEN_LOCATION', 'RESOLVE_END_OF_TURN_DAMAGE_NAMED_FAMILY_TARGET',
     'RESOLVE_SELECT_MOVE_SOURCE', 'RESOLVE_ENGAGE_BUFF_EOT', 'RESOLVE_ENGAGE_THEN_MOVE', 'RESOLVE_ENGAGE_MOVE_TWICE', 'RESOLVE_SACRIFICE_ARMAMENT_DAMAGE',
     'RESOLVE_DISCARD_CHOSEN_COST_REDUCTION', 'RESOLVE_TIME_COUNTER_BLOCK_MOVE',
     'RESOLVE_SACRIFICE_ANY_BEINGS_TOGGLE', 'RESOLVE_SACRIFICE_ANY_BEINGS_CONFIRM',
     'RESOLVE_DISCARD_X_NAMED_TOGGLE', 'RESOLVE_DISCARD_X_NAMED_CONFIRM', 'RESOLVE_FREEZE_FRAME_TARGET',
     'RESOLVE_SHUFFLE_PURGATORY_INTO_DECK',
-    'RESOLVE_ADD_COUNTER_RELIC_TARGET', 'RESOLVE_SACRIFICE_RELIC_COST', 'RESOLVE_VYU_BHATA_TARGET', 'RESOLVE_STRIKE_DOWN_TARGET',
+    'RESOLVE_ADD_COUNTER_RELIC_TARGET', 'RESOLVE_SACRIFICE_RELIC_COST', 'RESOLVE_VYU_BHATA_TARGET',
     'RESOLVE_SACRIFICE_POINTED_TARGET', 'RESOLVE_SACRIFICE_TYPED_COST_LIMIT',
     'RESOLVE_DROWN_SCREAMS_TARGET', 'RESOLVE_DENDRIFY_TARGET', 'RESOLVE_ANIMATE_RELIC_TARGET', 'RESOLVE_RECOLLECT_TARGET', 'RESOLVE_LEGEND_RULE_KEEP',
     'RESOLVE_DESTROY_RELIC_TARGET', 'RESOLVE_PAY_LIFESPAN_OPTIONAL', 'RESOLVE_MOVE_FORWARD_TARGET',
@@ -10461,7 +10664,7 @@ const gameReducerCore = (state, action) => {
     'RESOLVE_CHOOSE_X_VALUE', 'RESOLVE_CHOOSE_PROPHECY_TIMER', 'RESOLVE_DESTROY_POINTED_SUMMON_TOKEN',
     'RESOLVE_FAVOR_POINTED_TOGGLE', 'RESOLVE_FAVOR_POINTED_CONFIRM',
     'RESOLVE_TEETH_BOUNDS_SACRIFICE_HUNGER', 'RESOLVE_TEETH_BOUNDS_TIE_CHOICE', 'RESOLVE_MIDNIGHT_MASS_SACRIFICE_TARGET',
-    'RESOLVE_LEGION_ONSET_LIFESPAN', 'RESOLVE_ENGAGE_GRANT_COUNTER_SOURCE', 'RESOLVE_MOVE_ADJACENT_ARMAMENT_SOURCE',
+    'RESOLVE_LEGION_ONSET_CHOOSE_COUNT', 'RESOLVE_ENGAGE_GRANT_COUNTER_SOURCE', 'RESOLVE_MOVE_ADJACENT_ARMAMENT_SOURCE',
     'RESOLVE_AFTERIMAGE_TARGET',
     // Not a real choice — the revealPopup overlay (Match.jsx) is purely
     // informational (see REVEAL_TOP_SEED_RE's own comment above), so
@@ -10538,7 +10741,10 @@ const gameReducerCore = (state, action) => {
       // Circle's own flagged Relic tile is a legal destination too, even
       // occupied and outside both of those — see summonHereTargetOk.
       const legalCells = card.isRelicBeing ? mortalCellsFor(playerId) : SUMMON_CELLS[playerId];
-      const viaSummoningCircle = summonHereTargetOk(waiting, playerId, card);
+      // Lesser Summoning Circle lives in groundRelics, not board (see
+      // summonHereTargetOk) — state.board[action.cellId] (`waiting`) is
+      // genuinely empty under it, so this needs its own lookup.
+      const viaSummoningCircle = summonHereTargetOk(state.groundRelics[action.cellId], playerId, card);
       // Boknea Druid: "may be summoned directly onto another TreeFolk,
       // Vine, or Seed" — bypasses legalCells the same way Lesser Summoning
       // Circle's own flagged tile does, since the eligible Being could be
@@ -10595,6 +10801,13 @@ const gameReducerCore = (state, action) => {
       if (viaVittles) {
         let next = addLog({ ...paidState, nextHungerFreeSummonOnTile: null }, `${playerId} sacrifices Vicious Vittles as an additional cost to summon ${card.name}.`);
         next = destroyBeing(next, action.cellId);
+        return placeBeingOnBoard(next, playerId, action.cellId, card);
+      }
+      if (viaSummoningCircle) {
+        const circle = state.groundRelics[action.cellId];
+        const groundRelics = { ...paidState.groundRelics };
+        delete groundRelics[action.cellId];
+        let next = addLog({ ...paidState, groundRelics }, `${playerId} sacrifices ${circle.card.name} to summon ${card.name}.`);
         return placeBeingOnBoard(next, playerId, action.cellId, card);
       }
       return placeBeingOnBoard(paidState, playerId, action.cellId, card);
@@ -10698,11 +10911,11 @@ const gameReducerCore = (state, action) => {
       const actorCard = isBeing ? occupant.card : attackerTop.card;
 
       if (action.isAttack) {
-        // resolveAttackFrom re-derives occupant/isBeing/actorCard itself —
+        // declareAttackFrom re-derives occupant/isBeing/actorCard itself —
         // the engaged gate above already applies to this normal path (see
-        // resolveAttackFrom's own comment for the one caller that
-        // deliberately bypasses it).
-        return resolveAttackFrom(state, playerId, action.fromCellId);
+        // its own comment for the one caller that deliberately bypasses
+        // both it and the declare step entirely).
+        return declareAttackFrom(state, playerId, action.fromCellId);
       } else {
         if (!actorCard.arrows.includes(action.direction)) return state;
         if (occupant.blockedWhileHasTimeCounters && (occupant.counters?.time || 0) > 0) return state; // Moment of Doubt
@@ -11069,13 +11282,38 @@ const gameReducerCore = (state, action) => {
       return addLog(next, `${cardName} creates ${token.name} at ${action.cellId}.`);
     }
 
+    case 'RESOLVE_END_OF_TURN_DAMAGE_NAMED_FAMILY_TARGET': {
+      if (!state.pendingChoice || state.pendingChoice.kind !== 'end-of-turn-damage-named-family-target') return state;
+      const { playerId, cardName, amount, namePart, remainingSources } = state.pendingChoice;
+      const occupant = state.board[action.cellId];
+      if (!occupant || occupant.type !== 'being' || occupant.ownerId !== playerId || !occupant.card.name.toLowerCase().includes(namePart.toLowerCase())) return state;
+      let next = addLog({ ...state, pendingChoice: null }, `${playerId} chooses ${occupant.card.name} to take ${amount} Lifespan Damage from ${cardName}'s end-of-turn trigger.`);
+      next = dealDamageToBeing(next, action.cellId, amount);
+      next = checkWin(next);
+      if (next.phase === 'gameover') return next;
+      // A "Doubt-only" build can have more than one trigger source needing
+      // its own real choice in the same End Step (turn.js >
+      // resolveEndOfTurnDamageNamedFamilyQueue) — resume the rest of the
+      // queue here instead of leaving any further source unresolved.
+      // `playerId` (not state.turnPlayer, which has already flipped to the
+      // opponent by now) is the declaring player this whole queue belongs to.
+      return resolveEndOfTurnDamageNamedFamilyQueue(next, remainingSources || [], playerId);
+    }
+
     case 'RESOLVE_SUMMON_HAND_BEING_POINTED': {
       if (!state.pendingChoice || state.pendingChoice.kind !== 'summon-hand-being-pointed') return state;
       const { playerId, allowedCells } = state.pendingChoice;
-      if (!allowedCells.includes(action.cellId) || !emptyOrOwnArmamentStack(state.board[action.cellId], playerId)) return state;
+      if (!allowedCells.includes(action.cellId)) return state;
       const player = state.players[playerId];
       const card = player.hand.find(c => c.instanceId === action.instanceId);
       if (!card || card.kind !== 'being') return state;
+      // A Dryad-keyword Being may still target a tile carrying the
+      // player's own TreeFolk/Vine/Seed (dryadAttachTargetOk) — placeBeingOnBoard
+      // below already has its own real Dryad-attach branch that handles
+      // this correctly once it's actually reached; this is only the same
+      // legality re-check the offer branch above already applies.
+      const pointedOccupant = state.board[action.cellId];
+      if (!emptyOrOwnArmamentStack(pointedOccupant, playerId) && !dryadAttachTargetOk(pointedOccupant, playerId, card)) return state;
       const cost = effectiveCastingCost(card, state, playerId);
       if (!canPayCost(player.effigyPool, cost)) return state;
       const { remaining, spent } = payCost(player.effigyPool, cost);
@@ -11214,16 +11452,6 @@ const gameReducerCore = (state, action) => {
       const occupant = state.board[action.cellId];
       if (!occupant || occupant.type !== 'being' || !pointedCells.includes(action.cellId)) return state;
       return applyRecollect({ ...state, pendingChoice: null }, action.cellId, cardName, label);
-    }
-
-    case 'RESOLVE_STRIKE_DOWN_TARGET': {
-      if (!state.pendingChoice || state.pendingChoice.kind !== 'strike-down-target') return state;
-      const { playerId, cardName, label } = state.pendingChoice;
-      const opponentId = opponentOf(playerId);
-      const occupant = state.board[action.cellId];
-      if (!occupant || occupant.type !== 'being' || occupant.ownerId !== opponentId || parseCellId(action.cellId).row !== FRONT_ROW[opponentId]) return state;
-      let next = addLog({ ...state, pendingChoice: null }, `${cardName}'s ${label} destroys ${occupant.card.name}.`);
-      return destroyBeing(next, action.cellId);
     }
 
     case 'RESOLVE_DROWN_SCREAMS_TARGET': {
@@ -11406,7 +11634,9 @@ const gameReducerCore = (state, action) => {
       if (!state.pendingChoice || state.pendingChoice.kind !== 'engage-buff-eot') return state;
       const { playerId, cardName, label, strengthBonus, lifespanBonus } = state.pendingChoice;
       const occupant = state.board[action.cellId];
-      if (!occupant || occupant.type !== 'being' || occupant.ownerId !== playerId || occupant.engaged) return state;
+      // No ownerId check — Boknean Wine's own printed text targets any
+      // Being, either owner (see the offer branch's own comment above).
+      if (!occupant || occupant.type !== 'being' || occupant.engaged) return state;
       return applyEngageStatBuff({ ...state, pendingChoice: null }, action.cellId, strengthBonus, lifespanBonus, playerId, cardName, label);
     }
 
@@ -11779,33 +12009,38 @@ const gameReducerCore = (state, action) => {
       return resolveProphecyModulateHitZero(next, cellId);
     }
 
-    // Legion's Onset — pays the chosen Lifespan, then summons one Vassal
-    // token per full 5 paid, auto-placed onto the lowest-sorted empty
-    // Mortal Realm tiles in order. A deliberate simplification: nothing
-    // else in this engine offers an individual placement choice per token
-    // for a MULTI-token creation effect (every other token-placement
-    // pendingChoice is for exactly one token at a time), and asking the
-    // player to place each of what could be several tokens one-by-one
-    // would be a real UX regression for little value — running out of
-    // empty tiles partway through just stops early with an honest log.
-    case 'RESOLVE_LEGION_ONSET_LIFESPAN': {
-      if (!state.pendingChoice || state.pendingChoice.kind !== 'legion-onset-pay-lifespan') return state;
-      const { playerId, cardName, label, maxX } = state.pendingChoice;
+    // Legion's Onset — the player already chose how many Vassal tokens to
+    // summon (declare time capped this at both the "can't drop to 0"
+    // Lifespan floor and the actual number of empty tiles available), so
+    // this just pays the matching Lifespan (5 per token) and hands off to
+    // the same board-native multi-cell picker Elderflower Ancient's own
+    // Blooming Vine tokens use (summon-vine-tokens-toggle, generalized via
+    // tokenKey/tokenName) so the player picks WHERE each one lands instead
+    // of them being auto-placed.
+    case 'RESOLVE_LEGION_ONSET_CHOOSE_COUNT': {
+      if (!state.pendingChoice || state.pendingChoice.kind !== 'legion-onset-choose-count') return state;
+      const { playerId, cardName, label, maxCount } = state.pendingChoice;
       const value = action.value;
-      if (!Number.isInteger(value) || value < 0 || value > maxX) return state;
-      const player = state.players[playerId];
-      let next = { ...state, pendingChoice: null, players: { ...state.players, [playerId]: { ...player, lifespan: player.lifespan - value } } };
-      next = addLog(next, `${playerId} pays ${value} Lifespan for ${cardName}'s ${label}.`);
-      const tokenCount = Math.floor(value / 5);
-      for (let i = 0; i < tokenCount; i++) {
-        const cells = emptyMortalCellsFor(next.board, playerId).sort();
-        if (cells.length === 0) {
-          next = addLog(next, `${cardName}'s ${label} has no empty tile left for another Vassal token.`);
-          break;
-        }
-        next = placeTokenOnBoard(next, playerId, TOKEN_REGISTRY['vassal'](), cells[0]);
+      if (!Number.isInteger(value) || value < 0 || value > maxCount) return state;
+      if (value === 0) {
+        return addLog({ ...state, pendingChoice: null }, `${cardName}'s ${label} summons no Vassal tokens.`);
       }
-      return checkWin(next);
+      const cost = value * 5;
+      const player = state.players[playerId];
+      if (player.lifespan - cost <= 0) return state;
+      let next = { ...state, players: { ...state.players, [playerId]: { ...player, lifespan: player.lifespan - cost } } };
+      next = addLog(next, `${playerId} pays ${cost} Lifespan for ${value} Vassal token(s) from ${cardName}'s ${label}.`);
+      // Was missing before this fix — every OTHER Lifespan-payment resolver
+      // in this file calls this (e.g. RESOLVE_PAY_LIFESPAN_OPTIONAL above),
+      // so Ravenous Lamtukka's own "Whenever you pay Lifespan gain +1/+1"
+      // silently never fired off Legion's Onset specifically.
+      next = triggerLifespanPaidReactions(next, playerId);
+      next = checkWin(next);
+      if (next.phase === 'gameover') return next;
+      return {
+        ...next,
+        pendingChoice: { kind: 'summon-vine-tokens-toggle', playerId, cardName, label, maxCount: value, selected: [], tokenKey: 'vassal', tokenName: 'Vassal' },
+      };
     }
 
     case 'RESOLVE_FORCE_COMBAT_SELECT_MINE': {
@@ -12351,11 +12586,20 @@ const gameReducerCore = (state, action) => {
       const occupant = state.board[action.cellId];
       if (!occupant || !(occupant.type === 'being' || animatedTopEntry(occupant))) return state;
       const view = actorView(occupant);
+      // A Being's own printed Lifespan is its max — restoring past it
+      // fizzles the excess (user ruling) rather than overshooting it, so a
+      // Being already at (or within `amount` of) max is still a legal
+      // target, it just gains less than the full amount, possibly 0.
+      const restored = Math.max(0, Math.min(amount, view.card.lifespan - view.currentLifespan));
       const next = {
         ...state, pendingChoice: null,
-        board: { ...state.board, [action.cellId]: writeActorState(occupant, { currentLifespan: view.currentLifespan + amount }) },
+        board: { ...state.board, [action.cellId]: writeActorState(occupant, { currentLifespan: view.currentLifespan + restored }) },
       };
-      return addLog(next, `${cardName}'s ${label} restores ${amount} Lifespan to ${view.card.name}.`);
+      return addLog(next, restored >= amount
+        ? `${cardName}'s ${label} restores ${restored} Lifespan to ${view.card.name}.`
+        : restored > 0
+          ? `${cardName}'s ${label} restores ${restored} Lifespan to ${view.card.name} (${amount - restored} fizzles — already at max).`
+          : `${cardName}'s ${label} fizzles — ${view.card.name} is already at max Lifespan.`);
     }
 
     case 'RESOLVE_RESTORE_LIFESPAN_TARGET_PLAYER': {
@@ -12383,14 +12627,20 @@ const gameReducerCore = (state, action) => {
 
     case 'RESOLVE_SUMMON_VINE_TOKENS_CONFIRM': {
       if (!state.pendingChoice || state.pendingChoice.kind !== 'summon-vine-tokens-toggle') return state;
-      const { playerId, cardName, label, selected } = state.pendingChoice;
+      // tokenKey/tokenName default to Blooming Vine (Elderflower Ancient,
+      // the original caller) — Legion's Onset's own count-choice step sets
+      // both explicitly to summon Vassal tokens instead through this same
+      // generic multi-cell picker.
+      const { playerId, cardName, label, selected, tokenKey, tokenName } = state.pendingChoice;
+      const makeToken = TOKEN_REGISTRY[tokenKey || 'blooming vine'];
+      const name = tokenName || 'Blooming Vine';
       let next = selected.reduce(
-        (s, cell) => (s.board[cell] ? s : placeTokenOnBoard(s, playerId, TOKEN_REGISTRY['blooming vine'](), cell)),
+        (s, cell) => (s.board[cell] ? s : placeTokenOnBoard(s, playerId, makeToken(), cell)),
         { ...state, pendingChoice: null },
       );
       return addLog(next, selected.length > 0
-        ? `${cardName}'s ${label} summons ${selected.length} Blooming Vine token(s).`
-        : `${cardName}'s ${label} summons no Blooming Vine tokens.`);
+        ? `${cardName}'s ${label} summons ${selected.length} ${name} token(s).`
+        : `${cardName}'s ${label} summons no ${name} tokens.`);
     }
 
     case 'RESOLVE_COPY_STATS': {
@@ -13118,7 +13368,10 @@ const gameReducerCore = (state, action) => {
 
       const conjureCost = effectiveCastingCost(card, state, playerId);
       if (!canPayCost(player.effigyPool, conjureCost)) return state;
-      if (STRIKE_DOWN_RE.test(stripFlavorText(card.textBox) || '') && !hasAttackerAvailable(state.board, playerId)) return state;
+      if (STRIKE_DOWN_RE.test(stripFlavorText(card.textBox) || '')) {
+        const blockingCell = attackPendingBlockingCell(state);
+        if (!blockingCell || state.board[blockingCell]?.type !== 'being') return state;
+      }
       // Desperate Finale: won't be offered at all without an affordable
       // engaged Being to pay its own additional cost with — same "graceful
       // non-offer" precedent as every other additional-cost gate.
@@ -13266,6 +13519,18 @@ const gameReducerCore = (state, action) => {
       // during an open priority window too, not just on the turn player's
       // own main phase (see the matching getLegalActions branch above).
       const playerId = state.reactiveWindow?.openFor ?? state.turnPlayer;
+      // Phase 2 of the priority-window rework (see the approved plan): a
+      // fresh Engage attempt (no reactiveWindow already open) declares —
+      // costs are paid, but the engaged-flip and the ability's own effect
+      // are BOTH deferred behind a real priority window — while an
+      // ACTIVATE_ENGAGE dispatched AS A RESPONSE (reactiveWindow already
+      // open) keeps today's atomic behavior unchanged: cost, engage, and
+      // effect all in one step, no new stack depth. Only ACTIVATE_ENGAGE
+      // itself gets this split this phase — ACTIVATE_GROUND_RELIC_ENGAGE/
+      // ACTIVATE_ARMAMENT_ENGAGE stay atomic, a deliberate, documented
+      // scope boundary (no real card in the user's own examples needs
+      // them deferred yet), not an oversight.
+      const isReactiveResponse = !!state.reactiveWindow;
       if (state.phase !== 'playing') return state;
       const occupant = state.board[action.cellId];
       const isEngageable = occupant?.type === 'being' || occupant?.type === 'relic';
@@ -13313,11 +13578,25 @@ const gameReducerCore = (state, action) => {
           ...state.board,
           [action.cellId]: {
             ...occupant,
-            engaged: true,
+            // The engaged-flip itself is part of what's deferred for a
+            // fresh declaration (see the design-fork comment above the
+            // reducer case) — Boknean Wine's own "Engage target being"
+            // already excludes already-engaged Beings from its own
+            // candidate pool (applyEngageStatBuff's own resolveOrLogEffect
+            // branch), so flipping this immediately would make it
+            // structurally impossible for a response to ever "get there
+            // first" and negate the attempt, contradicting the user's own
+            // worked example. A response (isReactiveResponse) still flips
+            // it immediately, unchanged from before.
+            ...(isReactiveResponse ? { engaged: true } : {}),
             ...(counterCost ? { counters: { ...occupant.counters, [counterCost.type]: haveCounters - counterCost.amount } } : {}),
           },
         },
       };
+      // Every cost below is paid/sunk immediately regardless of declare
+      // vs. response — only the engaged-flip and the ability's own effect
+      // are ever deferred, matching this engine's established "a paid
+      // cost doesn't refund on a fizzled effect" convention.
       if (lifespanCost > 0) {
         next = {
           ...next,
@@ -13344,7 +13623,6 @@ const gameReducerCore = (state, action) => {
       if (counterCost) {
         next = addLog(next, `${playerId} spends ${counterCost.amount} ${counterCost.type} Counter(s) to engage ${occupant.card.name}.`);
       }
-      next = addLog(next, `${playerId} engages ${occupant.card.name}'s ability.`);
       // selfCellId now passed for a Relic's own Engage too, not just a
       // Being's — every resolver branch that reads it already checks the
       // occupant's own type first (e.g. self-damage requires a Being), so
@@ -13356,9 +13634,19 @@ const gameReducerCore = (state, action) => {
       // TYPED_FROM_PURGATORY_RE, above). Only added to context when there
       // actually was a sacrifice, so every other Engage's context shape is
       // unchanged.
-      return resolveOrLogEffect(next, playerId, occupant.card.name, engageEffect, 'Engage ability', {
-        selfCellId: action.cellId, ...(sacrificedCardName ? { excludeName: sacrificedCardName } : {}),
-      });
+      const engageContext = { selfCellId: action.cellId, ...(sacrificedCardName ? { excludeName: sacrificedCardName } : {}) };
+      if (isReactiveResponse) {
+        next = addLog(next, `${playerId} engages ${occupant.card.name}'s ability.`);
+        return resolveOrLogEffect(next, playerId, occupant.card.name, engageEffect, 'Engage ability', engageContext);
+      }
+      next = addLog(next, `${playerId} attempts to engage ${occupant.card.name}'s ability.`);
+      return {
+        ...next,
+        pendingResolution: {
+          kind: 'activate-engage', declaringPlayer: playerId, cellId: action.cellId,
+          cardName: occupant.card.name, engageEffect, context: engageContext,
+        },
+      };
     }
 
     case 'ACTIVATE_GROUND_RELIC_ENGAGE': {
@@ -13384,6 +13672,18 @@ const gameReducerCore = (state, action) => {
         }
         next = { ...next, players: { ...next.players, [playerId]: { ...player, effigyPool: pool } } };
         next = addLog(next, `${playerId} pays ${effigyCost.amount} ${effigyCost.color} for ${occupant.card.name}'s ability.`);
+      }
+
+      // Lesser Summoning Circle: "Pay (5) Lifespan, Engage: X" — same
+      // sunk-immediately convention ACTIVATE_ENGAGE's own lifespanCost
+      // deduction uses, just for a ground Relic instead of a board one.
+      // Was missing entirely before this fix, so this cost was silently free.
+      const lifespanCost = occupant.card.keywords?.engageLifespanCost || 0;
+      if (lifespanCost > 0) {
+        const payer = next.players[playerId];
+        next = { ...next, players: { ...next.players, [playerId]: { ...payer, lifespan: payer.lifespan - lifespanCost } } };
+        next = addLog(next, `${playerId} pays ${lifespanCost} Lifespan to engage ${occupant.card.name}.`);
+        next = triggerLifespanPaidReactions(next, playerId);
       }
 
       // Vadē Rah: "Sacrifice the Being on this tile" — the co-located Being
@@ -13681,8 +13981,83 @@ const clearStuckPendingChoice = (state) => {
 // same CAST_CONJURING reducer case / resolveOrLogEffect pipeline a normal
 // cast already uses (see that case's own playerId derivation). Chaining is
 // achieved purely by "does anyone want to respond to what just happened,"
-// asked once per event — a documented simplification that's safe because
-// no real card in this set needs deferred/queued resolution.
+// asked once per event.
+//
+// state.pendingResolution (added for Medium Mage's own "respond before the
+// trigger lands" case — confirmed with the user) is the one real exception
+// to "no deferred/queued resolution": certain declared-but-not-yet-applied
+// effects (currently just a Being's own When Summoned trigger — see
+// placeBeingOnBoard) ride behind this SAME reactiveWindow instead of
+// resolving inline, so the window opens BEFORE the effect applies, not
+// after. `pendingResolution` itself only ever holds the deferred data; it
+// never drives whose turn it is to act — `reactiveWindow` still does that,
+// completely unchanged. `resolvePendingResolution` (below) is what
+// actually fires the deferred effect, called from the two places this
+// function closes a window (an explicit PASS_PRIORITY, or the auto-close
+// loop finding nobody has anything real to respond with) rather than from
+// gameReducerCore directly — a response never gets its own deferred
+// window (see ACTIVATE_ENGAGE/SUMMON_BEING's own gating once phases 2-3
+// land), so there's no risk of this recursing into a second, nested
+// pendingResolution.
+const resolvePendingResolution = (state) => {
+  const { pendingResolution } = state;
+  if (!pendingResolution) return state;
+  const cleared = { ...state, pendingResolution: null };
+  if (pendingResolution.kind === 'summon-being') {
+    const { declaringPlayer, cellId, cardName, whenSummonedText, instanceId } = pendingResolution;
+    // The summoned Being might not be there anymore by the time priority
+    // actually settles (a response destroyed it, or — more prosaically —
+    // something else removed it) — re-checked fresh here rather than
+    // assumed, same "never trust stale data across a window" discipline
+    // the whole point of this mechanism exists for.
+    if (cleared.board[cellId]?.card?.instanceId !== instanceId) {
+      return addLog(cleared, `${cardName}'s When Summoned trigger fizzles — it's no longer on the battlefield.`);
+    }
+    let next = addLog(cleared, `${cardName}'s When Summoned triggers.`);
+    return resolveOrLogEffect(next, declaringPlayer, cardName, whenSummonedText, 'When Summoned', { selfCellId: cellId });
+  }
+  if (pendingResolution.kind === 'activate-engage') {
+    const { declaringPlayer, cellId, cardName, engageEffect, context } = pendingResolution;
+    const occupant = cleared.board[cellId];
+    // Re-validated fresh, per the design fork this whole kind exists for:
+    // a response (Boknean Wine et al.) may have engaged this same
+    // permanent first, or removed it outright — either way the original
+    // attempt fails here rather than assuming its own declare-time
+    // snapshot is still true. The costs already paid at declare time are
+    // NOT refunded (same "sunk cost" precedent this engine already
+    // follows everywhere else a cost is paid before a fizzled effect).
+    if (!occupant) {
+      return addLog(cleared, `${cardName}'s Engage ability fails to resolve — it's no longer on the battlefield.`);
+    }
+    if (occupant.engaged) {
+      return addLog(cleared, `${cardName}'s Engage ability fails to resolve — it's already Engaged.`);
+    }
+    let next = { ...cleared, board: { ...cleared.board, [cellId]: { ...occupant, engaged: true } } };
+    next = addLog(next, `${declaringPlayer} engages ${cardName}'s ability.`);
+    return resolveOrLogEffect(next, declaringPlayer, cardName, engageEffect, 'Engage ability', context);
+  }
+  if (pendingResolution.kind === 'attack') {
+    const { declaringPlayer, fromCellId, cardName, noDamage } = pendingResolution;
+    const occupant = cleared.board[fromCellId];
+    const isBeing = occupant?.type === 'being';
+    const attackerTop = animatedTopEntry(occupant);
+    // Re-validated fresh — a response destroying the attacker outright
+    // isn't reachable by any in-scope card yet, but the check costs
+    // nothing and matches every other kind's own "never trust stale data
+    // across a window" discipline. resolveAttackFrom (below) separately
+    // re-fetches the DEFENDER fresh too, which IS reachable today (Strike
+    // Down destroys the blocking Being during exactly this window).
+    if (!occupant || occupant.ownerId !== declaringPlayer || !(isBeing || attackerTop)) {
+      return addLog(cleared, `${cardName}'s attack fizzles — it's no longer on the battlefield.`);
+    }
+    // `noDamage` (Strike Down — see STRIKE_DOWN_RE's own resolution) was
+    // stashed directly onto this pendingResolution while the window was
+    // still open, since a response resolves atomically against the SAME
+    // one rather than opening its own.
+    return resolveAttackFrom(cleared, declaringPlayer, fromCellId, !!noDamage);
+  }
+  return cleared;
+};
 //
 // state.reactiveWindow is `null | { openFor: playerId }` — no "who has
 // passed" bookkeeping is needed: PASS_PRIORITY from the current openFor
@@ -13695,14 +14070,33 @@ const clearStuckPendingChoice = (state) => {
 // is the fully-resolved post-action state, `action` is what was just
 // dispatched.
 const manageReactiveWindow = (prevState, state, action) => {
-  if (state.phase !== 'playing' || state.winner || state.pendingChoice) {
+  if (state.phase !== 'playing' || state.winner) {
     // Always explicitly null (never left undefined) — createInitialState
-    // sets it to null too, so `reactiveWindow` is consistently either
-    // `null` or a real `{ openFor }` object everywhere, same as
-    // pendingChoice's own convention. Preserves reference equality when it
-    // was already null — many existing tests assert a rejected/no-op
+    // sets it to null too, so `reactiveWindow`/`pendingResolution` are
+    // consistently either `null` or a real object everywhere, same as
+    // pendingChoice's own convention. Preserves reference equality when
+    // both were already null — many existing tests assert a rejected/no-op
     // action returns the exact same state object, same discipline every
-    // other function in this recompute chain already follows.
+    // other function in this recompute chain already follows. A genuinely
+    // ending/inactive game is the one case a still-pending resolution is
+    // simply dropped rather than preserved — see the pendingChoice branch
+    // just below for the case that instead keeps it alive.
+    return (state.reactiveWindow == null && state.pendingResolution == null)
+      ? state : { ...state, reactiveWindow: null, pendingResolution: null };
+  }
+  if (state.pendingChoice) {
+    // A pendingChoice takes priority (this engine only ever tracks one
+    // choice at a time) — reactiveWindow closes exactly like the
+    // phase/winner case above, but `pendingResolution`, if any, is
+    // deliberately NOT cleared here. A response cast/engaged during an
+    // open window can itself need a real target choice (e.g. One Above
+    // All with 2+ legal Beings) — dropping the still-pending resolution
+    // in that moment would silently vaporize a real game effect (Medium
+    // Mage's own damage, say) rather than just delaying it. Once the
+    // blocking choice resolves, the "no window was open" branch below
+    // naturally opens a fresh window scoped to whoever's choice just
+    // finished, and the still-pending resolution keeps waiting behind it
+    // exactly as if nothing had interrupted it.
     return state.reactiveWindow == null ? state : { ...state, reactiveWindow: null };
   }
 
@@ -13724,7 +14118,7 @@ const manageReactiveWindow = (prevState, state, action) => {
     // own whitelist above).
     const reactor = prevState.reactiveWindow.openFor;
     if (action.type === 'PASS_PRIORITY') {
-      next = { ...next, reactiveWindow: null };
+      next = resolvePendingResolution({ ...next, reactiveWindow: null });
     } else if (REACTIVE_RESPONSE_ACTION_TYPES.has(action.type)) {
       // Defense in depth, mirroring the no-op check in the "no window was
       // open" branch below: a REACTIVE_RESPONSE_ACTION_TYPES entry that the
@@ -13779,7 +14173,7 @@ const manageReactiveWindow = (prevState, state, action) => {
     const { openFor } = next.reactiveWindow;
     const hasRealOption = getLegalActions(next, openFor).some(a => REACTIVE_RESPONSE_ACTION_TYPES.has(a.type));
     if (hasRealOption) break;
-    next = { ...next, reactiveWindow: null };
+    next = resolvePendingResolution({ ...next, reactiveWindow: null });
   }
   return next;
 };
@@ -13788,11 +14182,26 @@ const manageReactiveWindow = (prevState, state, action) => {
 // recomputeXBeings above) — refreshed after every single action, not just
 // once at the start of a turn, so a mid-turn Time Counter change (an Engage
 // cost, Freeze Frame, Moment of Doubt, etc.) is reflected immediately.
-export const gameReducer = (state, action) =>
-  clearStuckPendingChoice(
-    manageReactiveWindow(
-      state,
-      recomputeKalmahkaOverrides(recomputeBoardWideAuraBonuses(recomputeConditionalBonuses(recomputeDeathCountBonuses(recomputeXBeings(gameReducerCore(state, action)))))),
-      action
-    )
-  );
+const recomputeLiveAuras = (state) =>
+  recomputeKalmahkaOverrides(recomputeBoardWideAuraBonuses(recomputeConditionalBonuses(recomputeDeathCountBonuses(recomputeXBeings(state)))));
+
+export const gameReducer = (state, action) => {
+  const recomputed = recomputeLiveAuras(gameReducerCore(state, action));
+  let afterWindow = manageReactiveWindow(state, recomputed, action);
+  // manageReactiveWindow can itself apply a deferred effect
+  // (resolvePendingResolution) when a pre-resolution priority window
+  // closes — e.g. real combat damage finally landing once a declared
+  // attack's window resolves — which changes board/player state the same
+  // way any other real action would, and so needs this exact same live-
+  // recompute pass every other dispatch already gets (found via Restless
+  // Dead's own live "+2/+0 for each Being that died this turn" not
+  // picking up a death that happened only inside this deferred
+  // resolution, not the original dispatch). Skipped when nothing actually
+  // changed here — the overwhelmingly common case, a window that just
+  // opened/flipped/closed with no deferred effect firing — so a normal
+  // dispatch pays no extra cost.
+  if (afterWindow.board !== recomputed.board || afterWindow.players !== recomputed.players) {
+    afterWindow = recomputeLiveAuras(afterWindow);
+  }
+  return clearStuckPendingChoice(afterWindow);
+};

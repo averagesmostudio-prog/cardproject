@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { beginTurn, endTurn, checkWin } from './turn.js';
-import { gameReducer } from './actions.js';
+import { gameReducer, getLegalActions } from './actions.js';
 
 const player = (overrides = {}) => ({
   id: 'A',
@@ -514,6 +514,142 @@ describe('endTurn', () => {
     });
     const next = endTurn(state);
     expect(next.log.some(e => e.message.includes('Lingering Doubt grows'))).toBe(false);
+  });
+
+  describe('Passing Doubt: "At the end of your turn target Doubt you control is dealt (1) Lifespan Damage." — a real choice among 2+ candidates', () => {
+    const passingDoubt = (ownerId, instanceId, overrides = {}) => ({
+      type: 'being', ownerId,
+      card: { id: 'pd', instanceId, name: 'Passing Doubt', typing: 'Null, Being', strength: 2, lifespan: 2, keywords: { endOfTurnDamageNamedFamily: { amount: 1, namePart: 'Doubt' } } },
+      currentLifespan: 2, engaged: false, ...overrides,
+    });
+
+    it('with only itself as a candidate, damages itself directly — no choice needed', () => {
+      const state = baseState({
+        turnPlayer: 'A',
+        board: { r2c1: passingDoubt('A', 'pd#0') },
+        players: { A: player({ lifespan: 50 }), B: player() },
+      });
+      const next = endTurn(state);
+      expect(next.pendingChoice).toBeFalsy();
+      expect(next.board.r2c1.currentLifespan).toBe(1);
+      expect(next.log.some(e => e.message.includes("end-of-turn trigger deals 1 Lifespan Damage"))).toBe(true);
+    });
+
+    it('with 2+ Doubt-family Beings controlled, opens a real choice instead of guessing', () => {
+      const lingeringDoubt = {
+        type: 'being', ownerId: 'A',
+        card: { id: 'ld', instanceId: 'ld#0', name: 'Lingering Doubt', typing: 'Null, Being', strength: 2, lifespan: 2, keywords: {} },
+        currentLifespan: 2, engaged: false,
+      };
+      const state = baseState({
+        turnPlayer: 'A',
+        board: { r2c1: passingDoubt('A', 'pd#0'), r2c2: lingeringDoubt },
+        players: { A: player({ lifespan: 50 }), B: player() },
+      });
+      const next = endTurn(state);
+      expect(next.pendingChoice).toEqual({
+        kind: 'end-of-turn-damage-named-family-target', playerId: 'A', cardName: 'Passing Doubt', amount: 1, namePart: 'Doubt', remainingSources: [],
+      });
+      // Nothing damaged yet — both candidates still at full Lifespan.
+      expect(next.board.r2c1.currentLifespan).toBe(2);
+      expect(next.board.r2c2.currentLifespan).toBe(2);
+    });
+
+    it('offers both the trigger source itself and the other Doubt-family Being as legal targets', () => {
+      const lingeringDoubt = {
+        type: 'being', ownerId: 'A',
+        card: { id: 'ld', instanceId: 'ld#0', name: 'Lingering Doubt', typing: 'Null, Being', strength: 2, lifespan: 2, keywords: {} },
+        currentLifespan: 2, engaged: false,
+      };
+      const state = baseState({
+        turnPlayer: 'A',
+        board: { r2c1: passingDoubt('A', 'pd#0'), r2c2: lingeringDoubt },
+        players: { A: player({ lifespan: 50 }), B: player() },
+      });
+      const opened = endTurn(state);
+      const legal = getLegalActions(opened, 'A');
+      expect(legal).toContainEqual({ type: 'RESOLVE_END_OF_TURN_DAMAGE_NAMED_FAMILY_TARGET', cellId: 'r2c1' });
+      expect(legal).toContainEqual({ type: 'RESOLVE_END_OF_TURN_DAMAGE_NAMED_FAMILY_TARGET', cellId: 'r2c2' });
+    });
+
+    it('resolving the choice damages exactly the chosen target, still works after the turn has switched', () => {
+      const lingeringDoubt = {
+        type: 'being', ownerId: 'A',
+        card: { id: 'ld', instanceId: 'ld#0', name: 'Lingering Doubt', typing: 'Null, Being', strength: 2, lifespan: 2, keywords: {} },
+        currentLifespan: 2, engaged: false,
+      };
+      const state = baseState({
+        turnPlayer: 'A',
+        board: { r2c1: passingDoubt('A', 'pd#0'), r2c2: lingeringDoubt },
+        players: { A: player({ lifespan: 50 }), B: player() },
+      });
+      const opened = endTurn(state);
+      expect(opened.turnPlayer).toBe('B'); // the turn already switched — the choice just gates further play
+      const resolved = gameReducer(opened, { type: 'RESOLVE_END_OF_TURN_DAMAGE_NAMED_FAMILY_TARGET', cellId: 'r2c2' });
+      expect(resolved.board.r2c1.currentLifespan).toBe(2); // untouched — not the chosen one
+      expect(resolved.board.r2c2.currentLifespan).toBe(1);
+      expect(resolved.pendingChoice).toBeNull();
+    });
+
+    it('never offers a target belonging to the opponent', () => {
+      const opponentDoubt = {
+        type: 'being', ownerId: 'B',
+        card: { id: 'od', instanceId: 'od#0', name: 'Lingering Doubt', typing: 'Null, Being', strength: 2, lifespan: 2, keywords: {} },
+        currentLifespan: 2, engaged: false,
+      };
+      const anotherOwn = {
+        type: 'being', ownerId: 'A',
+        card: { id: 'ad', instanceId: 'ad#0', name: 'Lingering Doubt', typing: 'Null, Being', strength: 2, lifespan: 2, keywords: {} },
+        currentLifespan: 2, engaged: false,
+      };
+      const state = baseState({
+        turnPlayer: 'A',
+        board: { r2c1: passingDoubt('A', 'pd#0'), r2c2: anotherOwn, r4c1: opponentDoubt },
+        players: { A: player({ lifespan: 50 }), B: player() },
+      });
+      const opened = endTurn(state);
+      const legal = getLegalActions(opened, 'A');
+      expect(legal.some(a => a.cellId === 'r4c1')).toBe(false);
+    });
+
+    it('a Doubt-only build: two SEPARATE ambiguous trigger sources in the same End Step each get their own real choice, chained — not just the first', () => {
+      // Two copies of Passing Doubt plus a third Doubt-family Being: BOTH
+      // copies independently trigger, and each is ambiguous (3 real
+      // candidates each time it fires) — the exact shape that used to
+      // leave every source after the first silently unresolved for the
+      // turn.
+      const other = {
+        type: 'being', ownerId: 'A',
+        card: { id: 'ld', instanceId: 'ld#0', name: 'Lingering Doubt', typing: 'Null, Being', strength: 2, lifespan: 2, keywords: {} },
+        currentLifespan: 2, engaged: false,
+      };
+      const state = baseState({
+        turnPlayer: 'A',
+        board: { r2c1: passingDoubt('A', 'pd1#0'), r2c2: passingDoubt('A', 'pd2#0'), r2c3: other },
+        players: { A: player({ lifespan: 50 }), B: player() },
+      });
+      const opened = endTurn(state);
+      // First choice is open, with the second source queued up.
+      expect(opened.pendingChoice.kind).toBe('end-of-turn-damage-named-family-target');
+      expect(opened.pendingChoice.remainingSources).toEqual(['r2c2']);
+      expect(opened.board.r2c1.currentLifespan).toBe(2);
+      expect(opened.board.r2c2.currentLifespan).toBe(2);
+      expect(opened.board.r2c3.currentLifespan).toBe(2);
+
+      // Resolving the first choice damages exactly the chosen target, AND
+      // immediately opens the second source's own real choice — it is not
+      // skipped.
+      const afterFirst = gameReducer(opened, { type: 'RESOLVE_END_OF_TURN_DAMAGE_NAMED_FAMILY_TARGET', cellId: 'r2c3' });
+      expect(afterFirst.board.r2c3.currentLifespan).toBe(1); // the first choice's target took it
+      expect(afterFirst.pendingChoice.kind).toBe('end-of-turn-damage-named-family-target');
+      expect(afterFirst.pendingChoice.remainingSources).toEqual([]);
+
+      // Resolving the second choice damages ITS chosen target and finally
+      // clears pendingChoice — the whole queue is drained.
+      const afterSecond = gameReducer(afterFirst, { type: 'RESOLVE_END_OF_TURN_DAMAGE_NAMED_FAMILY_TARGET', cellId: 'r2c1' });
+      expect(afterSecond.board.r2c1.currentLifespan).toBe(1);
+      expect(afterSecond.pendingChoice).toBeNull();
+    });
   });
 
   it('Minute-taur moves backward (direction 5) at the end of its controller\'s turn', () => {

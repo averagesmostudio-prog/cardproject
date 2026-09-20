@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Minus, Upload, Search, X, ChevronLeft, ChevronRight } from 'lucide-react';
-import { EFFIGY_COLORS, EFFIGY_TYPE_COLORS, getBorderTypeForCard, resolveCardArt } from '../../lib/cardData.js';
+import { EFFIGY_COLORS, EFFIGY_TYPE_COLORS, getBorderTypeForCard, resolveCardArt, totalCastingCost } from '../../lib/cardData.js';
 import { parseDeckImport } from '../../lib/deckExport.js';
 import { renderCardOnCanvas, DEFAULT_POSITIONS } from '../../lib/cardRender.js';
 import { useCardFont, useBorderImages, useCardArtImages } from '../../lib/useCardAssets.js';
@@ -9,6 +9,49 @@ import {
   EFFIGY_DECK_SIZE, validateMainDeck, validateEffigyDeck,
 } from '../engine/deck.js';
 import CardThumbnail from './CardThumbnail.jsx';
+
+// "Strength=2", "Lifespan<3", "Cost>1" — a search term matching this pattern
+// filters by a numeric card field (an exact/less-than/greater-than
+// comparison) instead of substring-matching text. FIELD_GETTERS' keys are
+// every accepted spelling of a field; "cost" means total printed Effigy
+// cost (totalCastingCost), matching how DeckBuilder already sorts by cost.
+const FIELD_GETTERS = {
+  strength: (card) => card.strength || 0,
+  str: (card) => card.strength || 0,
+  lifespan: (card) => card.lifespan || 0,
+  life: (card) => card.lifespan || 0,
+  cost: (card) => totalCastingCost(card),
+};
+const FIELD_QUERY_RE = /^(strength|str|lifespan|life|cost)\s*(=|<|>)\s*(\d+)$/i;
+
+const cardMatchesText = (card, q) =>
+  card.name.toLowerCase().includes(q) ||
+  (card.textBox || '').toLowerCase().includes(q) ||
+  (card.rarity || '').toLowerCase().includes(q) ||
+  (card.typing || '').toLowerCase().includes(q) ||
+  (card.effigyType || '').includes(q) ||
+  Object.keys(card.castingCost?.colored || {}).some(color => color.includes(q));
+
+const cardMatchesFieldQuery = (card, field, op, value) => {
+  const actual = FIELD_GETTERS[field](card);
+  if (op === '=') return actual === value;
+  if (op === '<') return actual < value;
+  return actual > value; // '>'
+};
+
+// Multiple terms combine with ":" (e.g. "Strength=2:Cost<3"), ANDed
+// together — each term is either a field comparison or, falling back to the
+// original behavior, a free-text substring match.
+const filterCards = (cards, search) => {
+  const terms = search.trim().split(':').map(t => t.trim()).filter(Boolean);
+  if (terms.length === 0) return cards;
+  return cards.filter(card => terms.every(term => {
+    const m = term.match(FIELD_QUERY_RE);
+    return m
+      ? cardMatchesFieldQuery(card, m[1].toLowerCase(), m[2], parseInt(m[3], 10))
+      : cardMatchesText(card, term.toLowerCase());
+  }));
+};
 
 export default function DeckBuilder({ pool, onStart, onBack }) {
   const eligible = useMemo(
@@ -111,17 +154,15 @@ export default function DeckBuilder({ pool, onStart, onBack }) {
 
   // Shared by both "browse the whole pool" (List/Visual) and "review just
   // what's in the deck so far" (Deck) — same search box and sort dropdown
-  // apply to whichever source list is currently showing.
+  // apply to whichever source list is currently showing. A term like
+  // "Strength=2" or "Cost<3" filters by a numeric card field instead of
+  // substring-matching text; multiple terms combine with ":" (e.g.
+  // "Strength=2:Cost<3"), ANDed together — see filterCards below. Any term
+  // that isn't one of these field comparisons falls back to the original
+  // free-text substring search, so a plain query still behaves exactly as
+  // before.
   const filterAndSort = useCallback((cards) => {
-    const q = search.trim().toLowerCase();
-    const filtered = !q ? cards : cards.filter(card =>
-      card.name.toLowerCase().includes(q) ||
-      (card.textBox || '').toLowerCase().includes(q) ||
-      (card.rarity || '').toLowerCase().includes(q) ||
-      (card.typing || '').toLowerCase().includes(q) ||
-      (card.effigyType || '').includes(q) ||
-      Object.keys(card.castingCost?.colored || {}).some(color => color.includes(q))
-    );
+    const filtered = filterCards(cards, search);
 
     if (sortBy === 'none') return filtered;
     const sorted = [...filtered];
@@ -256,7 +297,7 @@ export default function DeckBuilder({ pool, onStart, onBack }) {
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search by name, text, or rarity…"
+                placeholder='Search by name, text, or rarity… or "Strength=2:Cost<3"'
                 className="w-full pl-8 pr-3 py-1.5 text-sm border border-stone-300 rounded focus:outline-none focus:ring-1 focus:ring-stone-400"
               />
             </div>

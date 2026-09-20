@@ -53,7 +53,7 @@ const lifeColor = (value) => {
 function LifeBadge({ value, flash, targetAction, onSelectTarget }) {
   return (
     <div
-      className={`relative text-center leading-tight rounded-lg transition ${targetAction ? 'cursor-pointer ring-2 ring-amber-400 ring-offset-2 ring-offset-black animate-pulse hover:bg-amber-400/10' : ''}`}
+      className={`relative text-center leading-tight rounded-lg transition ${targetAction ? 'cursor-pointer ring-2 ring-green-400 ring-offset-2 ring-offset-black animate-pulse hover:bg-green-400/10' : ''}`}
       onClick={targetAction ? () => onSelectTarget(targetAction) : undefined}
       role={targetAction ? 'button' : undefined}
       title={targetAction ? 'Target this Lifespan total' : undefined}
@@ -81,7 +81,12 @@ function LifeBadge({ value, flash, targetAction, onSelectTarget }) {
 // cell at all (RULES.md > Card types), so like a Conjuring it resolves
 // immediately from hand instead of needing a cell picked afterward (see
 // onHandSelect).
-const CELL_TARGET_TYPES = ['SUMMON_BEING', 'PLAY_PROPHECY', 'PLACE_RELIC', 'ATTACH_ARMAMENT'];
+// RESOLVE_SUMMON_HAND_BEING_POINTED (Collapsing Bridge's own "you may
+// summon a Being on a tile this points to") is the same hand-card-then-
+// cell two-step as a normal SUMMON_BEING, just gated behind a pendingChoice
+// instead of being freely offered — including it here is what makes
+// playableIds/highlightCells/onCellClick pick it up for free.
+const CELL_TARGET_TYPES = ['SUMMON_BEING', 'PLAY_PROPHECY', 'PLACE_RELIC', 'ATTACH_ARMAMENT', 'RESOLVE_SUMMON_HAND_BEING_POINTED'];
 
 // pendingChoice kinds that resolve by picking exactly one board cell, with
 // no further sub-choice needed — the same board-native interaction
@@ -120,7 +125,6 @@ const SINGLE_CELL_CHOICE_KINDS = {
   'add-counter-relic-target': { actionType: 'RESOLVE_ADD_COUNTER_RELIC_TARGET', cellField: 'cellId' },
   'sacrifice-relic-cost': { actionType: 'RESOLVE_SACRIFICE_RELIC_COST', cellField: 'cellId' },
   'vyu-bhata-target': { actionType: 'RESOLVE_VYU_BHATA_TARGET', cellField: 'cellId' },
-  'strike-down-target': { actionType: 'RESOLVE_STRIKE_DOWN_TARGET', cellField: 'cellId' },
   'sacrifice-pointed-target': { actionType: 'RESOLVE_SACRIFICE_POINTED_TARGET', cellField: 'cellId' },
   'sacrifice-typed-cost-limit': { actionType: 'RESOLVE_SACRIFICE_TYPED_COST_LIMIT', cellField: 'cellId' },
   'drown-screams-target': { actionType: 'RESOLVE_DROWN_SCREAMS_TARGET', cellField: 'cellId' },
@@ -147,6 +151,7 @@ const SINGLE_CELL_CHOICE_KINDS = {
   // land on (RESOLVE_CREATE_TOKEN_CHOICE, actions.js) — the same board-
   // native highlighted-tile click every other single-cell choice above uses.
   'ethereal-token-location': { actionType: 'RESOLVE_ETHEREAL_TOKEN_LOCATION', cellField: 'cellId' },
+  'end-of-turn-damage-named-family-target': { actionType: 'RESOLVE_END_OF_TURN_DAMAGE_NAMED_FAMILY_TARGET', cellField: 'cellId' },
   'add-counter-typed-pointed-target': { actionType: 'RESOLVE_ADD_COUNTER_TYPED_POINTED_TARGET', cellField: 'cellId' },
   'move-armament-destination': { actionType: 'RESOLVE_MOVE_ARMAMENT_DESTINATION', cellField: 'cellId' },
   'restore-lifespan-target': { actionType: 'RESOLVE_RESTORE_LIFESPAN_TARGET', cellField: 'cellId' },
@@ -193,7 +198,7 @@ const TOGGLE_CHOICE_KINDS = {
 const NUMERIC_CHOICE_KINDS = {
   'choose-x-value': { actionType: 'RESOLVE_CHOOSE_X_VALUE', max: 'maxX', prompt: (pc) => `${pc.cardName}: how much additional Essence to pay for its (X)?` },
   'choose-prophecy-timer': { actionType: 'RESOLVE_CHOOSE_PROPHECY_TIMER', max: 'maxValue', prompt: (pc) => `${pc.cardName}: how many Time Counters should it enter with?` },
-  'legion-onset-pay-lifespan': { actionType: 'RESOLVE_LEGION_ONSET_LIFESPAN', max: 'maxX', prompt: (pc) => `${pc.cardName}: how much Lifespan to pay? (1 Vassal token per 5 paid)` },
+  'legion-onset-choose-count': { actionType: 'RESOLVE_LEGION_ONSET_CHOOSE_COUNT', max: 'maxCount', prompt: (pc) => `${pc.cardName}: how many Vassal tokens to summon? (5 Lifespan each)` },
 };
 
 // One short line of banner text per SINGLE_CELL_CHOICE_KINDS entry,
@@ -266,8 +271,6 @@ const singleCellChoiceLabel = (pendingChoice) => {
       return `${cardName}: choose a highlighted Relic to sacrifice.`;
     case 'vyu-bhata-target':
       return `${cardName}: choose a highlighted Being to give +1/+1 (plus 1 for each adjacent Being you control).`;
-    case 'strike-down-target':
-      return `${cardName}: choose a highlighted blocking Being to destroy.`;
     case 'sacrifice-pointed-target':
       return `${cardName}: choose a highlighted Being to sacrifice.`;
     case 'sacrifice-typed-cost-limit':
@@ -314,6 +317,8 @@ const singleCellChoiceLabel = (pendingChoice) => {
       return `${cardName}: choose a highlighted Being you control to return to hand and resummon for free.`;
     case 'summon-sacrifice-cost':
       return `${cardName}: choose ${pendingChoice.amount - pendingChoice.selected.length} more highlighted Being(s) to sacrifice as an additional cost.`;
+    case 'end-of-turn-damage-named-family-target':
+      return `${cardName}: choose a highlighted Being to take ${pendingChoice.amount} Lifespan Damage.`;
     default:
       return `${cardName}: choose a highlighted tile.`;
   }
@@ -383,6 +388,15 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
   const [modulateDeltaCell, setModulateDeltaCell] = useState(null);
   const [expandedCell, setExpandedCell] = useState(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  // `.slice(-30)` on every render would otherwise hand ActionLog a brand
+  // new array reference each time — including the once-a-second re-render
+  // from the live match clock (setLiveElapsedMs below) — which made its own
+  // useEffect(() => scrollTop = scrollHeight, [entries]) think new entries
+  // had arrived and yank the panel back to the bottom every second,
+  // fighting any manual scroll-up. Memoized on state.log itself (a fresh
+  // reference only when a real dispatch appends to it) so the panel only
+  // snaps to bottom when there's actually something new to show.
+  const historyEntries = useMemo(() => state.log.slice(-30), [state.log]);
   const [purgatoryOwner, setPurgatoryOwner] = useState(null); // null | HUMAN | AI
   const [altarsOwner, setAltarsOwner] = useState(null); // null | HUMAN | AI
   const [purgatoryPreviewIndex, setPurgatoryPreviewIndex] = useState(null);
@@ -764,6 +778,18 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
     return set;
   }, [legalActions, selectedHand, selectedCell, state.pendingChoice, reanimatingPurgatoryId, reanimateSacrificeCandidates]);
 
+  // The one board cell the currently-open reactive window's own pending
+  // effect is about (Medium Mage's summoned Being, an Engage attempt, a
+  // declared attacker) — a distinct yellow highlight from the green
+  // target-selection ring below, so it's visually obvious which card is
+  // "the thing being responded to" until the window closes and it resolves.
+  // No pendingResolution (e.g. a reactive window opened after a plain
+  // CAST_CONJURING that already resolved atomically) means there's no
+  // single cell to outline.
+  const respondingCellId = state.reactiveWindow
+    ? state.pendingResolution?.cellId || state.pendingResolution?.fromCellId || null
+    : null;
+
   const toggledCells = useMemo(() => {
     if (!TOGGLE_CHOICE_KINDS[state.pendingChoice?.kind] || state.pendingChoice.playerId !== HUMAN) return undefined;
     return new Set(state.pendingChoice.selected);
@@ -853,11 +879,17 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
 
   // A "Beings may move across this" Relic (RULES.md > Keywords) lives in
   // groundRelics, not board — selectable for its own Engage the same way a
-  // board Relic is, but only when nothing from board is already occupying
-  // (and so taking selection priority over) that same tile.
+  // board Relic is. Deliberately independent of whatever's in board[id]
+  // (Claws of Onoushara: "Sacrifice a Being on this tile..." is exactly a
+  // ground Relic sharing a tile with a Being) — gating this on an empty
+  // board[id] made an already-engaged/no-bare-ability Being on the same
+  // tile block selection entirely, leaving the Relic's own Engage
+  // unreachable. engageActions below already merges both action types by
+  // selectedCell, so either occupant being independently selectable is
+  // enough to surface both.
   const isSelectableGroundRelic = (id) => {
     const g = state.groundRelics[id];
-    return !!g && !state.board[id] && g.ownerId === HUMAN && !g.engaged;
+    return !!g && g.ownerId === HUMAN && !g.engaged;
   };
 
   const onCellClick = (id) => {
@@ -926,7 +958,10 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
         // for a Being (Simple Summoner's own discount, costReduction, etc.)
         // or a Relic (Metal Worker's own "next Relic" discount) — never for
         // a Prophecy/Armament, which don't have any such reduction today.
-        const costOverride = (action.type === 'SUMMON_BEING' || action.type === 'PLACE_RELIC') && card
+        // RESOLVE_SUMMON_HAND_BEING_POINTED (Collapsing Bridge) summons a
+        // Being exactly like SUMMON_BEING, just via a pendingChoice, so it
+        // needs the same discount-aware override.
+        const costOverride = (action.type === 'SUMMON_BEING' || action.type === 'PLACE_RELIC' || action.type === 'RESOLVE_SUMMON_HAND_BEING_POINTED') && card
           ? effectiveCastingCost(card, state, HUMAN)
           : undefined;
         dispatchWithPaymentCheck(action, card, costOverride);
@@ -1458,7 +1493,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
     // instead of CardTile's usual near-tile popup, which for a card this
     // small (compact On Board frame, no text box) wouldn't actually show
     // the text at all. Sized to stay clear of the neighboring points.
-    const MULLIGAN_PREVIEW_WIDTH = 210;
+    const MULLIGAN_PREVIEW_WIDTH = 260;
     const MULLIGAN_PREVIEW_HEIGHT = Math.round(MULLIGAN_PREVIEW_WIDTH * 7 / 5);
     return (
       <div className="min-h-screen flex items-center justify-center bg-black p-8">
@@ -1642,7 +1677,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
 
       {historyOpen && (
         <div className="absolute top-12 right-4 z-40 w-80">
-          <ActionLog entries={state.log.slice(-30)} />
+          <ActionLog entries={historyEntries} />
         </div>
       )}
 
@@ -2297,131 +2332,6 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
 
       {(() => {
-        // Board-native choice, not a modal — the legal tiles themselves are
-        // highlighted (see highlightCells) and clicking one resolves it
-        // directly (see onCellClick), the same interaction as placing a
-        // hand card. This banner is just a non-blocking reminder of what's
-        // being chosen, shared by every SINGLE_CELL_CHOICE_KINDS kind.
-        if (!state.pendingChoice || state.pendingChoice.playerId !== HUMAN) return null;
-        if (!SINGLE_CELL_CHOICE_KINDS[state.pendingChoice.kind]) return null;
-        return (
-          <div className="shrink-0 flex items-center gap-2 bg-stone-900 border border-amber-700 rounded-lg px-3 py-2">
-            <span className="text-xs text-stone-300">
-              {singleCellChoiceLabel(state.pendingChoice)}
-              {/* "any target" (unlike a typed/Being-only "target Being")
-                  also includes either player's own Lifespan directly — not
-                  a board cell, so it's chosen by clicking the highlighted
-                  LifeBadge itself (below) rather than a tile here. */}
-              {playerTargetActions.length > 0 ? ' — including either player\'s own Lifespan total.' : ''}
-            </span>
-            {state.pendingChoice.kind === 'diablerie-select-mover' && (
-              <button
-                onClick={() => dispatch({ type: 'RESOLVE_DIABLERIE_DONE' })}
-                className="ml-auto shrink-0 px-2 py-1 bg-stone-700 text-white rounded text-xs font-semibold hover:bg-stone-600 transition"
-              >
-                Done
-              </button>
-            )}
-            {pendingChoiceIsOptional && (
-              <button
-                onClick={() => dispatch({ type: 'RESOLVE_DECLINE' })}
-                className="ml-auto shrink-0 text-xs text-stone-400 hover:text-stone-200 transition"
-              >
-                Decline
-              </button>
-            )}
-          </div>
-        );
-      })()}
-
-      {(() => {
-        const toggleChoice = state.pendingChoice?.playerId === HUMAN ? TOGGLE_CHOICE_KINDS[state.pendingChoice.kind] : null;
-        if (!toggleChoice) return null;
-        const selected = state.pendingChoice.selected.length;
-        const confirmable = legalActions.some(a => a.type === toggleChoice.confirmActionType);
-        const prompt = state.pendingChoice.kind === 'sacrifice-x-toggle'
-          ? `click highlighted ${state.pendingChoice.fodderName} tiles to choose how many to sacrifice`
-          : state.pendingChoice.kind === 'summon-vine-tokens-toggle'
-          ? `click highlighted tiles to choose up to ${state.pendingChoice.maxCount} to summon Blooming Vine tokens on`
-          : 'click highlighted Beings to choose how many to sacrifice';
-        return (
-          <div className="shrink-0 flex items-center gap-2 bg-stone-900 border border-purple-700 rounded-lg px-3 py-2">
-            <span className="text-xs text-stone-300">
-              {state.pendingChoice.cardName}: {prompt} — {selected} selected.
-            </span>
-            {state.pendingChoice.optional && (
-              <button
-                onClick={() => dispatch({ type: 'RESOLVE_DECLINE' })}
-                className="ml-auto shrink-0 text-xs text-stone-400 hover:text-stone-200 transition"
-              >
-                Cancel
-              </button>
-            )}
-            <button
-              onClick={() => dispatch({ type: toggleChoice.confirmActionType })}
-              disabled={!confirmable}
-              className={`${state.pendingChoice.optional ? '' : 'ml-auto'} shrink-0 px-3 py-1 bg-purple-800 text-white rounded text-xs font-semibold hover:bg-purple-700 transition disabled:opacity-40 disabled:cursor-not-allowed`}
-            >
-              Confirm ({selected})
-            </button>
-          </div>
-        );
-      })()}
-
-      {(() => {
-        // Board-native, like the SINGLE_CELL_CHOICE_KINDS banner above — the
-        // legal Time Counter holders light up on the board (highlightCells)
-        // and clicking one resolves it directly (onCellClick) when only one
-        // delta is legal there. A "±" effect (both +1 and -1 legal on the
-        // same cell) can't be disambiguated by a plain click, so clicking it
-        // instead opens this tiny inline +/- prompt for just that one cell,
-        // rather than falling back to a full-screen list of every candidate.
-        if (state.pendingChoice?.kind !== 'modulate' || state.pendingChoice.playerId !== HUMAN) return null;
-        const cellCandidates = pendingModulateCandidates.find(c => c.cellId === modulateDeltaCell);
-        return (
-          <div className="shrink-0 flex flex-wrap items-center gap-2 bg-stone-900 border border-amber-700 rounded-lg px-3 py-2">
-            <span className="text-xs text-stone-300">
-              {state.pendingChoice.cardName}: choose a highlighted Time Counter to Modulate.
-            </span>
-            {cellCandidates && (
-              <div className="flex gap-1 shrink-0 ml-auto">
-                <span className="text-xs text-stone-400 self-center">{cellCandidates.card?.name || modulateDeltaCell}:</span>
-                {cellCandidates.deltas.map(delta => (
-                  <button
-                    key={delta}
-                    onClick={() => {
-                      dispatch({ type: 'RESOLVE_MODULATE', cellId: modulateDeltaCell, delta });
-                      setModulateDeltaCell(null);
-                    }}
-                    className="px-2 py-1 rounded bg-stone-800 text-white text-xs font-semibold hover:bg-stone-700 transition"
-                  >
-                    {delta > 0 ? `+${delta}` : delta}
-                  </button>
-                ))}
-              </div>
-            )}
-            {/* Altars aren't board tiles, so they can't be clicked to
-                select the way cellCandidates above are — listed here as
-                their own always-visible row instead. */}
-            {pendingModulateAltarCandidates.map(ac => (
-              <div key={ac.altarInstanceId} className="flex gap-1 shrink-0 ml-auto">
-                <span className="text-xs text-stone-400 self-center">{ac.card?.name || 'Altar'}:</span>
-                {ac.deltas.map(delta => (
-                  <button
-                    key={delta}
-                    onClick={() => dispatch({ type: 'RESOLVE_MODULATE', altarInstanceId: ac.altarInstanceId, delta })}
-                    className="px-2 py-1 rounded bg-stone-800 text-white text-xs font-semibold hover:bg-stone-700 transition"
-                  >
-                    {delta > 0 ? `+${delta}` : delta}
-                  </button>
-                ))}
-              </div>
-            ))}
-          </div>
-        );
-      })()}
-
-      {(() => {
         // "You may pay (N) Lifespan to X" (Vassal Matriach) — a tiny
         // non-blocking banner, not a board choice or modal: Pay commits the
         // cost and resolves the effect, Decline (the existing generic
@@ -2774,6 +2684,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
             highlightCells={highlightCells}
             selectedCell={selectedCell}
             toggledCells={toggledCells}
+            respondingCellId={respondingCellId}
             onCellClick={onCellClick}
             onCellDoubleClick={onCellDoubleClick}
             borderImages={borderImages}
@@ -2849,20 +2760,30 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
             {state.reactiveWindow?.openFor === HUMAN && (
               <div className={`${ROW_H} flex flex-col justify-center gap-1`}>
                 {state.reactiveWindow.triggerDescription && (
-                  <p className="text-[11px] leading-snug text-stone-300 line-clamp-3">
+                  <p className="text-base font-medium leading-snug text-stone-200 line-clamp-3">
                     {state.reactiveWindow.triggerDescription}
                   </p>
                 )}
-                <div className="flex items-center justify-start gap-1.5">
-                  <span className="shrink-0 flex items-center gap-1 px-2 py-1 bg-amber-500 text-stone-900 rounded text-xs font-bold animate-pulse">
+                <div className="flex items-center justify-start gap-1.5 flex-wrap">
+                  <span className="shrink-0 flex items-center gap-1 px-2 py-1 bg-amber-500 text-stone-900 rounded text-sm font-bold animate-pulse">
                     Respond
                     {competitiveMode && reactiveSecondsLeft !== null && (
                       <span className="tabular-nums">{reactiveSecondsLeft}s</span>
                     )}
                   </span>
+                  {/* state.pendingResolution (Medium Mage's own "respond
+                      before the trigger lands" case) — this window is about
+                      something declared but not yet applied, distinct from
+                      the ordinary post-hoc "X already happened" window this
+                      banner otherwise always represents. */}
+                  {state.pendingResolution && (
+                    <span className="shrink-0 px-2 py-1 bg-amber-900/60 text-amber-300 border border-amber-600 rounded text-[10px] font-bold uppercase tracking-wide">
+                      Pending
+                    </span>
+                  )}
                   <button
                     onClick={() => dispatch({ type: 'PASS_PRIORITY' })}
-                    className="shrink-0 px-2 py-1 bg-stone-700 text-white rounded text-xs font-semibold hover:bg-stone-600 transition"
+                    className="shrink-0 px-2 py-1 bg-stone-700 text-white rounded text-sm font-semibold hover:bg-stone-600 transition"
                   >
                     Pass Priority
                   </button>
@@ -2887,6 +2808,155 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
             the human's own front row and above the Hand, the same
             full-width spot the "cast this?" confirmation below uses,
             rather than floating in a narrow column beside the board. */}
+        {(() => {
+          // Board-native choice, not a modal — the legal tiles themselves are
+          // highlighted (see highlightCells) and clicking one resolves it
+          // directly (see onCellClick), the same interaction as placing a
+          // hand card. This banner is just a non-blocking reminder of what's
+          // being chosen, shared by every SINGLE_CELL_CHOICE_KINDS kind.
+          // Lives in this same full-width "activation banner" spot as
+          // Martyr/Engage/etc. below, rather than floating above the board.
+          if (!state.pendingChoice || state.pendingChoice.playerId !== HUMAN) return null;
+          if (!SINGLE_CELL_CHOICE_KINDS[state.pendingChoice.kind]) return null;
+          return (
+            <div className="flex items-center gap-2 bg-stone-900 border border-amber-700 rounded-lg px-3 py-2 mb-1">
+              <span className="text-xs text-stone-300">
+                {singleCellChoiceLabel(state.pendingChoice)}
+                {/* "any target" (unlike a typed/Being-only "target Being")
+                    also includes either player's own Lifespan directly — not
+                    a board cell, so it's chosen by clicking the highlighted
+                    LifeBadge itself (below) rather than a tile here. */}
+                {playerTargetActions.length > 0 ? ' — including either player\'s own Lifespan total.' : ''}
+              </span>
+              {state.pendingChoice.kind === 'diablerie-select-mover' && (
+                <button
+                  onClick={() => dispatch({ type: 'RESOLVE_DIABLERIE_DONE' })}
+                  className="ml-auto shrink-0 px-2 py-1 bg-stone-700 text-white rounded text-xs font-semibold hover:bg-stone-600 transition"
+                >
+                  Done
+                </button>
+              )}
+              {pendingChoiceIsOptional && (
+                <button
+                  onClick={() => dispatch({ type: 'RESOLVE_DECLINE' })}
+                  className="ml-auto shrink-0 text-xs text-stone-400 hover:text-stone-200 transition"
+                >
+                  Decline
+                </button>
+              )}
+            </div>
+          );
+        })()}
+        {(() => {
+          // Collapsing Bridge's own "you may summon a Being on a tile this
+          // points to" — a hand-card-then-cell choice (RESOLVE_SUMMON_HAND_
+          // BEING_POINTED is in CELL_TARGET_TYPES, so selecting a Hand
+          // Being and clicking a highlighted tile resolves it directly,
+          // same as a normal SUMMON_BEING), just with no pendingChoice
+          // banner of its own before this — left the player with no way to
+          // even see the choice was open, let alone decline it.
+          if (state.pendingChoice?.kind !== 'summon-hand-being-pointed' || state.pendingChoice.playerId !== HUMAN) return null;
+          return (
+            <div className="flex items-center gap-2 bg-stone-900 border border-amber-700 rounded-lg px-3 py-2 mb-1">
+              <span className="text-xs text-stone-300">
+                {state.pendingChoice.cardName}: select a Being in Hand, then a highlighted tile to summon it on.
+              </span>
+              {pendingChoiceIsOptional && (
+                <button
+                  onClick={() => dispatch({ type: 'RESOLVE_DECLINE' })}
+                  className="ml-auto shrink-0 text-xs text-stone-400 hover:text-stone-200 transition"
+                >
+                  Decline
+                </button>
+              )}
+            </div>
+          );
+        })()}
+        {(() => {
+          const toggleChoice = state.pendingChoice?.playerId === HUMAN ? TOGGLE_CHOICE_KINDS[state.pendingChoice.kind] : null;
+          if (!toggleChoice) return null;
+          const selected = state.pendingChoice.selected.length;
+          const confirmable = legalActions.some(a => a.type === toggleChoice.confirmActionType);
+          const prompt = state.pendingChoice.kind === 'sacrifice-x-toggle'
+            ? `click highlighted ${state.pendingChoice.fodderName} tiles to choose how many to sacrifice`
+            : state.pendingChoice.kind === 'summon-vine-tokens-toggle'
+            ? `click highlighted tiles to choose up to ${state.pendingChoice.maxCount} to summon ${state.pendingChoice.tokenName || 'Blooming Vine'} token(s) on`
+            : 'click highlighted Beings to choose how many to sacrifice';
+          return (
+            <div className="flex items-center gap-2 bg-stone-900 border border-purple-700 rounded-lg px-3 py-2 mb-1">
+              <span className="text-xs text-stone-300">
+                {state.pendingChoice.cardName}: {prompt} — {selected} selected.
+              </span>
+              {state.pendingChoice.optional && (
+                <button
+                  onClick={() => dispatch({ type: 'RESOLVE_DECLINE' })}
+                  className="ml-auto shrink-0 text-xs text-stone-400 hover:text-stone-200 transition"
+                >
+                  Cancel
+                </button>
+              )}
+              <button
+                onClick={() => dispatch({ type: toggleChoice.confirmActionType })}
+                disabled={!confirmable}
+                className={`${state.pendingChoice.optional ? '' : 'ml-auto'} shrink-0 px-3 py-1 bg-purple-800 text-white rounded text-xs font-semibold hover:bg-purple-700 transition disabled:opacity-40 disabled:cursor-not-allowed`}
+              >
+                Confirm ({selected})
+              </button>
+            </div>
+          );
+        })()}
+        {(() => {
+          // Board-native, like the SINGLE_CELL_CHOICE_KINDS banner above — the
+          // legal Time Counter holders light up on the board (highlightCells)
+          // and clicking one resolves it directly (onCellClick) when only one
+          // delta is legal there. A "±" effect (both +1 and -1 legal on the
+          // same cell) can't be disambiguated by a plain click, so clicking it
+          // instead opens this tiny inline +/- prompt for just that one cell,
+          // rather than falling back to a full-screen list of every candidate.
+          if (state.pendingChoice?.kind !== 'modulate' || state.pendingChoice.playerId !== HUMAN) return null;
+          const cellCandidates = pendingModulateCandidates.find(c => c.cellId === modulateDeltaCell);
+          return (
+            <div className="flex flex-wrap items-center gap-2 bg-stone-900 border border-amber-700 rounded-lg px-3 py-2 mb-1">
+              <span className="text-xs text-stone-300">
+                {state.pendingChoice.cardName}: choose a highlighted Time Counter to Modulate.
+              </span>
+              {cellCandidates && (
+                <div className="flex gap-1 shrink-0 ml-auto">
+                  <span className="text-xs text-stone-400 self-center">{cellCandidates.card?.name || modulateDeltaCell}:</span>
+                  {cellCandidates.deltas.map(delta => (
+                    <button
+                      key={delta}
+                      onClick={() => {
+                        dispatch({ type: 'RESOLVE_MODULATE', cellId: modulateDeltaCell, delta });
+                        setModulateDeltaCell(null);
+                      }}
+                      className="px-2 py-1 rounded bg-stone-800 text-white text-xs font-semibold hover:bg-stone-700 transition"
+                    >
+                      {delta > 0 ? `+${delta}` : delta}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {/* Altars aren't board tiles, so they can't be clicked to
+                  select the way cellCandidates above are — listed here as
+                  their own always-visible row instead. */}
+              {pendingModulateAltarCandidates.map(ac => (
+                <div key={ac.altarInstanceId} className="flex gap-1 shrink-0 ml-auto">
+                  <span className="text-xs text-stone-400 self-center">{ac.card?.name || 'Altar'}:</span>
+                  {ac.deltas.map(delta => (
+                    <button
+                      key={delta}
+                      onClick={() => dispatch({ type: 'RESOLVE_MODULATE', altarInstanceId: ac.altarInstanceId, delta })}
+                      className="px-2 py-1 rounded bg-stone-800 text-white text-xs font-semibold hover:bg-stone-700 transition"
+                    >
+                      {delta > 0 ? `+${delta}` : delta}
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </div>
+          );
+        })()}
         {martyrAction && (
           <div className="flex items-center gap-2 bg-stone-900 border border-stone-700 rounded-lg px-3 py-2 mb-1">
             <span className="text-xs text-stone-300">
@@ -2915,14 +2985,21 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
           </div>
         )}
         {engageActions.length > 0 && (() => {
-          // The selected cell's own Engage-able occupant — a normal
-          // board one, or (RULES.md > Keywords > "Beings may move
-          // across this") a ground Relic that lives outside `board`
-          // entirely.
-          const cardOccupant = state.board[selectedCell] || state.groundRelics[selectedCell];
+          // The selected cell can carry an Engage-able board occupant (a
+          // Being/Relic/animated Armament pile) AND, independently, a
+          // ground Relic living outside `board` entirely (RULES.md >
+          // Keywords > "Beings may move across this" — Claws of Onoushara
+          // stacked under a Being is exactly this case), each with its own
+          // ACTIVATE_ENGAGE/ACTIVATE_GROUND_RELIC_ENGAGE entry in
+          // engageActions. Resolved per-action rather than once for the
+          // whole block, so Claws' own name/text never gets shadowed by
+          // whatever Being happens to share its tile.
           return (
             <div className="flex flex-col gap-1 bg-stone-900 border border-stone-700 rounded-lg px-3 py-2 mb-1">
               {engageActions.map((action) => {
+                const cardOccupant = action.type === 'ACTIVATE_GROUND_RELIC_ENGAGE'
+                  ? state.groundRelics[selectedCell]
+                  : state.board[selectedCell];
                 const ownAbilities = cardOccupant.card.keywords?.engageAbilities || [];
                 const effectText = action.abilityIndex != null && ownAbilities[action.abilityIndex]
                   ? ownAbilities[action.abilityIndex].effect
@@ -2930,7 +3007,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
                     ? cardOccupant.card.keywords?.engage
                     : effectiveEngage(cardOccupant);
                 return (
-                  <div key={action.abilityIndex ?? 0} className="flex items-center gap-2">
+                  <div key={`${action.type}-${action.abilityIndex ?? 0}`} className="flex items-center gap-2">
                     <span className="text-xs text-stone-300">
                       {cardOccupant.card.name}: Engage — "{effectText}"
                     </span>

@@ -66,26 +66,33 @@ function EffigyDeckStack({ count }) {
   );
 }
 
-// A small letter+count bubble for a Counter (Crossing, Forge, ...) sitting
+// A small letter+count "coin" for a Counter (Crossing, Forge, ...) sitting
 // on a card — "C2" for 2 Crossing Counters, "F3" for 3 Forge Counters. Only
 // the initial letter is shown (per the card's convention), not the full
 // name, to stay legible at this size; the full name is still in the
 // tooltip. Positioned opposite the existing armament-count/Effigy-pool
-// badges (top-left) so the two never collide.
+// badges (top-left) so the two never collide. COUNTER_LABELS overrides the
+// default single-initial for a type whose initial would otherwise collide
+// with another counter type's own — "favor" would render "F" same as
+// Forge, so it gets the two-letter "Fa" instead.
+const COUNTER_LABELS = { favor: 'Fa' };
 function CounterBadges({ counters }) {
   const entries = Object.entries(counters || {}).filter(([, n]) => n > 0);
   if (entries.length === 0) return null;
   return (
-    <div className="absolute -bottom-1.5 -right-1.5 z-10 flex gap-1">
-      {entries.map(([type, n]) => (
-        <span
-          key={type}
-          className="flex items-center justify-center min-w-[22px] h-[22px] px-1 rounded-full bg-stone-800 text-white text-xs font-bold border-2 border-white shadow"
-          title={`${n} ${type[0].toUpperCase()}${type.slice(1)} Counter${n === 1 ? '' : 's'}`}
-        >
-          {type[0].toUpperCase()}{n}
-        </span>
-      ))}
+    <div className="absolute -bottom-2 -right-2 z-10 flex gap-1.5">
+      {entries.map(([type, n]) => {
+        const label = COUNTER_LABELS[type] || type[0].toUpperCase();
+        return (
+          <span
+            key={type}
+            className="flex items-center justify-center min-w-[30px] h-[30px] px-1.5 rounded-full bg-stone-800 text-white text-sm font-bold border-2 border-white shadow"
+            title={`${n} ${type[0].toUpperCase()}${type.slice(1)} Counter${n === 1 ? '' : 's'}`}
+          >
+            {label}{n}
+          </span>
+        );
+      })}
     </div>
   );
 }
@@ -149,7 +156,7 @@ function EffigyZoneBreakdown({ pool }) {
   );
 }
 
-export default function Board({ state, displayBoard, flashes, lastAttack, viewerId, highlightCells, selectedCell, toggledCells, onCellClick, onCellDoubleClick, borderImages, borderImagesLoaded, artImages, artBorderImages, artImagesLoaded, fontLoaded }) {
+export default function Board({ state, displayBoard, flashes, lastAttack, viewerId, highlightCells, selectedCell, toggledCells, respondingCellId, onCellClick, onCellDoubleClick, borderImages, borderImagesLoaded, artImages, artBorderImages, artImagesLoaded, fontLoaded }) {
   const rows = [];
   // `displayBoard` (useStagedBoard.js) is a momentarily-lagged view of
   // state.board for a Being that just took damage or died — falls back to
@@ -177,6 +184,12 @@ export default function Board({ state, displayBoard, flashes, lastAttack, viewer
       // Keywords) — a distinct, filled ring so a toggled-in tile reads
       // differently from a merely-selectable one.
       const isToggled = toggledCells?.has(id);
+      // The specific cell an open reactive window's pending effect is about
+      // (see Match.jsx's respondingCellId) — its own yellow ring, distinct
+      // from both the red toggled-in ring and the green target-selection
+      // ring below, so "what am I being asked to respond to" reads clearly
+      // even when that same cell also happens to be a legal target.
+      const isRespondingTo = respondingCellId === id;
       const effigyDeckOwner = effigyDeckOwnerForCell(id);
       const effigyZoneOwner = effigyZoneOwnerForCell(id);
       const isEthereal = row === 3;
@@ -196,7 +209,7 @@ export default function Board({ state, displayBoard, flashes, lastAttack, viewer
           onDoubleClick={() => onCellDoubleClick?.(id)}
           className={`relative rounded flex items-center justify-center
             ${isEthereal ? 'w-36 h-24 sm:w-44 sm:h-28 bg-indigo-950/20' : 'w-36 h-[138px] sm:w-44 sm:h-[169px] bg-emerald-900/10'}
-            ${isToggled ? 'ring-4 ring-red-500 ring-inset' : isHighlighted ? 'ring-2 ring-amber-400 ring-inset' : 'ring-1 ring-stone-300'}
+            ${isToggled ? 'ring-4 ring-red-500 ring-inset' : isRespondingTo ? 'ring-4 ring-yellow-400 ring-inset' : isHighlighted ? 'ring-2 ring-green-400 ring-inset' : 'ring-1 ring-stone-300'}
             ${isSummonCell && !occupant ? 'bg-amber-50' : ''}`}
         >
           {occupant?.type === 'being' && (
@@ -228,6 +241,7 @@ export default function Board({ state, displayBoard, flashes, lastAttack, viewer
                   ⚔ {occupant.armaments.length}
                 </span>
               )}
+              <CounterBadges counters={{ ...occupant.counters, ...(occupant.favorCounter ? { favor: 1 } : {}) }} />
               <DamageFlash flash={flashes?.[id]} />
             </div>
           )}

@@ -284,27 +284,74 @@ const applyEndOfTurnGroundRelicCoLocatedLifespanLoss = (state) => {
 // Passing Doubt: "At the end of your turn target Doubt you control is
 // dealt (1) Lifespan Damage." — "Doubt" is a name-family reference
 // (Lingering Doubt/Passing Doubt), same as applyEndOfTurnGrowthPerName's
-// own. A real end-of-turn choice isn't representable here (no
-// pendingChoice infra in this pass of the turn cycle), so the target is
-// auto-picked: a DIFFERENT Doubt-family Being if one exists, else itself
-// — a documented simplification, same spirit as every other end-of-turn
-// scan in this file that can't offer a real choice.
+// own. With a single candidate there's nothing to choose, so it resolves
+// immediately; with 2+, this opens a real pendingChoice instead of
+// guessing — same "a pendingChoice belonging to a player outside their own
+// turn needs no special plumbing" precedent Venefica's own forced
+// sacrifice already established (actions.js > OPPONENT_SACRIFICE_RE):
+// endTurn's own remaining steps (and the eventual turn switch/draw) still
+// run to completion in the same dispatch, and the open pendingChoice
+// simply gates every other action — including the new turn player's own
+// first move — until it's resolved.
+//
+// A "Doubt-only" build can easily run more than one trigger source at
+// once (2+ copies of Passing Doubt/Lingering Doubt, or one of each) — each
+// needing its own real choice in the same End Step. Rather than only ever
+// handling the first and silently dropping the rest for the turn, every
+// source is queued up front and resolved one at a time: a source needing
+// a real choice stashes the REST of the queue on the pendingChoice itself
+// (`remainingSources`), and RESOLVE_END_OF_TURN_DAMAGE_NAMED_FAMILY_TARGET
+// (actions.js) resumes the queue with resolveEndOfTurnDamageNamedFamilyQueue
+// once that one choice is made — so a second (third, ...) ambiguous source
+// opens its own follow-up choice instead of being skipped.
 const applyEndOfTurnDamageNamedFamily = (state) => {
+  const sources = Object.entries(state.board)
+    .filter(([, o]) => o?.type === 'being' && o.ownerId === state.turnPlayer && o.card.keywords?.endOfTurnDamageNamedFamily)
+    .map(([cell]) => cell);
+  return resolveEndOfTurnDamageNamedFamilyQueue(state, sources, state.turnPlayer);
+};
+
+// Exported so actions.js's own RESOLVE_END_OF_TURN_DAMAGE_NAMED_FAMILY_TARGET
+// can resume this same queue after each real choice — `sources` cellIds
+// are always re-read fresh against `next.board` on every step, never
+// trusting a snapshot from before an earlier source in the same queue
+// resolved (a trigger source or its own target can die/move mid-queue).
+// `declaringPlayer` is threaded through explicitly rather than read off
+// `state.turnPlayer` — by the time a later source in the same queue
+// resumes (from the RESOLVE_* reducer case), endTurn's own turn-switch has
+// already happened and state.turnPlayer is the OPPONENT, not the player
+// whose End Step this trigger actually belongs to.
+export const resolveEndOfTurnDamageNamedFamilyQueue = (state, sources, declaringPlayer) => {
   let next = state;
-  Object.entries(state.board).forEach(([cell, occupant]) => {
-    if (!occupant || occupant.type !== 'being' || occupant.ownerId !== state.turnPlayer) return;
+  let remaining = sources;
+  while (remaining.length > 0) {
+    const [cell, ...rest] = remaining;
+    remaining = rest;
+    const occupant = next.board[cell];
+    if (!occupant || occupant.type !== 'being' || occupant.ownerId !== declaringPlayer) continue;
     const effect = occupant.card.keywords?.endOfTurnDamageNamedFamily;
-    if (!effect) return;
+    if (!effect) continue;
     const needle = effect.namePart.toLowerCase();
     const candidates = Object.entries(next.board).filter(([, o]) =>
-      o?.type === 'being' && o.ownerId === state.turnPlayer && o.card.name.toLowerCase().includes(needle)
+      o?.type === 'being' && o.ownerId === declaringPlayer && o.card.name.toLowerCase().includes(needle)
     );
-    const other = candidates.find(([c]) => c !== cell);
-    const [targetCell] = other || candidates.find(([c]) => c === cell) || [];
-    if (!targetCell) return;
-    next = addLog(next, `${occupant.card.name}'s end-of-turn trigger deals ${effect.amount} Lifespan Damage to ${next.board[targetCell].card.name}.`);
-    next = dealDamageToBeing(next, targetCell, effect.amount);
-  });
+    if (candidates.length === 0) continue;
+    if (candidates.length === 1) {
+      const [targetCell] = candidates[0];
+      next = addLog(next, `${occupant.card.name}'s end-of-turn trigger deals ${effect.amount} Lifespan Damage to ${next.board[targetCell].card.name}.`);
+      next = dealDamageToBeing(next, targetCell, effect.amount);
+      continue;
+    }
+    next = addLog(next, `${occupant.card.name}'s end-of-turn trigger lets ${declaringPlayer} choose which Doubt takes ${effect.amount} Lifespan Damage.`);
+    return {
+      ...next,
+      pendingChoice: {
+        kind: 'end-of-turn-damage-named-family-target', playerId: declaringPlayer,
+        cardName: occupant.card.name, amount: effect.amount, namePart: effect.namePart,
+        remainingSources: remaining,
+      },
+    };
+  }
   return next;
 };
 
