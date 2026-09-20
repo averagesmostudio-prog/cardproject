@@ -9174,6 +9174,21 @@ describe('"Whenever you Martyr a Seed, Craft (1) Effigy." (Sapling)', () => {
     const next = gameReducer(state, { type: 'ACTIVATE_MARTYR', cellId: 'r4c1' });
     expect(next.players.A.effigyPool).toHaveLength(0);
   });
+
+  it('also crafts an Effigy when a Seed sacrifices itself to its own effect (Blooming Seed/Kernel-style counterCostSacrificeAbility), not just a printed Martyr', () => {
+    const bloomingSeed = {
+      type: 'being', ownerId: 'A',
+      card: beingCard({
+        instanceId: 'bs#0', name: 'Blooming Seed', typing: 'Seed, Being',
+        keywords: { counterCostSacrificeAbility: { type: 'growth', amount: 1, effect: 'summon a Treefolk token on this tile.' } },
+      }),
+      currentLifespan: 1, engaged: false, counters: { growth: 1 },
+    };
+    const state = baseState({ board: { r2c1: sapling, r2c2: bloomingSeed }, players: { A: player({ effigyDeck: [effigy('living')] }), B: player() } });
+    const next = gameReducer(state, { type: 'ACTIVATE_COUNTER_COST_SACRIFICE', cellId: 'r2c2' });
+    expect(next.log.some(e => e.message.includes("Sapling's reaction triggers"))).toBe(true);
+    expect(next.players.A.effigyPool).toHaveLength(1);
+  });
 });
 
 describe('"If you conjure a non Armament Relic on a tile this points to, Craft an Effigy." (Monumental Mason)', () => {

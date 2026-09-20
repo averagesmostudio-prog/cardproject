@@ -3106,7 +3106,8 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
   // something to work with once the caster is already gone.
   const sacrificeThisMatch = text.match(SACRIFICE_THIS_THEN_RE);
   if (sacrificeThisMatch && context.selfCellId) {
-    const selfArrows = state.board[context.selfCellId]?.card?.arrows || [];
+    const sacrificedCard = state.board[context.selfCellId]?.card;
+    const selfArrows = sacrificedCard?.arrows || [];
     let next = addLog(state, `${playerId} sacrifices ${cardName} for its ${label}.`);
     next = destroyBeing(next, context.selfCellId);
     // SACRIFICE_THIS_THEN_RE's own `,?` is an optional COMMA, not "and" —
@@ -3118,7 +3119,15 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
     // regex itself, since every other card using this shape already uses a
     // comma and would never hit this branch.
     const effectText = sacrificeThisMatch[1].trim().replace(/^(?:and|then)\s+/i, '');
-    return resolveOrLogEffect(next, playerId, cardName, effectText, label, { ...context, selfArrows });
+    next = resolveOrLogEffect(next, playerId, cardName, effectText, label, { ...context, selfArrows });
+    // Sapling's own "Whenever you Martyr a Seed" (triggerMartyrTypedReactions
+    // below) fires here too, not just from ACTIVATE_MARTYR — this IS the
+    // caster sacrificing its own Seed to its own effect (Blooming Seed/
+    // Kernel's counterCostSacrificeAbility), the same real-game event
+    // Sapling's text means to react to, just reached through a different
+    // reducer action than a printed "Martyr:" ability.
+    if (sacrificedCard) next = triggerMartyrTypedReactions(next, playerId, sacrificedCard);
+    return next;
   }
 
   if (SELF_SACRIFICE_BARE_RE.test(text) && context.selfCellId) {
@@ -7852,21 +7861,28 @@ const triggerSacrificeSelfOnSummonTyping = (state, playerId, cellId, card) => {
 };
 
 // Sapling: "Whenever you Martyr a Seed, Craft (1) Effigy." — a Being's own
-// reaction to its controller's OWN Martyr activations, checked against
-// whichever card was just Martyred (`martyredCard`) — same typing-substring
-// match as triggerTypedSummonReactions above, just watching a different
-// trigger point (ACTIVATE_MARTYR, after the sacrifice). The scan runs on
-// the board AFTER the Martyred occupant is already removed, so a card
-// reacting to its own Martyr (not the case for any real card checked so
-// far) simply wouldn't see itself — consistent with it no longer being on
-// the board to react.
-const triggerMartyrTypedReactions = (state, playerId, martyredCard) => {
+// reaction to its controller sacrificing their own Seed, checked against
+// whichever card was just sacrificed (`sacrificedCard`) — same typing-
+// substring match as triggerTypedSummonReactions above, just watching a
+// different trigger point. Called from two real self-sacrifice shapes: a
+// printed "Martyr:" activation (ACTIVATE_MARTYR), and a card sacrificing
+// itself to its OWN effect (SACRIFICE_THIS_THEN_RE — Blooming Seed/Kernel's
+// own counterCostSacrificeAbility) — both are "you sacrifice a Seed" from
+// the player's perspective, just reached through different reducer actions;
+// scoping this to only the former was the actual bug (a Seed sacrificing
+// itself via its own printed cost never reads as anything other than "you
+// sacrificed a Seed" to a card watching for it). The scan runs on the board
+// AFTER the sacrificed occupant is already removed, so a card reacting to
+// its own sacrifice (not the case for any real card checked so far) simply
+// wouldn't see itself — consistent with it no longer being on the board to
+// react.
+const triggerMartyrTypedReactions = (state, playerId, sacrificedCard) => {
   let next = state;
   Object.entries(state.board).forEach(([cell, occupant]) => {
     if (!occupant || occupant.type !== 'being' || occupant.ownerId !== playerId) return;
     const reaction = occupant.card.keywords?.onOwnMartyrTyped;
     if (!reaction) return;
-    if (!(martyredCard.typing || '').toLowerCase().includes(reaction.typing.toLowerCase())) return;
+    if (!(sacrificedCard.typing || '').toLowerCase().includes(reaction.typing.toLowerCase())) return;
     next = addLog(next, `${occupant.card.name}'s reaction triggers.`);
     next = resolveOrLogEffect(next, playerId, occupant.card.name, reaction.effect, 'Reaction', { selfCellId: cell });
   });
