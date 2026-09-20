@@ -4164,6 +4164,21 @@ describe('"Target Being loses all abilities and becomes a 0/5 TreeFolk Being unt
     expect(next.board.r4c1.currentLifespan).toBe(2); // not healed to 5
   });
 
+  it('turns Horological Horror into a real 0/5 instead of killing it — Dendrify suppresses xEqualsTimeCountersControlled in the same step, which must not also re-derive its live X as 0 and deal lethal damage', () => {
+    const horror = {
+      type: 'being', ownerId: 'B',
+      card: beingCard({ instanceId: 'horror', name: 'Horological Horror', strength: 0, lifespan: 0, keywords: { xEqualsTimeCountersControlled: true } }),
+      currentLifespan: 6, strengthOverride: 6, engaged: false, // a live X of 6 from some Time Counters in play
+    };
+    const state = baseState({ board: { r4c1: horror }, players: { A: player({ hand: [dendrify] }), B: player() } });
+    const next = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'dn-1#0' });
+    expect(next.board.r4c1).toBeDefined(); // still alive, not routed through death
+    expect(next.board.r4c1.card.name).toBe('Horological Horror');
+    expect(effectiveStrength(next.board.r4c1)).toBe(0);
+    expect(next.board.r4c1.currentLifespan).toBe(5);
+    expect(next.players.B.purgatory).toHaveLength(0); // never died
+  });
+
   it('restores original Strength/Lifespan/abilities at end of turn', () => {
     const target = {
       type: 'being', ownerId: 'A',

@@ -7475,6 +7475,17 @@ export const recomputeXBeings = (state) => {
     const suppressedAbsolute = !isAbsolute && occupant.suppressedKeywords?.xEqualsTimeCountersControlled;
 
     if (isAbsolute || suppressedAbsolute) {
+      // Dendrify's own "becomes a 0/5 until end of turn" (applyDendrify
+      // above) suppresses abilities AND stamps an explicit
+      // lifespanSetUntilEndOfTurn override in the SAME reducer step — that
+      // override already IS this Being's real current stats for the rest
+      // of the turn, so the "lost its defining ability, falls back to 0"
+      // death treatment below must never also fire for it: without this,
+      // Horological Horror's suppressedAbsolute branch would immediately
+      // re-derive its live X as 0 and deal damage equal to the Lifespan
+      // Dendrify just set, silently undoing "becomes a 0/5" into a kill the
+      // instant it lands.
+      if (occupant.lifespanSetUntilEndOfTurn != null) return;
       const total = isAbsolute ? getTotal(occupant.ownerId) : 0;
       if (occupant.strengthOverride === total && occupant.currentLifespan === total) return;
       // A live X of (0) — or losing the ability that defines it — is a
