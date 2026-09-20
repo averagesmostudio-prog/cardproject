@@ -8316,9 +8316,20 @@ const placeBeingOnBoard = (state, playerId, cellId, card) => {
   // reanimation, Invoke, tokens) gets the exact same deferred treatment
   // for free, matching RULES.md's own "fires exactly the same way a
   // normally-cast Being's would" precedent — no special-casing needed.
-  // Skipped (same documented-gap precedent as the legend-rule check just
-  // above) when a pendingChoice is already open.
-  if (card.keywords?.whenSummoned && !next.pendingChoice) {
+  //
+  // Unlike the legend-rule check just above, this is NOT skipped when an
+  // earlier reaction (Sporangium's own "When a Being with Dryad moves onto
+  // this") already left a pendingChoice open — scheduling pendingResolution
+  // here is purely additive (it never touches/clobbers pendingChoice
+  // itself), so the two coexist safely: getLegalActions already resolves
+  // whichever pendingChoice exists first (it short-circuits before ever
+  // reaching a reactiveWindow offer), and only once that's resolved does
+  // the reactive window this pendingResolution rides behind actually
+  // become reachable — one extra dispatch later, not lost. Before this,
+  // Jirahperā's own "you may summon (2) Vine tokens" was silently dropped
+  // every time it landed on Sporangium specifically, since Sporangium's
+  // own reaction always opens its own pendingChoice first.
+  if (card.keywords?.whenSummoned) {
     const whenSummonedText = selfReferentialWhenSummonedText(card.keywords.whenSummoned, card.name);
     next = {
       ...next,

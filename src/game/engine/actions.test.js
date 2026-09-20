@@ -1564,6 +1564,33 @@ describe('Dryad — "This Being may move onto another Being with the TreeFolk, V
     const vineCells = Object.entries(next.board).filter(([, o]) => o?.card?.name === 'Vine');
     expect(vineCells).toHaveLength(1);
   });
+
+  it('a freshly-summoned Being\'s own When Summoned still schedules (not silently dropped) even when landing directly onto Sporangium leaves ITS OWN pendingChoice open', () => {
+    // Two arrows -> two empty candidate tiles, so Sporangium's own
+    // "summon a Vine on a tile this points to" opens a real pendingChoice
+    // instead of auto-resolving the way the single-arrow test above does
+    // — this is the shape that actually exposes the bug (Jirahperā's own
+    // trigger being dropped only ever happens once Sporangium's reaction
+    // leaves a real pendingChoice in place).
+    const sporangium = {
+      type: 'being', ownerId: 'A',
+      card: beingCard({ instanceId: 'spor#0', name: 'Sporangium', typing: 'Seed, Being', strength: 0, lifespan: 1, arrows: [3, 4], keywords: { onDryadAttachedOnto: 'summon a 0/2 Vine token on a tile this points to.' } }),
+      currentLifespan: 1, engaged: false,
+    };
+    const jirahpera = beingCard({
+      instanceId: 'jp#0', name: 'Jirahperā', typing: 'TreeFolk, Being', castingCost: { faithless: 0, colored: {} },
+      keywords: { dryad: true, whenSummoned: 'you may summon (2) 0/2 Vine tokens on tiles Jirahperā points to.' },
+    });
+    const state = baseState({ board: { r2c2: sporangium }, players: { A: player({ hand: [jirahpera], effigyPool: [effigy('living')] }), B: player() } });
+    const next = gameReducer(state, { type: 'SUMMON_BEING', instanceId: 'jp#0', cellId: 'r2c2' });
+    expect(next.board.r2c2.card.name).toBe('Jirahperā');
+    expect(next.board.r2c2.dryadAttached.card.name).toBe('Sporangium');
+    // Sporangium's own reaction still opens its own choice...
+    expect(next.pendingChoice?.kind).toBe('summon-token-pointed');
+    // ...and Jirahperā's own When Summoned is NOT silently dropped just
+    // because that choice is still open — it schedules alongside it.
+    expect(next.pendingResolution).toMatchObject({ kind: 'summon-being', cardName: 'Jirahperā' });
+  });
 });
 
 describe('Shift — "Engage: Move this onto a tile in the Ethereal Realm, it becomes a Prophecy..." (RULES.md > Keywords > Shift)', () => {
