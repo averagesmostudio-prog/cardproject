@@ -8660,6 +8660,29 @@ describe('Invoke keyword ("Add to hand, then summon/conjure")', () => {
     expect(next.players.A.mainDeck).toHaveLength(0); // found and invoked, not left behind
   });
 
+  it('Samara Seed — with 2+ pointed candidates (a real invoke-destination pendingChoice), picking the occupied plant tile still attaches instead of silently clearing the choice', () => {
+    const samaraSeed = {
+      type: 'being', ownerId: 'A',
+      card: beingCard({ instanceId: 'ss#0', name: 'Samara Seed', arrows: [1, 2], keywords: { martyr: 'Invoke a TreeFolk with cost (4) or less on a tile this points to.' } }),
+      currentLifespan: 1, engaged: false,
+    };
+    const elderflowerAncient = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'ea#0', name: 'Elderflower Ancient', typing: 'TreeFolk, Being', strength: 2, lifespan: 4 }), currentLifespan: 4, engaged: false };
+    const jirahpera = { id: 'jp', instanceId: 'jp#0', name: 'Jirahperā', kind: 'being', typing: 'TreeFolk, Being', castingCost: { faithless: 0, colored: { living: 2 } }, strength: 1, lifespan: 1, keywords: { dryad: true } };
+    // Direction 1 from r1c2 points to r2c2 (the plant, occupied but
+    // Dryad-attach-eligible); direction 2 points to r2c3 (empty) — two
+    // real candidates, so placeInvokedCard opens a genuine pendingChoice
+    // instead of auto-resolving the way the single-candidate test above
+    // does.
+    const state = baseState({ board: { r1c2: samaraSeed, r2c2: elderflowerAncient }, players: { A: player({ mainDeck: [jirahpera] }), B: player() } });
+    const opened = gameReducer(state, { type: 'ACTIVATE_MARTYR', cellId: 'r1c2' });
+    expect(opened.pendingChoice).toMatchObject({ kind: 'invoke-destination' });
+    expect(opened.pendingChoice.allowedCells).toEqual(expect.arrayContaining(['r2c2', 'r2c3']));
+    const next = gameReducer(opened, { type: 'RESOLVE_INVOKE_DESTINATION', cellId: 'r2c2' });
+    expect(next.board.r2c2.card.name).toBe('Jirahperā'); // attached, not silently dropped
+    expect(next.board.r2c2.dryadAttached?.card?.name).toBe('Elderflower Ancient');
+    expect(next.players.A.mainDeck).toHaveLength(0);
+  });
+
   it('"Remove (1) Growth Counter: Sacrifice this, Invoke a Treefolk with cost (2) or less summon it on a tile this points to." (Kernel) sacrifices itself, then invokes within the cost cap', () => {
     const kernel = {
       type: 'being', ownerId: 'A',

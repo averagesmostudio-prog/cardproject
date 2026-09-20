@@ -13831,7 +13831,16 @@ const gameReducerCore = (state, action) => {
     case 'RESOLVE_INVOKE_DESTINATION': {
       if (!state.pendingChoice || state.pendingChoice.kind !== 'invoke-destination') return state;
       const { playerId, cardName, label, cardInstanceId, allowedCells, context } = state.pendingChoice;
-      if (state.board[action.cellId] || !allowedCells.includes(action.cellId)) return { ...state, pendingChoice: null };
+      // Not `state.board[action.cellId] || !allowedCells.includes(...)` — a
+      // stale guard from before allowedCells' own candidate filter learned
+      // to include Dryad-attach-eligible occupied tiles (placeInvokedCard
+      // above, `dryadAttachTargetOk`). allowedCells already encodes every
+      // real legality check (occupied-but-attachable included), so an
+      // occupied cell in it is a legitimate destination, not something to
+      // reject — this was silently clearing the pendingChoice and dropping
+      // the Invoke entirely the moment its only candidate happened to be a
+      // plant.
+      if (!allowedCells.includes(action.cellId)) return { ...state, pendingChoice: null };
       const card = state.players[playerId].mainDeck.find(c => c.instanceId === cardInstanceId);
       if (!card) return { ...state, pendingChoice: null };
       return invokeCardOnto({ ...state, pendingChoice: null }, playerId, cardName, label, card, action.cellId, context);
