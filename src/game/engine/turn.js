@@ -336,7 +336,13 @@ const modulate = (state) => {
     next = triggerZealotProphecyEssence({ ...next, board }, occupant.ownerId);
     next = triggerHourglassCollection(next, occupant.ownerId);
     board = { ...next.board, [cell]: { ...next.board[cell], timer } };
-    next = resolveProphecyModulateHitZero({ ...next, board }, cell);
+    // landDisengaged=false: this automatic per-turn tick runs BEFORE
+    // beginTurn's own disengage() step below (same synchronous call), so a
+    // shifted Being returning here still lands Engaged and gets caught
+    // naturally by that normal step moments later — see
+    // placeReturnedFromShift's own comment (actions.js) for why every
+    // OTHER call site defaults the other way.
+    next = resolveProphecyModulateHitZero({ ...next, board }, cell, false, 0, false, false);
     board = next.board;
   });
   return { ...next, board };
@@ -450,6 +456,12 @@ const disengage = (state) => {
     if (occupant.timesPerTurnUsed) {
       next = { ...next, timesPerTurnUsed: 0 };
     }
+    // payEffigyAbilityUsesThisTurn (actions.js's ACTIVATE_PAY_EFFIGY_COST_
+    // ABILITY case) is an AI-scoring-only bookkeeping field, same reset
+    // timing as timesPerTurnUsed just above.
+    if (occupant.payEffigyAbilityUsesThisTurn) {
+      next = { ...next, payEffigyAbilityUsesThisTurn: 0 };
+    }
     // Wretched Remnants: "Once per turn ..." resets here too, same
     // reasoning — the borrowed textBox itself is a separate "until end of
     // turn" effect, restored in endTurn below, not here.
@@ -459,9 +471,15 @@ const disengage = (state) => {
     // Armaments are independently engageable permanents of their own (e.g.
     // "Feathers of the Fallen"'s own "Engage: ..." line) — untap any that
     // are engaged, whether attached to a Being or sitting in a freestanding
-    // pile, same as the occupant they're stored on.
-    if (occupant.armaments?.some(a => a.engaged)) {
-      next = { ...next, armaments: occupant.armaments.map(a => (a.engaged ? { ...a, engaged: false } : a)) };
+    // pile, same as the occupant they're stored on. Same Freeze Frame
+    // exception as the Being/Relic check above: an Animated Armament's own
+    // topmost entry (RULES.md > Keywords > Animated) can carry
+    // doesNotDisengageWhileHasTimeCounters too (see the GAIN_TIME_COUNTER_
+    // NO_DISENGAGE_RE handler in actions.js), and skips this untap the same
+    // way a Being holding it would.
+    const stillHeld = (a) => a.doesNotDisengageWhileHasTimeCounters && (a.counters?.time || 0) > 0;
+    if (occupant.armaments?.some(a => a.engaged && !stillHeld(a))) {
+      next = { ...next, armaments: occupant.armaments.map(a => (a.engaged && !stillHeld(a) ? { ...a, engaged: false } : a)) };
     }
     if (next !== occupant) board[cell] = next;
   });

@@ -1,4 +1,4 @@
-import { cellId, parseCellId, ROWS, COLS, ETHEREAL_ROW, FRONT_ROW, SUMMON_CELLS, mortalCellsFor, isMortalRealm, opponentOf, computeMoveDestination, computeAttackCell } from './board.js';
+import { cellId, parseCellId, ROWS, COLS, ETHEREAL_ROW, FRONT_ROW, SUMMON_CELLS, mortalCellsFor, isMortalRealm, opponentOf, computeMoveDestination, computeAttackCell, owningPlayerOfRow } from './board.js';
 import { STARTING_LIFESPAN } from './constants.js';
 import { STARTING_HAND_SIZE, MULLIGAN_COST, drawCard } from './deck.js';
 import { addLog, beginTurn, endTurn, checkWin, controlsOnlyFaithlessPermanents, triggerZealotProphecyEssence, triggerHourglassCollection } from './turn.js';
@@ -80,8 +80,8 @@ const drawCardsFor = (state, playerId, count) => {
 // Alternation order matters: "an" must be tried before "a" or the shorter
 // alternative wins first, leaving a stray "n" glued onto the captured query.
 const SEARCH_FROM_DECK_PATTERNS = [
-  /Add\s+(?:\d+|an|a)?\s*(.+?)\s+to hand from deck/i,
-  /Add\s+(?:\d+|an|a)?\s*(.+?)\s+from deck to hand/i,
+  /Add\s+(?:\d+|an|a)?\s*(.+?)\s+to hand from (?:your )?deck/i,
+  /Add\s+(?:\d+|an|a)?\s*(.+?)\s+from (?:your )?deck to hand/i,
 ];
 
 // Invoke (RULES.md > Keywords): "Add to hand, then summon/conjure" — see
@@ -96,13 +96,15 @@ const SEARCH_FROM_DECK_PATTERNS = [
 //   ("Faithless" here means "no colored casting cost", not a typing word),
 //   reusing isFaithlessTypedCard (already used by Temple of Dubiety).
 // - "Invoke a <Typing> with cost (N) or less summon it on a tile this
-//   points to." (Kernel) — a typing filter, a cost ceiling, landing on an
-//   arrow-pointed tile.
+//   points to." (Kernel), or the same clause with "summon it" dropped —
+//   "Invoke a <Typing> with cost (N) or less on a tile this points to."
+//   (Samara Seed's own Martyr) — a typing filter, a cost ceiling, landing
+//   on an arrow-pointed tile either way.
 // - "Invoke a <Typing> on target tile this points to." (Crathean
 //   Cultivator) — a typing filter only, landing on an arrow-pointed tile.
 const INVOKE_NAMED_RE = /^Invoke \(Add to hand,? then summon\/conjure\)\s+(.+?)\.?$/i;
 const INVOKE_TYPED_RELIC_FAITHLESS_RE = /^Invoke an?\s+Faithless\s+(.+?)\s+Card that costs\s*\(?(\d+)\)?\s+or less\.?$/i;
-const INVOKE_TYPED_COST_POINTED_RE = /^Invoke an?\s+(.+?)\s+with cost\s*\(?(\d+)\)?\s+or less summon it on a tile this points to\.?$/i;
+const INVOKE_TYPED_COST_POINTED_RE = /^Invoke an?\s+(.+?)\s+with cost\s*\(?(\d+)\)?\s+or less(?:\s+summon it)?\s+on a tile this points to\.?$/i;
 const INVOKE_TYPED_POINTED_RE = /^Invoke an?\s+(.+?)\s+on target tile this points to\.?$/i;
 
 // "Add X to hand from your Purgatory" (e.g. Osteomancer: "Add an Undead to
@@ -159,12 +161,13 @@ const SHUFFLE_FIXED_N_FROM_PURGATORY_RE = /^Shuffle\s*\(?(\d+)\)?\s+(.+?)s? into
 const TEMPLE_OF_DUBIETY_RE = /^Shuffle a Faithless Being into deck from (?:your )?Purgatory,?\s*then if you control only Faithless Cards draw\s*\(?(\d+)\)?\s+Cards?/i;
 
 // "Summon a/an <Typing> Being on this tile from your Purgatory" (Grave
-// robber's Martyr) — real reanimation straight onto the board, not to hand
-// (contrast SEARCH_FROM_PURGATORY_RE above). Needs its own pendingChoice
-// kind since resolving it does something entirely different (a board
-// placement, via placeBeingOnBoard) from the generic 'search' kind's
-// add-to-hand.
-const SUMMON_FROM_PURGATORY_RE = /Summon an?\s+(.+?)\s+Being on this tile from (?:your )?Purgatory/i;
+// robber's Martyr), or the same clauses in the other order, "...Being from
+// your Purgatory on this tile" (Planchette's own granted Martyr) — real
+// reanimation straight onto the board, not to hand (contrast
+// SEARCH_FROM_PURGATORY_RE above). Needs its own pendingChoice kind since
+// resolving it does something entirely different (a board placement, via
+// placeBeingOnBoard) from the generic 'search' kind's add-to-hand.
+const SUMMON_FROM_PURGATORY_RE = /Summon an?\s+(.+?)\s+Being (?:on this tile from (?:your )?Purgatory|from (?:your )?Purgatory on this tile)/i;
 
 // "You may summon Undead from your Purgatory until the end of your turn."
 // (Mausoleum Gates) — unlike SUMMON_FROM_PURGATORY_RE above (a single,
@@ -202,6 +205,19 @@ export const searchZoneCandidates = (zone, query) => {
     const name = (c.name || '').toLowerCase();
     return (c.typing || '').toLowerCase().includes(q) || name === q || name.startsWith(`${q},`);
   });
+};
+
+// searchZoneCandidates, widened for an OR'd typing list (Planchette: "an
+// Undead or Demon Being...") — splits on " or " and unions each part's own
+// matches, deduped by instanceId. A single-typing query (the overwhelming
+// majority of real cards) is just a one-part split, so this is a drop-in
+// replacement anywhere a query might legally contain "X or Y" — same
+// split-and-union convention BUFF_ALLY_RE's own handler already uses.
+export const searchZoneCandidatesAnyOf = (zone, query) => {
+  const seenIds = new Set();
+  return query.split(/\s+or\s+/i).map(w => w.trim()).filter(Boolean)
+    .flatMap(part => searchZoneCandidates(zone, part))
+    .filter(c => !seenIds.has(c.instanceId) && seenIds.add(c.instanceId));
 };
 
 // A card with no colored casting cost at all — the same "Faithless" test
@@ -242,6 +258,16 @@ const MODULATE_RE = /Modulate\s*\(([+\-±]?\d+)\)/i;
 // 'modulate' pendingChoice's own candidates to the caster's own printed
 // Arrows instead of every Time-Counter permanent on the board.
 const MODULATE_POINTED_RE = /Modulate\s*\(([+\-±]?\d+)\)\s+a target this points to\.?/i;
+// "You may Modulate (-1)." (Orbital Acceleration's own third clause, after
+// "All players draw a card. Craft (1) Effigy.") — genuinely OPTIONAL
+// ("may", never forced) and, per its own printed wording carrying no "you
+// control" restriction (unlike the bare Modulate clauses above, which are
+// always scoped to the caster's own permanents), able to target EITHER
+// player's Time Counters. Checked before the generic MODULATE_RE below
+// (more specific — an unanchored MODULATE_RE would otherwise match "Modulate
+// (-1)" as a bare substring here too and silently drop both the "may" and
+// the either-owner targeting).
+const OPTIONAL_MODULATE_ANY_OWNER_RE = /^You may Modulate\s*\(([+\-±]?\d+)\)\.?$/i;
 
 // "Modulate (+1), then repeat for each Time Counter on this." (Time
 // Capsule's own Martyr) — matched as one whole unit (excluded from the
@@ -268,18 +294,40 @@ const hasOwnProphecy = (board, playerId) =>
 const hasOwnTyping = (board, playerId, typing) =>
   Object.values(board).some(o => o?.type === 'being' && o.ownerId === playerId && (o.card.typing || '').toLowerCase().includes(typing.toLowerCase()));
 
+// A card already sitting at 0 Time Counters isn't a legal Modulate target —
+// it has nothing left to tick down (Modulate (-1) would be a no-op) and, for
+// something like Eònion Altar, 0 Time Counters is itself a meaningful game
+// state (its craft bonus condition) that Modulate shouldn't be able to
+// casually target at all. Hourglass-style relics (keywords.
+// collectsRemovedProphecyTimeCounters) are the one documented exception —
+// they can still be Modulated UP from 0, since that's how they receive
+// their very first collected counter.
 const isModulateTarget = (occupant) =>
-  !!occupant && (occupant.type === 'prophecy' || occupant.counters?.time !== undefined || occupant.card?.keywords?.collectsRemovedProphecyTimeCounters);
+  !!occupant && (
+    occupant.type === 'prophecy'
+    || occupant.card?.keywords?.collectsRemovedProphecyTimeCounters
+    || (occupant.counters?.time !== undefined && occupant.counters.time > 0)
+  );
 
 // An Altar (Eònion Altar in particular) carries its own Time Counters too,
 // but altars live in `state.altars[playerId]` (a plain array, keyed by
 // nothing but position), not `state.board` — structurally outside
-// isModulateTarget's board-occupant scan, so it needs its own check.
-const isModulateableAltar = (altar) => !!altar && altar.counters?.time !== undefined;
+// isModulateTarget's board-occupant scan, so it needs its own check. Same
+// 0-Time-Counters exclusion (and Hourglass-style exception) as
+// isModulateTarget above.
+const isModulateableAltar = (altar) =>
+  !!altar && altar.counters?.time !== undefined
+  && (altar.counters.time > 0 || altar.card?.keywords?.collectsRemovedProphecyTimeCounters);
 
 const hasModulateTarget = (board, playerId, altars) =>
   Object.values(board).some(o => o?.ownerId === playerId && isModulateTarget(o))
   || (altars?.[playerId] || []).some(isModulateableAltar);
+
+// Same check with no ownership restriction at all — OPTIONAL_MODULATE_ANY_
+// OWNER_RE's own "either player" targeting (see its comment above).
+const hasModulateTargetAnyOwner = (board, altars) =>
+  Object.values(board).some(isModulateTarget)
+  || Object.values(altars || {}).some(list => (list || []).some(isModulateableAltar));
 
 // Time Capsule: "Modulate (+1), then repeat for each Time Counter on
 // this." — each Modulate needs its own target choice (the 'modulate'
@@ -982,6 +1030,20 @@ const hasAffordableEngagedTarget = (board, players, playerId) =>
 const countOwnBeings = (board, playerId) =>
   Object.values(board).filter(o => o?.type === 'being' && o.ownerId === playerId).length;
 
+// Same count, but an Animated Armament's own topmost entry (RULES.md >
+// Keywords > Animated) also counts as a Being — By Teeth and Bounds' own
+// three-way "more/less/tied Beings than your opponent" comparison is the
+// one place in this file that needs this broader count; countOwnBeings
+// above stays strict to real Beings everywhere else (e.g. Immen Gorta's
+// own sacrifice-cost gate, which isn't asking "who has more board
+// presence" the way this card is). Forward-references animatedTopEntry
+// (defined further down this file) — safe, since neither function body
+// runs until actually called, well after the whole module has loaded.
+const countBeingsIncludingAnimated = (board, playerId) =>
+  Object.values(board).filter(o =>
+    o?.ownerId === playerId && (o.type === 'being' || animatedTopEntry(o))
+  ).length;
+
 // Samara Seed / Seed of Divinity ("Remove (N) Counters, Martyr: X") and
 // Melting Clock ("Pay (N) Essence, Martyr: X") both gate their otherwise-
 // unconditional Martyr behind a real additional cost — checked at offer
@@ -1648,9 +1710,24 @@ const BOTTOM_OF_DECK_RE = /put\s*\(?(\d+)\)?\s+card from hand on the bottom of d
 // by the time CAST_CONJURING calls this resolver, so it's never its own
 // candidate).
 const DISCARD_KIND_DRAW_RE = /^Discard an?\s+(\w+):\s*Draw\s*\(?(\d+|one|two|three|four|five)\)?\s+cards?\.?$/i;
-// "Discard a <Typing>." with no attached draw (Onagīous Hunger's own
-// "Engage: Discard a Hunger, then draw (1) card." — the "then"-split above
-// leaves this half standing alone).
+// "Discard a <Typing>, then draw (N) card(s)." (Onagīous Hunger's real
+// printed text: "Engage: Discard a Hunger, then draw (1) card.") — matched
+// as ONE whole pattern, excluded from the generic "then"-split below
+// (same precedent as MOVE_OWN_THEN_OPPONENT_RE and friends): the discard
+// half can open a real pendingChoice with 2+ matching cards, and the
+// generic split has no way to defer the draw until AFTER that choice
+// resolves — it would just run the draw immediately on the not-yet-
+// reduced hand, so with 2+ candidates the draw fired before the discard
+// choice was ever made (and could even offer discarding the very card
+// just drawn). Handled as its own branch below, storing `drawCount` on
+// the SAME 'discard-typed' pendingChoice the plain DISCARD_TYPED_RE below
+// already uses, so RESOLVE_DISCARD_TYPED can do the draw once the discard
+// actually completes.
+const DISCARD_TYPED_THEN_DRAW_RE = /^Discard an?\s+(\w+),?\s+then\s+draw\s*\(?(\d+|one|two|three|four|five)\)?\s+cards?\.?$/i;
+// "Discard a <Typing>." with no attached draw (Skeptical Scrawling-style
+// "then"-split leftover halves that DON'T need the draw-continuation
+// above — anything already caught by DISCARD_TYPED_THEN_DRAW_RE never
+// reaches here, since it's checked first).
 const DISCARD_TYPED_RE = /^Discard an?\s+(\w+)\.?$/i;
 // Bare "Discard (1) Card." (Skeptical Scrawling, as one half of a
 // "then"-split) — no "at random" (DISCARD_RANDOM_RE) and no typing
@@ -1747,8 +1824,12 @@ const TOKEN_REGISTRY = {
   // Real printed token's own typing (public/default-card-set.csv row 452:
   // "Being, Vine, Token") — was missing "Vine" here, which silently broke
   // any typing-based match against it (e.g. Roots of Eternity's own "sacrifice
-  // a Vine token" ability).
-  'vine': () => createTokenCard({ name: 'Vine', typing: 'Being, Vine, Token', strength: 0, lifespan: 2 }),
+  // a Vine token" ability). Its own row also prints Arrows "1" — like every
+  // other Being token below, createTokenCard used to have no `arrows` param
+  // at all, so every token silently came out immobile regardless of what its
+  // real card actually prints; now fixed at the source (createTokenCard), so
+  // each entry here just needs its own real printed Arrows value passed through.
+  'vine': () => createTokenCard({ name: 'Vine', typing: 'Being, Vine, Token', strength: 0, lifespan: 2, arrows: '1' }),
   'shifting sands': () => createTokenCard({
     name: 'Shifting Sands', typing: 'Relic, Token', effigyCost: '1 Shifting',
     textBox: 'When summoned gain (2) Crossing Counters.\nEngage: Remove (1) Crossing Counter, then move target Being you control to this tile.\nBeings may move across Shifting Sands.',
@@ -1760,7 +1841,7 @@ const TOKEN_REGISTRY = {
   // the token's own row (448: "Being, Token", missing "Demon") — confirmed
   // with the user that "Demon" stays on the token too; the CSV's own token
   // row is the one that's inconsistent, not this entry.
-  'vassal': () => createTokenCard({ name: 'Vassal', typing: 'Demon, Being, Token', effigyCost: '2 Formless', strength: 2, lifespan: 2 }),
+  'vassal': () => createTokenCard({ name: 'Vassal', typing: 'Demon, Being, Token', effigyCost: '2 Formless', strength: 2, lifespan: 2, arrows: '1, 7' }),
   // Afterimage's own real printed token (public/default-card-set.csv row
   // 462) — its own dedicated row prints only the sacrifice-at-zero
   // trigger, not "When Summoned gain (2) Time Counters" (that line lives
@@ -1774,12 +1855,12 @@ const TOKEN_REGISTRY = {
   // "Engage: Add (1) Living" ability (parsed off its textBox the same as
   // any other card, so `keywords.engage` fires for real — see
   // ADD_EFFIGY_RE below).
-  'blooming vine': () => createTokenCard({ name: 'Blooming Vine Token', typing: 'Vine, Being, Token', strength: 0, lifespan: 3, textBox: 'Engage: Add (1) Living Essence' }),
+  'blooming vine': () => createTokenCard({ name: 'Blooming Vine Token', typing: 'Vine, Being, Token', strength: 0, lifespan: 3, textBox: 'Engage: Add (1) Living Essence', arrows: '1' }),
   // Real printed token (public/default-card-set.csv row 463) — a plain 1/1
   // vanilla Being, no ability of its own (Hoarder's own "Each time this
   // moves create a Rat token on the tile it moved from." is the only real
   // card that creates one).
-  'rat': () => createTokenCard({ name: 'Rat', typing: 'Being, Rat, Familiar, Token', effigyCost: '1 Living', strength: 1, lifespan: 1 }),
+  'rat': () => createTokenCard({ name: 'Rat', typing: 'Being, Rat, Familiar, Token', effigyCost: '1 Living', strength: 1, lifespan: 1, arrows: '1' }),
   // Real printed card's own stats (public/default-card-set.csv row 125),
   // generated straight as a token by Skeptic's own Depart — confirmed with
   // the user this is really meant to create a fresh token, not search the
@@ -1787,6 +1868,7 @@ const TOKEN_REGISTRY = {
   'passing doubt': () => createTokenCard({
     name: 'Passing Doubt', typing: 'Null, Being, Token', effigyCost: '2 Faithless', strength: 2, lifespan: 2,
     textBox: 'At the end of your turn target Doubt you control is dealt (1) Lifespan Damage',
+    arrows: '2, 8',
   }),
   // Crathea's own printed reminder text (public/default-card-set.csv row
   // 231): "0 cost - Divine Prophecy - 3T" — a face-up Prophecy token, 3
@@ -1804,6 +1886,7 @@ const TOKEN_REGISTRY = {
   "scā-vuhk hunger": () => createTokenCard({
     name: 'Scā-vuhk Hunger', typing: 'Being, Hunger, Token', strength: 0, lifespan: 3,
     textBox: 'Shift (1): "At the end of your turn remove (1) Time Counter from this"\nWhen this moves into the Mortal Realm, sacrifice this and create (2) Scā-vuhk Hunger tokens.',
+    arrows: '1',
   }),
 };
 
@@ -1906,6 +1989,15 @@ const SUMMON_TOKEN_ON_TILE_RE = /summon\s*(?:\(?\d+\)?)?\s*an?\s+(.+?)\s+tokens?
 // "on this tile" above (context.selfCellId, the mover's *new* cell) —
 // Hoarder's token lands where it moved *from*, not where it landed.
 const CREATE_TOKEN_MOVED_FROM_RE = /create an?\s+(.+?)\s+tokens?\b(?:\s*\([^)]*\))?\s+on the tile it moved from/i;
+
+// "Summon (1) 0/2 Vine token on the tile it moved from." (Imneyat Dryad's
+// own onMove) — same moved-from destination as CREATE_TOKEN_MOVED_FROM_RE
+// above, but printed with "Summon" instead of "create" and a literal "0/2"
+// stat block between the count and the token name, same "0/2 Vine" fixed
+// literal precedent every other Vine-token regex above uses (its own
+// dedicated shape, rather than trying to generalize the "create" regex to
+// also tolerate a stat block for every other token name too).
+const SUMMON_VINE_MOVED_FROM_RE = /Summon\s*\(?\d+\)?\s+0\/2 Vine tokens? on the tile it moved from/i;
 
 // Crathea: "create a face up Blooming Life token (0 cost - Divine Prophecy
 // - 3T "...") or a Withering Life token (0 cost - Divine Prophecy - 3T -
@@ -2052,6 +2144,11 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
     // read off how many were JUST discarded, so it can't be split into two
     // independently-resolved clauses either.
     && !DISCARD_HAND_DRAW_EQUAL_RE.test(text)
+    // DISCARD_TYPED_THEN_DRAW_RE (Onagīous Hunger) joins the same list —
+    // see its own comment above: the discard half can defer to a real
+    // pendingChoice, and the draw must wait for that choice to actually
+    // resolve, not fire immediately.
+    && !DISCARD_TYPED_THEN_DRAW_RE.test(text)
     // DAMAGE_THEN_MOVE_ARMAMENT_HERE_RE (Brick) joins the same list — its
     // own "then" is a move to wherever the damage just landed, which needs
     // the same target settled by both halves, not two independent clauses.
@@ -2148,6 +2245,16 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
   if (grantDepartWearerMatch && context.selfCellId && state.board[context.selfCellId]) {
     const departText = grantDepartWearerMatch[1].trim();
     const occ = state.board[context.selfCellId];
+    // ACTIVATE_ARMAMENT_MARTYR's own getLegalActions offer (and reducer
+    // case) deliberately allow this Martyr to fire from a freestanding
+    // (Being-less) armament-stack too — Martyr itself doesn't require a
+    // wearer — but THIS specific granted text ("Being this is attached to
+    // gains...") only means something when there actually is one. No wearer
+    // is a real, reachable case (attach the Armament to an empty tile, then
+    // Martyr it there), not just a defensive check.
+    if (occ.type !== 'being') {
+      return addLog(state, `${cardName}'s ${label} has no attached Being to grant "Depart: ${departText}" to.`);
+    }
     const next = { ...state, board: { ...state.board, [context.selfCellId]: { ...occ, grantedDepart: departText } } };
     return addLog(next, `${cardName}'s ${label} gives ${occ.card.name} "Depart: ${departText}".`);
   }
@@ -2296,22 +2403,22 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
   // self-contained branch instead of one combined multi-line pattern).
   if (BY_TEETH_AND_BOUNDS_MORE_RE.test(text)) {
     const oppId = opponentOf(playerId);
-    const ownBeings = Object.values(state.board).filter(o => o?.type === 'being' && o.ownerId === playerId).length;
-    const oppBeings = Object.values(state.board).filter(o => o?.type === 'being' && o.ownerId === oppId).length;
+    const ownBeings = countBeingsIncludingAnimated(state.board, playerId);
+    const oppBeings = countBeingsIncludingAnimated(state.board, oppId);
     if (ownBeings <= oppBeings) return state; // this line's own condition isn't met — no-op, not an automation gap
     return applyByTeethAndBoundsMore(state, playerId, cardName, label, context);
   }
   if (BY_TEETH_AND_BOUNDS_LESS_RE.test(text)) {
     const oppId = opponentOf(playerId);
-    const ownBeings = Object.values(state.board).filter(o => o?.type === 'being' && o.ownerId === playerId).length;
-    const oppBeings = Object.values(state.board).filter(o => o?.type === 'being' && o.ownerId === oppId).length;
+    const ownBeings = countBeingsIncludingAnimated(state.board, playerId);
+    const oppBeings = countBeingsIncludingAnimated(state.board, oppId);
     if (ownBeings >= oppBeings) return state;
     return applyByTeethAndBoundsLess(state, playerId, cardName, label);
   }
   if (BY_TEETH_AND_BOUNDS_TIE_RE.test(text)) {
     const oppId = opponentOf(playerId);
-    const ownBeings = Object.values(state.board).filter(o => o?.type === 'being' && o.ownerId === playerId).length;
-    const oppBeings = Object.values(state.board).filter(o => o?.type === 'being' && o.ownerId === oppId).length;
+    const ownBeings = countBeingsIncludingAnimated(state.board, playerId);
+    const oppBeings = countBeingsIncludingAnimated(state.board, oppId);
     if (ownBeings !== oppBeings) return state;
     const next = addLog(state, `${cardName}'s ${label}: it's tied — ${playerId} chooses.`);
     return { ...next, pendingChoice: { kind: 'teeth-bounds-tie-choice', playerId, cardName, label, context } };
@@ -2501,7 +2608,18 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
     // (no comma) never is — stripped here rather than touching the shared
     // matcher every other search already relies on.
     const query = searchMatch[1].trim().replace(/\s+Being$/i, '');
-    const candidates = searchZoneCandidates(state.players[playerId].mainDeck, query);
+    // Seed of Divinity: "Add a Living Deity to hand from your deck" — a
+    // leading Effigy-color word ("Living") isn't part of the typing at
+    // all (a Deity's typing is just "...Deity", never "Living, Deity");
+    // it's this card's own way of also filtering by color. Stripped from
+    // the typing query and applied as its own effigyType filter, same
+    // "search plus an extra filter layered on top" shape
+    // searchDeckCostOrMoreMatch above already uses for a cost ceiling.
+    const leadingColorMatch = query.match(new RegExp(`^(${EFFIGY_COLORS.join('|')})\\s+(.+)$`, 'i'));
+    const colorFilter = leadingColorMatch ? leadingColorMatch[1].toLowerCase() : null;
+    const typingQuery = leadingColorMatch ? leadingColorMatch[2] : query;
+    const candidates = searchZoneCandidates(state.players[playerId].mainDeck, typingQuery)
+      .filter(c => !colorFilter || c.effigyType === colorFilter);
     // Erroneous Evocation's own trailing clause — independent of the
     // search's own outcome, so it's applied either way, not deferred.
     const opponentTokenMatch = text.match(OPPONENT_SUMMON_TOKEN_RE);
@@ -2519,7 +2637,7 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
       return applyOpponentToken(addLog(state, `${cardName}'s ${label} finds no "${query}" in ${playerId}'s deck.`));
     }
     let next = applyOpponentToken(addLog(state, `${cardName}'s ${label} searches ${playerId}'s deck for "${query}" to add to hand.`));
-    return { ...next, pendingChoice: { kind: 'search', playerId, source: 'mainDeck', query, cardName } };
+    return { ...next, pendingChoice: { kind: 'search', playerId, source: 'mainDeck', query: typingQuery, ...(colorFilter ? { colorFilter } : {}), cardName } };
   }
 
   // "Discard a Spirit, add a Turanga to hand from your Purgatory." (Book
@@ -2652,7 +2770,9 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
   const summonFromPurgatoryMatch = text.match(SUMMON_FROM_PURGATORY_RE);
   if (summonFromPurgatoryMatch && context.selfCellId) {
     const query = summonFromPurgatoryMatch[1].trim();
-    const candidates = searchZoneCandidates(state.players[playerId].purgatory, query).filter(c => c.kind === 'being');
+    // Planchette: "Summon an Undead or Demon Being..." — see
+    // searchZoneCandidatesAnyOf's own comment.
+    const candidates = searchZoneCandidatesAnyOf(state.players[playerId].purgatory, query).filter(c => c.kind === 'being');
     if (candidates.length === 0) {
       return addLog(state, `${cardName}'s ${label} finds no "${query}" Being in ${playerId}'s Purgatory.`);
     }
@@ -2778,7 +2898,18 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
   // second's delta through as `thenDelta` on the SAME `modulate`
   // pendingChoice (continueModulateRepeat, below `RESOLVE_MODULATE`) rather
   // than a new pendingChoice kind.
-  const doubleModulateMatch = text.match(/^Modulate\s*\(([+\-±]?\d+)\)\s+and\s+Modulate\s*\(([+\-±]?\d+)\)\.?$/i);
+  // Not anchored with a trailing `$` — the real printed card's own
+  // textBox has a whole SECOND line after this one ("This may only
+  // target Time Counters that you control."), and `$` (no multiline
+  // flag) matches end-of-STRING, not end-of-line, so it silently failed
+  // to match the real two-line text at all (confirmed live: it fell
+  // through to the generic single-Modulate branch below instead,
+  // applying only the first "-1" and dropping the "+1" entirely) —
+  // own-only is already this branch's own unconditional default below,
+  // which already matches that second line's own printed restriction, so
+  // it needs no further handling once this pattern can actually see
+  // past it.
+  const doubleModulateMatch = text.match(/^Modulate\s*\(([+\-±]?\d+)\)\s+and\s+Modulate\s*\(([+\-±]?\d+)\)\.?/i);
   if (doubleModulateMatch) {
     if (!hasModulateTarget(state.board, playerId, state.altars)) {
       return addLog(state, `${cardName}'s ${label} has no Time Counter of ${playerId}'s to Modulate.`);
@@ -2790,15 +2921,49 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
     return { ...next, pendingChoice: { kind: 'modulate', playerId, cardName, label, delta, thenDelta } };
   }
 
+  // Checked before the generic MODULATE_RE just below — see its own regex
+  // comment for why (more specific, and MODULATE_RE would otherwise catch
+  // "Modulate (-1)" as a bare substring first and silently drop the "may").
+  const optionalModulateAnyOwnerMatch = text.match(OPTIONAL_MODULATE_ANY_OWNER_RE);
+  if (optionalModulateAnyOwnerMatch) {
+    if (!hasModulateTargetAnyOwner(state.board, state.altars)) {
+      return addLog(state, `${cardName}'s ${label} has no Time Counter on the board to Modulate.`);
+    }
+    const raw = optionalModulateAnyOwnerMatch[1];
+    const delta = raw.startsWith('±') ? 'choose' : parseInt(raw, 10);
+    let next = addLog(state, `${cardName}'s ${label} lets ${playerId} choose whether to Modulate a Time Counter either player controls.`);
+    return { ...next, pendingChoice: { kind: 'modulate', playerId, cardName, delta, optional: true, anyOwner: true } };
+  }
+
   const modulateMatch = text.match(MODULATE_RE);
   if (modulateMatch) {
-    if (!hasModulateTarget(state.board, playerId, state.altars)) {
-      return addLog(state, `${cardName}'s ${label} has no Time Counter of ${playerId}'s to Modulate.`);
+    // Own-only unless the printed text says otherwise — but "otherwise"
+    // isn't every card without "you control": it's specifically whether
+    // "you control" appears ANYWHERE in this Modulate's own text at all.
+    // Confirmed by the real CSV's own internal contrast: Hurry Up and Wait
+    // spells out "This may only target Time Counters that you control" as
+    // an explicit second clause, while Charge Forward, Roll Back, the
+    // Conjuring literally named "Modulate", and MetaToris ("Twice per
+    // turn Modulate (±1).") all print a bare Modulate with no such
+    // restriction anywhere — the CSV author adds the qualifier exactly
+    // when it's meant to apply and leaves it off otherwise, so its
+    // absence here means "either player's Time Counter", not "assume
+    // own-only". Matches the user's own ruling: unlike Dial of Metatoris
+    // (own-only, per its printed "on a target you control"), MetaToris's
+    // own ability has no such restriction in its printed text, so it can
+    // target a Time Counter — including one on a shifted Being — that the
+    // opponent controls.
+    const anyOwner = !/you control/i.test(text);
+    const hasTarget = anyOwner
+      ? hasModulateTargetAnyOwner(state.board, state.altars)
+      : hasModulateTarget(state.board, playerId, state.altars);
+    if (!hasTarget) {
+      return addLog(state, `${cardName}'s ${label} has no Time Counter ${anyOwner ? 'on the board' : `of ${playerId}'s`} to Modulate.`);
     }
     const raw = modulateMatch[1];
     const delta = raw.startsWith('±') ? 'choose' : parseInt(raw, 10);
-    let next = addLog(state, `${cardName}'s ${label} lets ${playerId} Modulate a Time Counter they control.`);
-    return { ...next, pendingChoice: { kind: 'modulate', playerId, cardName, delta } };
+    let next = addLog(state, `${cardName}'s ${label} lets ${playerId} Modulate a Time Counter ${anyOwner ? 'either player controls' : 'they control'}.`);
+    return { ...next, pendingChoice: { kind: 'modulate', playerId, cardName, delta, ...(anyOwner ? { anyOwner: true } : {}) } };
   }
 
   // "Sacrifice a Being you control: X" / "Sacrifice target Being add (N)
@@ -3563,10 +3728,12 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
   }
 
   if (EQUANIMITY_RE.test(text)) {
-    const repeats = totalProphecyTimeCountersControlledBy(state, playerId);
-    if (repeats === 0) {
-      return addLog(state, `${cardName}'s ${label} finds no Time Counter on a Prophecy of ${playerId}'s — nothing happens.`);
-    }
+    // "Deal (1) damage..., repeat for each Time Counter..." — the base
+    // effect always fires once, then repeats once more per Time Counter, so
+    // X = Time Counters + 1 (0 Time Counters still triggers once), not the
+    // Time Counter count alone.
+    const timeCounters = totalProphecyTimeCountersControlledBy(state, playerId);
+    const repeats = timeCounters + 1;
     let next = state;
     for (let i = 0; i < repeats; i += 1) {
       next = addLog(next, `${cardName}'s ${label} triggers (${i + 1}/${repeats}).`);
@@ -3934,11 +4101,47 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
     return { ...next, pendingChoice: { kind: 'discard-kind-draw', playerId, cardName, label, discardKind: kind, drawCount: count } };
   }
 
-  // "Discard a <Typing>." (Onagīous Hunger, as one half of a "then"-split
-  // with its own separate "draw (1) card" clause) — the same shape as
-  // discardKindDrawMatch above, minus the draw, so it reuses the exact
-  // same 'discard-kind-draw' pendingChoice with drawCount 0 rather than a
-  // new kind.
+  // "Discard a <Typing>, then draw (N) card(s)." (Onagīous Hunger's real
+  // printed text) — see DISCARD_TYPED_THEN_DRAW_RE's own comment above for
+  // why this needs its own combined branch rather than the generic
+  // "then"-split. Same shape as discardKindDrawMatch above (0/1/2+
+  // candidates), just matched by typing (matchesDiscardTyping) instead of
+  // kind, and storing `drawCount` on the 'discard-typed' pendingChoice
+  // below so RESOLVE_DISCARD_TYPED can draw once the discard actually
+  // resolves.
+  const discardTypedThenDrawMatch = text.match(DISCARD_TYPED_THEN_DRAW_RE);
+  if (discardTypedThenDrawMatch) {
+    const typing = discardTypedThenDrawMatch[1];
+    const count = parseAmount(discardTypedThenDrawMatch[2]);
+    const candidates = state.players[playerId].hand.filter(c => matchesDiscardTyping(c, typing));
+    if (candidates.length === 0) {
+      return addLog(state, `${cardName}'s ${label} has no ${typing} to discard in ${playerId}'s hand.`);
+    }
+    if (candidates.length === 1) {
+      const card = candidates[0];
+      const player = state.players[playerId];
+      let next = {
+        ...state,
+        players: {
+          ...state.players,
+          [playerId]: {
+            ...player,
+            hand: player.hand.filter(c => c.instanceId !== card.instanceId),
+            purgatory: purgatoryAfterAdding(player.purgatory, card),
+          },
+        },
+      };
+      next = addLog(next, `${playerId} discards ${card.name} for ${cardName}'s ${label}.`);
+      const { state: afterDraw, drawnCount } = drawCardsFor(next, playerId, count);
+      return addLog(afterDraw, `${cardName}'s ${label} draws ${drawnCount} card(s) for ${playerId}.`);
+    }
+    let next = addLog(state, `${cardName}'s ${label} lets ${playerId} choose a ${typing} to discard.`);
+    return { ...next, pendingChoice: { kind: 'discard-typed', playerId, cardName, label, typing, drawCount: count } };
+  }
+
+  // "Discard a <Typing>." with no attached draw (Skeptical Scrawling-style
+  // "then"-split leftover halves) — same shape as discardTypedThenDrawMatch
+  // above, minus the draw.
   const discardTypedMatch = text.match(DISCARD_TYPED_RE);
   if (discardTypedMatch) {
     const typing = discardTypedMatch[1];
@@ -4037,24 +4240,34 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
     if (have < spend) {
       return addLog(state, `${cardName}'s ${label} has no ${counterType} Counters left to spend.`);
     }
-    const candidates = searchZoneCandidates(state.players[playerId].purgatory, query);
+    // Unlike Melting Clock/Temple of Dubiety's own "from YOUR Purgatory"
+    // (own-only), Canopic Jar's printed text says just "from Purgatory
+    // into it's owners deck, they draw (1) card" — no "your", and "it's
+    // owners"/"they" both point at whoever the found Being actually
+    // belongs to, not necessarily the activating player. So this searches
+    // BOTH players' Purgatories, and the shuffle + draw both apply to the
+    // found card's own owner — confirmed with the user.
+    const candidates = [
+      ...searchZoneCandidates(state.players.A.purgatory, query).map(card => ({ card, owner: 'A' })),
+      ...searchZoneCandidates(state.players.B.purgatory, query).map(card => ({ card, owner: 'B' })),
+    ];
     let next = {
       ...state,
       board: { ...state.board, [context.selfCellId]: { ...occupant, counters: { ...occupant.counters, [counterType]: have - spend } } },
     };
     next = addLog(next, `${cardName}'s ${label} spends ${spend} ${counterType} Counter(s).`);
     if (candidates.length === 0) {
-      return addLog(next, `${cardName}'s ${label} finds no "${query}" in ${playerId}'s Purgatory.`);
+      return addLog(next, `${cardName}'s ${label} finds no "${query}" in either player's Purgatory.`);
     }
-    const shuffleAndDraw = (st, card) => {
-      let n = shuffleFromPurgatoryIntoDeck(st, playerId, card);
-      n = addLog(n, `${cardName}'s ${label} shuffles ${card.name} into ${playerId}'s deck.`);
-      const { state: afterDraw, drawnCount } = drawCardsFor(n, playerId, drawCount);
-      return addLog(afterDraw, `${cardName}'s ${label} draws ${drawnCount} card(s) for ${playerId}.`);
+    const shuffleAndDraw = (st, owner, card) => {
+      let n = shuffleFromPurgatoryIntoDeck(st, owner, card);
+      n = addLog(n, `${cardName}'s ${label} shuffles ${card.name} into ${owner}'s deck.`);
+      const { state: afterDraw, drawnCount } = drawCardsFor(n, owner, drawCount);
+      return addLog(afterDraw, `${cardName}'s ${label} draws ${drawnCount} card(s) for ${owner}.`);
     };
-    if (candidates.length === 1) return shuffleAndDraw(next, candidates[0]);
-    next = addLog(next, `${cardName}'s ${label} lets ${playerId} choose a "${query}" to shuffle into their deck.`);
-    return { ...next, pendingChoice: { kind: 'shuffle-purgatory-into-deck', playerId, cardName, label, query, then: { drawCount } } };
+    if (candidates.length === 1) return shuffleAndDraw(next, candidates[0].owner, candidates[0].card);
+    next = addLog(next, `${cardName}'s ${label} lets ${playerId} choose a "${query}" (either player's Purgatory) to shuffle into its owner's deck.`);
+    return { ...next, pendingChoice: { kind: 'shuffle-purgatory-into-deck', playerId, cardName, label, query, then: { drawCount }, anyOwner: true } };
   }
 
   // Generic coin flip ("Flip a coin, if heads X, if tails Y" — Illegible
@@ -4297,18 +4510,25 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
   const gainTimeCounterNoDisengageMatch = text.match(GAIN_TIME_COUNTER_NO_DISENGAGE_RE);
   if (gainTimeCounterNoDisengageMatch) {
     const amount = parseInt(gainTimeCounterNoDisengageMatch[1], 10);
-    const candidates = Object.entries(state.board).filter(([, o]) => o?.type === 'being' && o.engaged);
+    // Also targets an Animated Armament acting as a Being (RULES.md >
+    // Keywords > Animated), the same actorView/writeActorState pattern
+    // dealDamageToBeing already uses — its own topmost entry carries
+    // `engaged`/`counters` instead of the stack occupant itself.
+    const candidates = Object.entries(state.board).filter(([, o]) =>
+      (o?.type === 'being' && o.engaged) || (o?.type === 'armament-stack' && animatedTopEntry(o)?.engaged));
     if (candidates.length === 0) {
       return addLog(state, `${cardName}'s ${label} has no Engaged Being to target.`);
     }
     const applyFreezeFrame = (st, cellId) => {
       const occupant = st.board[cellId];
-      const have = occupant.counters?.time || 0;
-      const next = {
-        ...st,
-        board: { ...st.board, [cellId]: { ...occupant, counters: { ...occupant.counters, time: have + amount }, doesNotDisengageWhileHasTimeCounters: true } },
-      };
-      return addLog(next, `${cardName}'s ${label} gives ${occupant.card.name} ${amount} Time Counter(s); it won't disengage while it has any.`);
+      const actingCard = actorView(occupant).card;
+      const have = (occupant.type === 'being' ? occupant.counters : animatedTopEntry(occupant).counters)?.time || 0;
+      const updated = writeActorState(occupant, {
+        counters: { ...(occupant.type === 'being' ? occupant.counters : animatedTopEntry(occupant).counters), time: have + amount },
+        doesNotDisengageWhileHasTimeCounters: true,
+      });
+      const next = { ...st, board: { ...st.board, [cellId]: updated } };
+      return addLog(next, `${cardName}'s ${label} gives ${actingCard.name} ${amount} Time Counter(s); it won't disengage while it has any.`);
     };
     if (candidates.length === 1) {
       return applyFreezeFrame(state, candidates[0][0]);
@@ -4638,14 +4858,24 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
     const player = state.players[playerId];
     const top = player.mainDeck[0];
     if (!top) return addLog(state, `${cardName}'s ${label} reveals nothing — ${playerId}'s deck is empty.`);
+    // revealPopup (Farm Hand's own bug report): the outcome itself is
+    // already fully decided right here — no player choice, the printed
+    // condition alone decides it — this transient field is purely a
+    // "show the player what was revealed" overlay (Match.jsx), not a
+    // pendingChoice; it never blocks or reorders anything and is cleared
+    // by DISMISS_REVEAL_POPUP (a click, or the UI's own 30s auto-timeout).
     if ((top.typing || '').toLowerCase().includes(seedTyping.toLowerCase())) {
       const next = {
         ...state,
         players: { ...state.players, [playerId]: { ...player, mainDeck: player.mainDeck.slice(1), hand: [...player.hand, top] } },
+        revealPopup: { playerId, card: top, outcome: 'drawn', cardName, label },
       };
       return addLog(next, `${cardName}'s ${label} reveals ${top.name} (a ${seedTyping} Being) and adds it to ${playerId}'s hand.`);
     }
-    return addLog(state, `${cardName}'s ${label} reveals ${top.name} — not a ${seedTyping} Being, so it stays on top.`);
+    return addLog(
+      { ...state, revealPopup: { playerId, card: top, outcome: 'kept', cardName, label } },
+      `${cardName}'s ${label} reveals ${top.name} — not a ${seedTyping} Being, so it stays on top.`
+    );
   }
 
   const lookMatch = text.match(LOOK_TOP_NO_OP_RE);
@@ -5101,7 +5331,13 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
     if (candidates.length === 1) {
       return moveBeingFreely(state, context.selfCellId, candidates[0]);
     }
-    let next = addLog(state, `${cardName}'s ${label} lets ${playerId} choose where ${occupant.card.name} moves.`);
+    // A real Being carries its own top-level `card`; an Animated Armament
+    // acting as one (moveBeingFreely, just above, already handles this
+    // same shape) doesn't — occupant.card.name unconditionally crashed the
+    // moment context.selfCellId held one instead (self-play found this a
+    // real, reachable crash).
+    const actingCard = occupant.card || occupant.armaments[occupant.armaments.length - 1].card;
+    let next = addLog(state, `${cardName}'s ${label} lets ${playerId} choose where ${actingCard.name} moves.`);
     return { ...next, pendingChoice: { kind: 'free-move', playerId, cardName, fromCellId: context.selfCellId } };
   }
 
@@ -5236,6 +5472,18 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
     return addLog(next, `${cardName}'s ${label} creates ${token.name} at ${context.movedFromCellId}.`);
   }
 
+  // "Summon (1) 0/2 Vine token on the tile it moved from." (Imneyat Dryad) —
+  // same moved-from placement as createTokenMovedFromMatch just above,
+  // fixed to the Vine token instead of a name captured from the text.
+  if (SUMMON_VINE_MOVED_FROM_RE.test(text) && context.movedFromCellId) {
+    if (state.board[context.movedFromCellId]) {
+      return addLog(state, `${cardName}'s ${label} has no empty tile to summon a token on.`);
+    }
+    const token = TOKEN_REGISTRY['vine']();
+    let next = placeTokenOnBoard(state, playerId, token, context.movedFromCellId);
+    return addLog(next, `${cardName}'s ${label} summons ${token.name} at ${context.movedFromCellId}.`);
+  }
+
   const createTokenChoiceMatch = text.match(CREATE_TOKEN_CHOICE_RE);
   if (createTokenChoiceMatch) {
     const options = [createTokenChoiceMatch[1].trim().toLowerCase(), createTokenChoiceMatch[2].trim().toLowerCase()]
@@ -5308,11 +5556,18 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
     const targets = [...new Set(selfArrows.map(dir => computeMoveDestination(playerId, context.selfCellId, dir)))].filter(Boolean);
     let next = state;
     let placed = 0;
-    targets.forEach(cellId => {
-      if (next.groundRelics[cellId]) return; // a ground Relic is already here — skip
-      const boardOccupant = next.board[cellId];
+    targets.forEach(targetCellId => {
+      if (next.groundRelics[targetCellId]) return; // a ground Relic is already here — skip
+      const boardOccupant = next.board[targetCellId];
       if (boardOccupant && !(coLocatesWithBeings && boardOccupant.type === 'being')) return; // genuinely blocked — skip
-      next = placeTokenOnBoard(next, playerId, makeToken(), cellId);
+      // Al khali the Empty's own arrows reach all the way across the
+      // midline (RULES.md — direction 1 "forward" points at the
+      // OPPONENT'S front row), so a token landing on the far side belongs
+      // to whichever player's own side that tile actually is, not
+      // whoever cast this — same as any other permanent, control follows
+      // the board zone it's sitting on, not its caster.
+      const targetOwnerId = owningPlayerOfRow(parseCellId(targetCellId).row) || playerId;
+      next = placeTokenOnBoard(next, targetOwnerId, makeToken(), targetCellId);
       placed++;
     });
     return addLog(next, `${cardName}'s ${label} summons ${placed} ${summonAllPointedMatch[1].trim()} token(s) on tiles it points to.`);
@@ -5425,15 +5680,16 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
       return addLog(state, `${cardName}'s ${label} has no empty tile of ${playerId}'s to summon a token on.`);
     }
     if (count > 1) {
-      // No choice offered for a multi-token summon — same auto-place-across-
-      // up-to-N-empty-tiles, sorted, no-picker precedent as SUMMON_VINE_MULTI_RE.
-      let next = state;
-      let placed = 0;
-      candidates.slice().sort().slice(0, count).forEach(cell => {
-        next = placeTokenOnBoard(next, playerId, TOKEN_REGISTRY[tokenName](), cell);
-        placed++;
-      });
-      return addLog(next, `${cardName}'s ${label} summons ${placed} ${TOKEN_REGISTRY[tokenName]().name} token(s).`);
+      // Same 'token-location' choice as the single-token case below, just
+      // opened `count` times in a row (RESOLVE_TOKEN_LOCATION's own
+      // `remaining` field reopens it after each placement) — the player
+      // picks where each token lands instead of the engine auto-placing
+      // them on sorted empty tiles (Scā-vuhk Hunger's own report: "allow
+      // the player to decide where the tokens are summoned"). Degrades
+      // gracefully exactly like the single-token branch below if the board
+      // runs out of empty tiles partway through.
+      let next = addLog(state, `${cardName}'s ${label} lets ${playerId} choose ${count} tile(s) to summon ${TOKEN_REGISTRY[tokenName]().name} tokens on.`);
+      return { ...next, pendingChoice: { kind: 'token-location', playerId, cardName, tokenName, remaining: count } };
     }
     if (candidates.length === 1) {
       const token = TOKEN_REGISTRY[tokenName]();
@@ -5662,12 +5918,18 @@ const triggerOnOwnBeingShiftReactions = (state, playerId, duringEndStep = false)
 // The Boundless Hunger bounce loop (Immen Gorta's own quoted Shift decay
 // + Mouth of Madness + Terranean Gates — confirmed intentional with the
 // user, meant to drain the opponent's Lifespan via Immen Gorta's own
-// "deal (1) damage to any target" firing every return trip): during End
-// Phase, a real player choice for "any target" has nowhere to pause for
-// up to 100 iterations, so `autoTargetOpponentId` short-circuits
-// DAMAGE_ANY_TARGET_RE straight to the shifted Being's owner's opponent
-// instead of opening the normal pendingChoice — see resolveOrLogEffect's
-// own damageAnyMatch branch.
+// "deal (1) damage to any target" firing every return trip): while Mouth
+// of Madness is actually on the board (so the loop WILL keep re-firing
+// right after this, with no "a choice is already pending" guard on that
+// re-trigger check), a real player choice for "any target" has nowhere
+// safe to pause, so `autoTargetOpponentId` short-circuits DAMAGE_ANY_
+// TARGET_RE straight to the shifted Being's owner's opponent instead of
+// opening the normal pendingChoice — see resolveOrLogEffect's own
+// damageAnyMatch branch. Scoped to only that genuinely-unpausable case
+// (see `activeBounceLoop` below) — Immen Gorta's OWN Shift also ties its
+// ordinary, non-looping return to end-of-turn processing (its "loses (2)
+// Time Counters" decay), and that single return gets a real choice, per
+// the user's own ruling.
 // `disengageOnReturn` is Údarik Hunger's own "...if it moves into the
 // Mortal Realm this turn Disengage it" — lands Engaged as normal (per
 // Shift's own default ending) and is THEN explicitly Disengaged as a
@@ -5676,7 +5938,23 @@ const triggerOnOwnBeingShiftReactions = (state, playerId, duringEndStep = false)
 // Boundless Hunger bounce loop (`duringEndStep`) — Údarik's own Engage
 // activation only ever happens mid-turn, not during automatic End Phase
 // processing, so the two flags never co-occur in practice.
-const placeReturnedFromShift = (state, cellId, toCellId, duringEndStep = false, bounceCount = 0, disengageOnReturn = false) => {
+//
+// `landDisengaged` (default true) is the general-purpose version of the
+// same idea: a shifted Being lands Engaged per its own printed text, but
+// if this specific return is happening at a point where its controller's
+// own Disengage step for the CURRENT turn has already run (or will never
+// run again this turn) — a mid-turn card-granted Modulate bringing it to
+// 0, a multi-tile RESOLVE_SHIFT_RETURN choice the player resolves after
+// beginTurn's own disengage() already passed, or an End Phase decay tick
+// (applyEndOfTurnShiftDecay, turn.js) — it would otherwise sit Engaged for
+// a whole extra turn it was never supposed to lose, rather than being
+// swept up by "that same turn's Disengage step" per the user's own
+// framing of the ruling. The ONE call site that should NOT do this is
+// turn.js's own `modulate()` — the automatic per-turn tick runs BEFORE
+// beginTurn's disengage() in that same synchronous pass, so the normal
+// step still catches it naturally moments later; that's the only place
+// this is explicitly passed `false`.
+const placeReturnedFromShift = (state, cellId, toCellId, duringEndStep = false, bounceCount = 0, disengageOnReturn = false, landDisengaged = true) => {
   const occupant = state.board[cellId];
   const card = occupant.shiftedFromCard;
   const board = { ...state.board };
@@ -5685,9 +5963,49 @@ const placeReturnedFromShift = (state, cellId, toCellId, duringEndStep = false, 
   let next = addLog({ ...state, board }, `${card.name} moves into the Mortal Realm at ${toCellId}, Engaged.`);
   const reaction = card.keywords?.onMovedIntoMortalRealm;
   if (reaction) {
+    // Only bypass the real "any target" choice when a forced re-Shift
+    // (Mouth of Madness's own duringEndStepForceShift, checked the exact
+    // same way the bounce check just below this does) is actually
+    // possible right now — that check runs unconditionally right after
+    // this with no "a choice is already pending" guard, so letting a real
+    // pendingChoice open here when Mouth of Madness IS present would just
+    // get silently clobbered a moment later by the loop's own next
+    // iteration, losing the player's pick with nothing to show for it —
+    // worse than not offering one at all. With no Mouth of Madness on the
+    // board, this is Immen Gorta's own single, ordinary end-of-turn
+    // return (its Shift's own "loses (2) Time Counters" decay always ties
+    // its return to duringEndStep, even with no bounce loop ever
+    // involved) — nothing will re-trigger the loop afterward, so a real
+    // player choice is both safe and what the user asked for. Confirmed
+    // with the user: scope the auto-target bypass to only the genuinely
+    // unpausable case, not every end-of-turn return.
+    const activeBounceLoop = duringEndStep && !!relicWithKeywordAnywhere(state.board, 'duringEndStepForceShift');
+    // Boundless Hunger loop declaration (confirmed with the user): rather
+    // than actually grinding out up to 100 real damage iterations, the
+    // named 3-piece combo (Mouth of Madness + Terranean Gates + Immen
+    // Gorta) is declared an automatic win for its controller the moment
+    // Immen Gorta returns to the Mortal Realm for the 3rd time with both
+    // Relics still in play — `bounceCount` is 0 on the very first
+    // (non-forced) return, so its 3rd occurrence is bounceCount === 2.
+    // Named specifically to this one combo (not a generic "any Shift-decay
+    // Being + any forced-re-Shift Relic" mechanism) — nothing else in the
+    // real CSV shares this shape, and a future card that happens to
+    // wouldn't automatically inherit an instant-win/loss the user never
+    // asked for it to have.
+    if (activeBounceLoop && bounceCount === 2 && card.name === 'Immen Gorta, the Boundless Hunger') {
+      const mouthOfMadness = Object.values(state.board).find(o => o?.type === 'relic' && o.card.keywords?.duringEndStepForceShift)?.card;
+      const terraneanGates = Object.values(state.board).find(o => o?.type === 'relic' && o.card.keywords?.duringEndStepLoseTimeCounters)?.card;
+      let loopNext = addLog(next, `${occupant.ownerId} has assembled the Boundless Hunger loop (Mouth of Madness + Terranean Gates + Immen Gorta) — ${opponentOf(occupant.ownerId)} concedes.`);
+      return {
+        ...loopNext,
+        phase: 'gameover',
+        winner: occupant.ownerId,
+        loopWin: { winnerId: occupant.ownerId, cards: [mouthOfMadness, terraneanGates, card].filter(Boolean) },
+      };
+    }
     next = resolveOrLogEffect(next, occupant.ownerId, card.name, reaction, 'Reaction', {
       selfCellId: toCellId,
-      ...(duringEndStep ? { autoTargetOpponentId: opponentOf(occupant.ownerId) } : {}),
+      ...(activeBounceLoop ? { autoTargetOpponentId: opponentOf(occupant.ownerId) } : {}),
     });
   }
   // Mouth of Madness: "If a Being moves into the Mortal Realm during End
@@ -5704,7 +6022,7 @@ const placeReturnedFromShift = (state, cellId, toCellId, duringEndStep = false, 
       next = offerOrPerformShift(next, occupant.ownerId, toCellId, { amount: forceAmount, effect: null }, duringEndStep, bounceCount + 1);
     }
   }
-  if (disengageOnReturn) {
+  if (disengageOnReturn || landDisengaged) {
     const landed = next.board[toCellId];
     if (landed?.type === 'being' && landed.engaged) {
       next = addLog(
@@ -5713,7 +6031,27 @@ const placeReturnedFromShift = (state, cellId, toCellId, duringEndStep = false, 
       );
     }
   }
-  return next;
+  // This writes a fresh `type: 'being'` occupant directly rather than going
+  // through placeBeingOnBoard (a Shift return is a very different shape —
+  // no cost, no When Summoned, a fixed destination tile), so it needs its
+  // own legend-rule check — same "at most one same-named Deity" enforcement
+  // placeBeingOnBoard's own end already does, just duplicated here since
+  // this is the one other real path a Being (Deity included — nothing
+  // stops a Deity from being forced to Shift by another card) lands on the
+  // board as a going concern. Same `!next.pendingChoice` guard for the same
+  // reason: this engine only ever tracks one pendingChoice at a time.
+  if (card.isDeity && !next.pendingChoice) {
+    next = enforceDeityLegendRule(next, occupant.ownerId, card.name);
+  }
+  // Shift's own return trip can only resolve one "which tile?" choice at a
+  // time — if a second shifted Being was ALSO sitting at 0-or-fewer Time
+  // Counters when this one needed a multi-tile choice made for a different
+  // return earlier this same tick, it was left waiting rather than retried
+  // (returnFromShift's own comment). Retried here, once the coast is clear
+  // (no pendingChoice currently open — from this placement itself or from
+  // the legend-rule check just above), rather than leaving it stuck until
+  // the owner's next turn ticks it again.
+  return retryStuckShiftReturns(next, landDisengaged);
 };
 
 // Shift's own return trip, fired from resolveProphecyModulateHitZero below
@@ -5726,8 +6064,15 @@ const placeReturnedFromShift = (state, cellId, toCellId, duringEndStep = false, 
 // precedent logDepartIfPresent already establishes elsewhere.
 // `duringEndStep` always auto-picks the first empty tile instead — see
 // offerOrPerformShift's own comment: the Boundless Hunger bounce loop has
-// nowhere to pause.
-const returnFromShift = (state, cellId, duringEndStep = false, bounceCount = 0, disengageOnReturn = false) => {
+// nowhere to pause. `landDisengaged` (see placeReturnedFromShift's own
+// comment) only matters for the auto-place branch here — the multi-tile
+// pendingChoice branch deliberately does NOT stash it, since by the time a
+// player actually resolves that choice (RESOLVE_SHIFT_RETURN, a separate
+// later dispatch), the current turn's Disengage step has unconditionally
+// already run regardless of what it was when the choice first opened —
+// RESOLVE_SHIFT_RETURN's own call to placeReturnedFromShift relies on that
+// function's own `true` default instead.
+const returnFromShift = (state, cellId, duringEndStep = false, bounceCount = 0, disengageOnReturn = false, landDisengaged = true) => {
   const occupant = state.board[cellId];
   const card = occupant.shiftedFromCard;
   const emptyCells = emptyMortalCellsFor(state.board, occupant.ownerId);
@@ -5735,13 +6080,32 @@ const returnFromShift = (state, cellId, duringEndStep = false, bounceCount = 0, 
     return addLog(state, `${card.name} has no empty tile in the Mortal Realm to return to.`);
   }
   if (emptyCells.length === 1 || duringEndStep) {
-    return placeReturnedFromShift(state, cellId, emptyCells[0], duringEndStep, bounceCount, disengageOnReturn);
+    return placeReturnedFromShift(state, cellId, emptyCells[0], duringEndStep, bounceCount, disengageOnReturn, landDisengaged);
   }
   if (state.pendingChoice) {
     return addLog(state, `${card.name}'s return from the Ethereal Realm doesn't resolve yet — still waiting on an earlier choice.`);
   }
   let next = addLog(state, `${occupant.ownerId} chooses where ${card.name} returns to the Mortal Realm.`);
   return { ...next, pendingChoice: { kind: 'shift-return', playerId: occupant.ownerId, cellId, disengageOnReturn, allowedCells: emptyCells } };
+};
+
+// Scans for any OTHER shifted Being still sitting at 0-or-fewer Time
+// Counters (stuck behind an earlier multi-tile shift-return choice, per
+// returnFromShift's own one-choice-at-a-time comment) and retries it
+// immediately, rather than leaving it to wait for the owner's next turn's
+// automatic tick. Called from placeReturnedFromShift itself, so this
+// naturally chains through however many are stuck at once — each
+// successful auto-place removes exactly one candidate from the board,
+// guaranteeing termination — and stops cleanly the moment a retry itself
+// needs its own multi-tile choice (the `!state.pendingChoice` guard below
+// then leaves the rest for the NEXT time this runs, once that choice
+// resolves).
+const retryStuckShiftReturns = (state, landDisengaged = true) => {
+  if (state.pendingChoice) return state;
+  const stuckCellId = Object.entries(state.board).find(([, o]) =>
+    o?.type === 'prophecy' && !o.faceDown && o.shiftedFromCard && (o.timer || 0) <= 0
+  )?.[0];
+  return stuckCellId ? returnFromShift(state, stuckCellId, false, 0, false, landDisengaged) : state;
 };
 
 // A Prophecy's own two-phase Time Counter lifecycle (RULES.md >
@@ -5769,7 +6133,7 @@ const returnFromShift = (state, cellId, duringEndStep = false, bounceCount = 0, 
 //     cleanup: straight to Purgatory, no further effect.
 // A Prophecy still above 0 either way is a no-op (the caller already wrote
 // its new timer onto the board).
-export const resolveProphecyModulateHitZero = (state, cellId, duringEndStep = false, bounceCount = 0, disengageOnReturn = false) => {
+export const resolveProphecyModulateHitZero = (state, cellId, duringEndStep = false, bounceCount = 0, disengageOnReturn = false, landDisengaged = true) => {
   const occupant = state.board[cellId];
   if (!occupant || occupant.type !== 'prophecy' || (occupant.timer || 0) > 0) return state;
 
@@ -5791,7 +6155,7 @@ export const resolveProphecyModulateHitZero = (state, cellId, duringEndStep = fa
     // A shifted Being (occupant.shiftedFromCard — see performShift above)
     // returns to the Mortal Realm instead of going to Purgatory; a real
     // printed Prophecy has no such field and takes the normal ending.
-    if (occupant.shiftedFromCard) return returnFromShift(state, cellId, duringEndStep, bounceCount, disengageOnReturn);
+    if (occupant.shiftedFromCard) return returnFromShift(state, cellId, duringEndStep, bounceCount, disengageOnReturn, landDisengaged);
     return sendToPurgatory(state);
   }
 
@@ -6124,10 +6488,17 @@ const destroyArmamentEntryAt = (state, cellId, armamentInstanceId) => {
   const occupant = state.board[cellId];
   const entry = occupant?.armaments?.find(a => a.card.instanceId === armamentInstanceId);
   if (!entry) return state;
+  // entry.kalmahkaOriginalCard || entry.card — same "never let Kalmahka's
+  // board-only synthetic stand-in leak into a permanent zone" fix as
+  // realCardFor above, just inlined here since this already has the raw
+  // entry (not an actorView) in hand. Self-play found the un-guarded
+  // version put a "Warped Armament" card with no castingCost into
+  // Purgatory, crashing the moment it was later searched back to hand.
+  const realCard = entry.kalmahkaOriginalCard || entry.card;
   let next = removeArmamentEntry(state, cellId, armamentInstanceId);
   const owner = next.players[occupant.ownerId];
-  next = { ...next, players: { ...next.players, [occupant.ownerId]: { ...owner, purgatory: purgatoryAfterAdding(owner.purgatory, entry.card) } } };
-  return addLog(next, `${entry.card.name} is destroyed.`);
+  next = { ...next, players: { ...next.players, [occupant.ownerId]: { ...owner, purgatory: purgatoryAfterAdding(owner.purgatory, realCard) } } };
+  return addLog(next, `${realCard.name} is destroyed.`);
 };
 
 // When a Being dies, its Armaments stay behind on the tile instead of
@@ -6137,7 +6508,21 @@ const destroyArmamentEntryAt = (state, cellId, armamentInstanceId) => {
 // including `armaments` over to the new cell instead of using this.)
 const dropArmaments = (board, cellId, occupant) => {
   if (occupant.armaments?.length > 0) {
-    board[cellId] = { type: 'armament-stack', ownerId: occupant.ownerId, armaments: occupant.armaments };
+    // An Animated Armament (RULES.md > Keywords) only ever acts once it's
+    // the topmost entry of a Being-less pile — normal attachment already
+    // keeps it there (insertArmamentEntry), but the array can still end up
+    // with one buried mid-stack if it arrived some other way (e.g.
+    // MOVE_OR_ATTACK's own reposition branch, which just concatenates a
+    // picked-up waiting pile's armaments after the mover's own, with no
+    // reordering). This is the one choke point where a pile first actually
+    // NEEDS a "topmost" (the Being that was overriding it just died), so
+    // it's the right place to restore the invariant once and for all,
+    // regardless of how it got buried.
+    const animatedIndex = occupant.armaments.findIndex(a => a.card.keywords?.animated);
+    const armaments = animatedIndex === -1 || animatedIndex === occupant.armaments.length - 1
+      ? occupant.armaments
+      : [...occupant.armaments.slice(0, animatedIndex), ...occupant.armaments.slice(animatedIndex + 1), occupant.armaments[animatedIndex]];
+    board[cellId] = { type: 'armament-stack', ownerId: occupant.ownerId, armaments };
   } else {
     delete board[cellId];
   }
@@ -6181,6 +6566,22 @@ export const animatedTopEntry = (occupant) => {
   const top = occupant.armaments[occupant.armaments.length - 1];
   return top.card.keywords?.animated ? top : null;
 };
+
+// The real, permanent-zone-safe card behind whatever actorView(occupant)
+// returned as `view` — itself, for a real Being, or, only when Kalmahka's
+// live board-wide aura (recomputeKalmahkaOverrides, below) replaced an
+// Animated Armament's own card with its synthetic KALMAHKA_OVERRIDE_CARD
+// stand-in (no castingCost, no real identity — fine for combat-stat
+// display while still on the board, where every read already goes through
+// this same override), the ORIGINAL card stashed on that entry
+// (kalmahkaOriginalCard) before the override was applied. `view.card`
+// itself is exactly right for combat-stat reading, but must never be what
+// gets captured into a permanent zone (Purgatory, hand) once the occupant
+// actually leaves the board for good — self-play found the synthetic
+// "Warped Armament" stand-in leaking into Purgatory this way, later
+// crashing (reading .colored off its missing castingCost) the moment it
+// was searched back to hand.
+const realCardFor = (occupant, view) => animatedTopEntry(occupant)?.kalmahkaOriginalCard || view.card;
 
 // Where a newly-attached Armament entry slots into an existing pile. A
 // non-Animated Armament always goes in *below* whatever's currently
@@ -6302,15 +6703,16 @@ export const dealDamageToBeing = (state, cellId, damage) => {
     return { ...state, board: { ...state.board, [cellId]: writeActorState(occupant, { currentLifespan: lifespanAfter }) } };
   }
   const dmg = deathDamageFor(view);
+  const realCard = realCardFor(occupant, view);
   const owner = state.players[occupant.ownerId];
   let next = {
     ...state,
     players: {
       ...state.players,
-      [occupant.ownerId]: { ...owner, lifespan: owner.lifespan - dmg, purgatory: purgatoryAfterAdding(owner.purgatory, view.card) },
+      [occupant.ownerId]: { ...owner, lifespan: owner.lifespan - dmg, purgatory: purgatoryAfterAdding(owner.purgatory, realCard) },
     },
   };
-  next = addLog(next, `${view.card.name} dies; ${occupant.ownerId} takes ${dmg} Lifespan damage.`);
+  next = addLog(next, `${realCard.name} dies; ${occupant.ownerId} takes ${dmg} Lifespan damage.`);
   // Plague Doctor's own counter is Being-specific — an Animated Armament
   // dying (isBeing false) doesn't count, it was never really a Being.
   if (isBeing) next = incrementBeingsDiedThisTurn(next, occupant.ownerId);
@@ -6380,6 +6782,20 @@ const copyEngageAbility = (state, playerId, cardName, label, targetCellId, conte
   const engageText = targetCard?.keywords?.engage;
   if (!targetCard || !engageText) {
     return addLog(state, `${cardName}'s ${label} has no Engage ability of ${targetCard?.name || 'its target'}'s to copy.`);
+  }
+  // A target whose own Engage ability IS "copy an Engage ability" (another
+  // Marionette Doll, say) is a graceful no-op rather than actually copying
+  // it — standard "a copy effect can't target another copy effect"
+  // precedent, and the one this file actually needs: self-play found this
+  // recursing for real. With exactly one opposing Being (itself a copy-
+  // Engage card), copying it re-enters this exact same resolveOrLogEffect
+  // -> copyEngageAbility pair on the same single candidate every time —
+  // guaranteed stack overflow, not just a lot of iterations. With more than
+  // one candidate, it instead opens a fresh 'copy-engage-target' choice
+  // every time it's picked, chaining forever with no real effect ever
+  // landing — the matching AI-loop half of the same bug.
+  if (COPY_ENGAGE_RE.test(engageText)) {
+    return addLog(state, `${cardName}'s ${label} can't copy ${targetCard.name}'s Engage ability — it's a copy effect too.`);
   }
   let next = addLog(state, `${cardName}'s ${label} copies ${targetCard.name}'s Engage ability: "${engageText}"`);
   return resolveOrLogEffect(next, playerId, cardName, engageText, label, context);
@@ -6481,12 +6897,17 @@ export const destroyBeing = (state, cellId) => {
 // Tilled Fields' own sacrificeIfEngagedAtEndOfTurn. Exported so turn.js's
 // own endTurn can sweep for it. "Sacrifice", not a real death, so this
 // reuses destroyBeing (no owner Lifespan loss) — same distinction this
-// whole file draws everywhere else.
+// whole file draws everywhere else. Deliberately NOT gated on
+// `occupant.ownerId === state.turnPlayer` — now that Ethereal Conjurings
+// (Desperate Finale included) can be cast reactively during a
+// reactiveWindow, the flagged Being's own owner can be the NON-turn-player,
+// and the flag itself is already scoped to the one specific instance that
+// earned it, so no extra ownership check is needed (or correct).
 export const applyDesperateFinaleSacrifice = (state) => {
   let next = state;
   Object.keys(state.board).forEach(cell => {
     const occupant = next.board[cell];
-    if (occupant?.type === 'being' && occupant.ownerId === state.turnPlayer && occupant.sacrificeAtEndOfTurn) {
+    if (occupant?.type === 'being' && occupant.sacrificeAtEndOfTurn) {
       next = destroyBeing(next, cell);
     }
   });
@@ -6554,30 +6975,63 @@ const moveNamedArmamentToTile = (state, armamentName, targetCellId) => {
   return addLog({ ...state, board }, `${armamentName} moves to ${targetCellId}.`);
 };
 
+// Equanimity's own "No damage is dealt from any Beings that die" carve-out
+// (RULES.md) — mirrors dealDamageToBeing's own full death handling
+// (Purgatory, Depart, drop Armaments/Animated top, every reaction) but
+// skips the owner-Lifespan-loss step, the same relationship destroyBeing
+// has to dealDamageToBeing, just Animated-Armament-aware too (same
+// actorView/writeActorState/dropAnimatedTop pattern as dealDamageToBeing
+// itself — see its own comment) so a repeat cast that kills a Being with
+// an Animated Armament attached can go on to hit that Armament, now
+// topmost, on a later iteration.
 const dealDamageToBeingNoDeathLoss = (state, cellId, damage) => {
   const occupant = state.board[cellId];
-  if (!occupant || occupant.type !== 'being') return state;
-  const lifespanAfter = occupant.currentLifespan - damage;
+  const view = actorView(occupant);
+  if (!occupant || !view) return state;
+  const isBeing = occupant.type === 'being';
+  const lifespanAfter = view.currentLifespan - damage;
   if (lifespanAfter > 0) {
-    return { ...state, board: { ...state.board, [cellId]: { ...occupant, currentLifespan: lifespanAfter } } };
+    return { ...state, board: { ...state.board, [cellId]: writeActorState(occupant, { currentLifespan: lifespanAfter }) } };
   }
-  return destroyBeing(state, cellId);
+  const owner = state.players[occupant.ownerId];
+  let next = {
+    ...state,
+    players: { ...state.players, [occupant.ownerId]: { ...owner, purgatory: purgatoryAfterAdding(owner.purgatory, realCardFor(occupant, view)) } },
+  };
+  if (isBeing) next = incrementBeingsDiedThisTurn(next, occupant.ownerId);
+  if (isBeing) next = triggerOwnBeingDiedReactions(next, occupant.ownerId);
+  if (isBeing) next = triggerAnyBeingDiedCounterGain(next);
+  if (isBeing) next = triggerAnyBeingDiedGiveDifferentBuff(next, occupant.ownerId);
+  if (isBeing) next = triggerDeckSearchOnTypedDeath(next, occupant.ownerId, view.card.typing);
+  const board = { ...next.board };
+  const priorArmaments = occupant.armaments;
+  if (isBeing) dropArmamentsOrDryadMount(board, cellId, occupant); else dropAnimatedTop(board, cellId, occupant);
+  next = logDepartIfPresent({ ...next, board }, { card: view.card, ownerId: occupant.ownerId, grantedDepart: occupant.grantedDepart }, cellId);
+  if (isBeing) next = triggerOnAttachedBeingDied(next, occupant.ownerId, cellId, priorArmaments);
+  if (isBeing) next = triggerWretchedRemnantsOffer(next, occupant.ownerId, view.card);
+  if (isBeing) next = triggerEchoesOfBoundlessOffer(next, occupant.ownerId, view.card);
+  return checkWin(next);
 };
 
-// Equanimity's own single iteration: 1 damage to every Being currently on
+// Equanimity's own single iteration: 1 damage to every Being (or Animated
+// Armament acting as one — RULES.md > Keywords > Animated) currently on
 // the board (either owner, no death Lifespan loss — see
 // dealDamageToBeingNoDeathLoss above, which still fires Depart/Purgatory/
-// the death counter normally) plus 1 REAL damage to the caster's own
-// Lifespan. The Being cell list is re-read fresh each call (not shared
-// across iterations) so a later iteration correctly sees deaths (and any
-// Departs they triggered) from earlier ones — "allow Depart mechanics to
-// occur in between each trigger," per the user's own instruction — while
-// never double-hitting a cell that's already empty by the time its turn
-// in this particular iteration's pass comes up.
+// the death counter normally for a real Being) plus 1 REAL damage to the
+// caster's own Lifespan. The target cell list is re-read fresh each call
+// (not shared across iterations) so a later iteration correctly sees
+// deaths (and any Departs they triggered) from earlier ones — "allow
+// Depart mechanics to occur in between each trigger," per the user's own
+// instruction — while never double-hitting a cell that's already empty by
+// the time its turn in this particular iteration's pass comes up. This is
+// also what lets a LATER iteration hit an Animated Armament that just
+// became topmost because the Being wearing it died on an earlier one.
 const resolveEquanimityIteration = (state, playerId) => {
-  const beingCells = Object.entries(state.board).filter(([, o]) => o?.type === 'being').map(([cell]) => cell);
-  let next = beingCells.reduce(
-    (st, cell) => (st.board[cell]?.type === 'being' ? dealDamageToBeingNoDeathLoss(st, cell, 1) : st),
+  const targetCells = Object.entries(state.board)
+    .filter(([, o]) => o?.type === 'being' || animatedTopEntry(o))
+    .map(([cell]) => cell);
+  let next = targetCells.reduce(
+    (st, cell) => (st.board[cell]?.type === 'being' || animatedTopEntry(st.board[cell]) ? dealDamageToBeingNoDeathLoss(st, cell, 1) : st),
     state
   );
   const owner = next.players[playerId];
@@ -7762,9 +8216,20 @@ const placeInvokedCard = (state, playerId, cardName, label, card, destinationMod
   // Seed both sacrifice themselves as part of the same cost that leads
   // here), same fallback order SUMMON_TOKEN_POINTED_RE's own resolver uses.
   const selfArrows = context.selfArrows || state.board[context.selfCellId]?.card?.arrows || [];
+  // Samara Seed / Kernel: "Invoke a TreeFolk...on a tile this points to" —
+  // when the invoked card itself has Dryad (Jirahperā, Boknean Druid), a
+  // tile occupied by an eligible plant (TreeFolk/Vine/Seed) is ALSO a
+  // legal destination, per the same dryadAttachTargetOk rule
+  // placeBeingOnBoard's own SUMMON_BEING-time check already applies — the
+  // gap was here, one level up: this filter never offered that tile as a
+  // candidate at all, so placeBeingOnBoard's already-correct attach logic
+  // never got a chance to run. Ruled directly analogous to Boknean Druid's
+  // own "may be summoned directly onto..." — confirmed with the user
+  // ("Samara Seed should allow a Jirahperā to be summoned onto an
+  // Elderflower Ancient, assuming Samara Seed points to it").
   const candidates = destinationMode === 'pointed'
     ? [...new Set(selfArrows.map(dir => computeMoveDestination(playerId, context.selfCellId, dir)))]
-      .filter(c => c && !state.board[c] && !state.groundRelics[c])
+      .filter(c => c && !state.groundRelics[c] && (!state.board[c] || dryadAttachTargetOk(state.board[c], playerId, card)))
     : emptyMortalCellsFor(state.board, playerId);
   if (candidates.length === 0) {
     return addLog(state, `${cardName}'s ${label} has no empty tile to invoke ${card.name} onto.`);
@@ -7959,17 +8424,34 @@ const continueMoveThen = (state, playerId, cardName, label, then, movedToCellId)
 // explicit continuation here instead means Y truly waits for X to resolve.
 const moveOrOfferFreeMove = (state, playerId, cardName, label, fromCellId, destinationFilter = 'any', then = null) => {
   const occupant = state.board[fromCellId];
+  // continueMoveThen's `sameActor` path (Acrobatic Escape: "move it, then
+  // move it again") re-enters this function at the Being's own NEW cell,
+  // assuming it's still there — but moveBeingFreely (for the FIRST move)
+  // already fired triggerOnMoveReaction before returning, and that
+  // reaction can itself be another "when this moves, move it again" effect
+  // that moved (or otherwise removed) the same Being a second time before
+  // this explicit continuation ever runs. Same graceful degrade as the "no
+  // legal destination" case just below, minus the log line (no card left
+  // to name) — self-play found the un-guarded version a real, reachable
+  // crash (`occupant` undefined here).
+  if (!occupant) return continueMoveThen(state, playerId, cardName, label, then, fromCellId);
+  // A real Being carries its own top-level `card`; an Animated Armament
+  // acting as one doesn't (moveBeingFreely, just above, already handles
+  // this same shape) — reachable here too via the same sameActor
+  // continuation, when the first move's destination is itself an
+  // armament-stack rather than a plain Being.
+  const actingCard = occupant.card || occupant.armaments[occupant.armaments.length - 1].card;
   const candidates = [...new Set([1, 2, 3, 4, 5, 6, 7, 8].map(dir => computeMoveDestination(playerId, fromCellId, dir)))]
     .filter(c => c && freeMoveDestinationOk(state, playerId, c, destinationFilter));
   if (candidates.length === 0) {
-    const next = addLog(state, `${cardName}'s ${label} has nowhere for ${occupant.card.name} to move.`);
+    const next = addLog(state, `${cardName}'s ${label} has nowhere for ${actingCard.name} to move.`);
     return continueMoveThen(next, playerId, cardName, label, then, fromCellId);
   }
   if (candidates.length === 1) {
     const next = moveBeingFreely(state, fromCellId, candidates[0]);
     return continueMoveThen(next, playerId, cardName, label, then, candidates[0]);
   }
-  const next = addLog(state, `${cardName}'s ${label} lets ${playerId} choose where ${occupant.card.name} moves.`);
+  const next = addLog(state, `${cardName}'s ${label} lets ${playerId} choose where ${actingCard.name} moves.`);
   return { ...next, pendingChoice: { kind: 'free-move', playerId, cardName, label, fromCellId, destinationFilter, then } };
 };
 
@@ -8123,6 +8605,9 @@ export const createInitialState = ({ mainDeckA, effigyDeckA, mainDeckB, effigyDe
   // resolveOrLogEffect / RESOLVE_CHOICE. Blocks all other actions for both
   // players until resolved, same as a mandatory tutor in most TCGs.
   pendingChoice: null,
+  // Ethereal Conjuring reactive timing — see manageReactiveWindow, below.
+  // `null | { openFor: playerId }`.
+  reactiveWindow: null,
 });
 
 // -- Effigy cost payment ----------------------------------------------------
@@ -8134,7 +8619,18 @@ export const createInitialState = ({ mainDeckA, effigyDeckA, mainDeckB, effigyDe
 // pip instead). Every cost function below reads the pool through this one
 // choke point instead of the raw array, so no individual cost-paying call
 // site anywhere else needs touching.
-const payablePool = (pool) => pool.filter(e => !e.engaged);
+//
+// Temporary Essence (makeTemporaryEssence — a Zealot's own "Add" grant, or
+// any other "...Essence usable this turn" effect) expires at end of turn
+// regardless of whether it's spent, so it should always be prioritized
+// over a real Effigy that would otherwise persist into future turns — a
+// player would rather burn value they were about to lose anyway than
+// spend a permanent resource unnecessarily. Sort is stable (guaranteed by
+// the JS spec), so relative order within each group — temporary entries
+// among themselves, real Effigies among themselves — stays exactly the
+// "pool order" every payment function already relied on before this.
+const payablePool = (pool) => pool.filter(e => !e.engaged)
+  .sort((a, b) => (b.temporary ? 1 : 0) - (a.temporary ? 1 : 0));
 
 // Marks one Effigy pool pip Engaged and grants a temporary Essence of its
 // own color — see TARGET_EFFIGY_ENGAGE_ADD_ESSENCE_RE above. The Engaged
@@ -8286,6 +8782,37 @@ const dejaVuCandidates = (state, playerId, card) => {
     .map(([cell]) => cell);
 };
 
+// Every additional-cost/target-availability gate a Conjuring or Ethereal
+// Conjuring's own cast can carry, beyond plain affordability (Strike Down's
+// hasAttackerAvailable, Desperate Finale's hasAffordableEngagedTarget, Deja
+// Vu's own candidate search, "Shuffle (N) <X>s..."'s fixed-count Purgatory
+// search) — shared by both getLegalActions' main-phase offer AND its
+// reactiveWindow offer (offerReactiveEngageActions/the reactiveWindow
+// branch just above it in getLegalActions itself cast this same net for
+// Engage; CAST_CONJURING's own reactive offer used to only check
+// affordability, never these, so a card whose gate failed (no attacker
+// available, no Deja Vu target, ...) stayed offered — and, critically, once
+// dispatched it was a real state-changing action reaching a real
+// REACTIVE_RESPONSE_ACTION_TYPES entry as far as manageReactiveWindow was
+// concerned, so it kept flipping the reactive window back and forth
+// forever between the two players even though the reducer silently no-oped
+// every single cast (self-play found this as an infinite CAST_CONJURING
+// ping-pong — Strike Down/Deja Vu repeatedly "cast" but never actually
+// leaving hand).
+const conjuringCastGateOk = (state, playerId, card) => {
+  if (STRIKE_DOWN_RE.test(stripFlavorText(card.textBox) || '') && !hasAttackerAvailable(state.board, playerId)) return false;
+  if (card.keywords?.conjureCost && LIFESPAN_EQUAL_TARGET_ENGAGED_RE.test(card.keywords.conjureCost)
+    && !hasAffordableEngagedTarget(state.board, state.players, playerId)) return false;
+  if (card.keywords?.dejaVu && dejaVuCandidates(state, playerId, card).length === 0) return false;
+  const shuffleFixedNGate = stripFlavorText(card.textBox || '').match(SHUFFLE_FIXED_N_FROM_PURGATORY_RE);
+  if (shuffleFixedNGate) {
+    const needed = parseInt(shuffleFixedNGate[1], 10);
+    const query = shuffleFixedNGate[2].trim();
+    if (searchZoneCandidates(state.players[playerId].purgatory, query).length < needed) return false;
+  }
+  return true;
+};
+
 // How many permanents named `name` (case-insensitive) `playerId` controls,
 // anywhere on the board — a Being/Relic occupant's own card, or any
 // Armament entry attached to one, including a freestanding pile. Backs
@@ -8386,6 +8913,96 @@ export const effectiveCastingCost = (card, state, playerId) => {
 
 // -- Legal action enumeration ------------------------------------------------
 
+// The Engage-only subset of getLegalActions' own board-occupant scan below —
+// a Being's own/granted Engage (including a multi-ability card like
+// Osteomancer), a plain board Relic's Engage, a ground Relic's Engage
+// (Shifting Sands), and an Armament's own independent Engage — with none of
+// the move/attack/Martyr/Shift offers those same loops also make. Used by
+// getLegalActions' reactiveWindow branch so an Engage ability can be
+// activated "at ethereal speed" (reactively, during an open priority
+// window) without also re-running the full turn-player action scan (hand
+// affordability, moves, attacks, ...), which is both wasted work and, for
+// occupants a reactive scenario never needed to shape correctly before,
+// a real crash risk (e.g. a hand card with no real castingCost). Kept as
+// its own small, explicitly-duplicated scan rather than refactoring the
+// main loops below to share it — safer than risking the already-tested
+// main-phase path for this.
+const offerReactiveEngageActions = (state, playerId, actions) => {
+  const player = state.players[playerId];
+
+  Object.entries(state.board).forEach(([cell, occupant]) => {
+    if (occupant?.type === 'being' && occupant.ownerId === playerId && !occupant.engaged) {
+      const ownAbilities = occupant.card.keywords?.engageAbilities || [];
+      if (ownAbilities.length > 1) {
+        ownAbilities.forEach((ability, abilityIndex) => {
+          const conditionOk = engageConditionMet(ability.condition, state.board, playerId, state.altars[playerId], state.groundRelics);
+          const costOk = player.lifespan - (ability.lifespanCost || 0) > 0;
+          const extraCostOk = engageExtraCostSacrificeCell(ability.extraCost, state.board, playerId).payable;
+          if (conditionOk && costOk && extraCostOk) {
+            actions.push({ type: 'ACTIVATE_ENGAGE', cellId: cell, abilityIndex });
+          }
+        });
+      } else if (effectiveEngage(occupant)) {
+        const engageKeywords = occupant.card.keywords || {};
+        const conditionOk = engageConditionMet(engageKeywords.engageCondition, state.board, playerId, state.altars[playerId], state.groundRelics);
+        const costOk = player.lifespan - (engageKeywords.engageLifespanCost || 0) > 0;
+        const extraCostOk = engageExtraCostSacrificeCell(engageKeywords.engageExtraCost, state.board, playerId).payable;
+        // A counter-gated Engage (Void Channeler: "Remove (3) Crossing
+        // Counters, Engage: ...") also needs this checked here — the same
+        // check the Relic branch just below already makes, and the one
+        // ACTIVATE_ENGAGE's own reducer case already enforces. Missing it
+        // meant this stayed "legal" forever once the counter cost couldn't
+        // actually be paid: the reducer would silently no-op every time
+        // (self-play found this as the single largest source of AI infinite
+        // loops — the AI kept re-selecting the same always-offered,
+        // never-payable action with nothing to distinguish it from a real
+        // one).
+        const counterCost = engageKeywords.engageCounterCost;
+        const counterCostOk = !counterCost || (occupant.counters?.[counterCost.type] || 0) >= counterCost.amount;
+        if (conditionOk && costOk && extraCostOk && counterCostOk) {
+          actions.push({ type: 'ACTIVATE_ENGAGE', cellId: cell });
+        }
+      }
+    }
+    if (occupant?.type === 'relic' && occupant.ownerId === playerId && !occupant.engaged && occupant.card.keywords?.engage) {
+      // A Relic's Engage can carry the same "If you control ... you may
+      // Engage" condition a Being's can (a borrowed textbox via Wretched
+      // Remnants, e.g. "If you control only Faithless permanents..." —
+      // condition: 'faithless-only'). Missing this check here (unlike the
+      // Being branch above, which already had it) meant a Relic Engage
+      // whose condition wasn't met stayed "legal" forever: the reducer
+      // silently no-ops (see the shared engageConditionMet check in the
+      // ACTIVATE_ENGAGE case), indistinguishable from real progress to the
+      // AI, so it kept re-selecting it every turn.
+      const conditionOk = engageConditionMet(occupant.card.keywords?.engageCondition, state.board, playerId, state.altars[playerId], state.groundRelics);
+      const lifespanCostOk = player.lifespan - (occupant.card.keywords?.engageLifespanCost || 0) > 0;
+      const extraCostOk = engageExtraCostSacrificeCell(occupant.card.keywords?.engageExtraCost, state.board, playerId).payable;
+      const counterCost = occupant.card.keywords?.engageCounterCost;
+      const counterCostOk = !counterCost || (occupant.counters?.[counterCost.type] || 0) >= counterCost.amount;
+      const ownEffectCounterMatch = occupant.card.keywords.engage.match(REMOVE_OWN_COUNTERS_RE);
+      const ownEffectCounterOk = !ownEffectCounterMatch
+        || (occupant.counters?.[ownEffectCounterMatch[2].toLowerCase()] || 0) >= parseInt(ownEffectCounterMatch[1], 10);
+      if (conditionOk && lifespanCostOk && extraCostOk && counterCostOk && ownEffectCounterOk) {
+        actions.push({ type: 'ACTIVATE_ENGAGE', cellId: cell });
+      }
+    }
+    if (occupant && (occupant.type === 'being' || occupant.type === 'armament-stack') && occupant.ownerId === playerId) {
+      (occupant.armaments || []).forEach(a => {
+        if (!a.engaged && a.card.keywords?.engage) {
+          actions.push({ type: 'ACTIVATE_ARMAMENT_ENGAGE', cellId: cell, armamentInstanceId: a.card.instanceId });
+        }
+      });
+    }
+  });
+
+  Object.entries(state.groundRelics).forEach(([cell, occupant]) => {
+    if (!occupant || occupant.ownerId !== playerId || occupant.engaged) return;
+    if (!occupant.card.keywords?.engage) return;
+    if (!groundRelicEngageCostPayable(occupant, player, playerId, cell, state.board)) return;
+    actions.push({ type: 'ACTIVATE_GROUND_RELIC_ENGAGE', cellId: cell });
+  });
+};
+
 export const getLegalActions = (state, playerId) => {
   const actions = [];
 
@@ -8401,10 +9018,11 @@ export const getLegalActions = (state, playerId) => {
       // TIme: "costs (3) or more") is the same idea but a floor instead of
       // an exact match — everything else about a 'search' choice
       // (RESOLVE_CHOICE's own resolution) is unchanged.
-      const { source, query, costFilter, minCostFilter, sharedTypings } = state.pendingChoice;
+      const { source, query, costFilter, minCostFilter, sharedTypings, colorFilter } = state.pendingChoice;
       let candidates = searchZoneCandidates(state.players[playerId][source], query);
       if (costFilter != null) candidates = candidates.filter(c => totalCastingCost(c) === costFilter);
       if (minCostFilter != null) candidates = candidates.filter(c => totalCastingCost(c) >= minCostFilter);
+      if (colorFilter != null) candidates = candidates.filter(c => c.effigyType === colorFilter);
       // sharedTypings (Vadē Rah) — same idea as costFilter/minCostFilter,
       // just narrowing by a typing overlap with the just-sacrificed Being
       // instead of a cost comparison.
@@ -8418,15 +9036,28 @@ export const getLegalActions = (state, playerId) => {
       state.pendingChoice.allowedCells.forEach(cell => actions.push({ type: 'RESOLVE_INVOKE_DESTINATION', cellId: cell }));
     } else if (state.pendingChoice.kind === 'shuffle-purgatory-into-deck') {
       // Two shapes: a plain typing/name query (Melting Clock), or Temple of
-      // Dubiety's own fixed "Faithless Being" filter (source).
-      const { query, source } = state.pendingChoice;
-      const candidates = source === 'purgatory-faithless-being'
-        ? state.players[playerId].purgatory.filter(c => c.kind === 'being' && isFaithlessTypedCard(c))
-        : searchZoneCandidates(state.players[playerId].purgatory, query);
-      candidates.forEach(c => actions.push({ type: 'RESOLVE_SHUFFLE_PURGATORY_INTO_DECK', instanceId: c.instanceId }));
+      // Dubiety's own fixed "Faithless Being" filter (source). `anyOwner`
+      // (Canopic Jar — its own printed text has no "your Purgatory"
+      // restriction) widens the search to both players' Purgatories
+      // instead of just the activating player's own.
+      const { query, source, anyOwner } = state.pendingChoice;
+      const purgatoryOwners = anyOwner ? Object.keys(state.players) : [playerId];
+      purgatoryOwners.forEach(ownerId => {
+        const candidates = source === 'purgatory-faithless-being'
+          ? state.players[ownerId].purgatory.filter(c => c.kind === 'being' && isFaithlessTypedCard(c))
+          : searchZoneCandidates(state.players[ownerId].purgatory, query);
+        // `ownerId` rides along on the action itself (not just re-derived
+        // by searching both piles for the instanceId at resolve time) —
+        // deck-built instanceIds are only unique WITHIN one player's own
+        // deck (`${card.id}#${i}`, deck.js), so the same two decks (e.g.
+        // both players on the same precon) can genuinely produce the same
+        // instanceId in both Purgatories at once; only the action's own
+        // explicit ownerId disambiguates which one this candidate is.
+        candidates.forEach(c => actions.push({ type: 'RESOLVE_SHUFFLE_PURGATORY_INTO_DECK', instanceId: c.instanceId, ...(anyOwner ? { ownerId } : {}) }));
+      });
     } else if (state.pendingChoice.kind === 'summon-from-purgatory') {
       const { query } = state.pendingChoice;
-      searchZoneCandidates(state.players[playerId].purgatory, query)
+      searchZoneCandidatesAnyOf(state.players[playerId].purgatory, query)
         .filter(c => c.kind === 'being')
         .forEach(c => actions.push({ type: 'RESOLVE_SUMMON_FROM_PURGATORY', instanceId: c.instanceId }));
     } else if (state.pendingChoice.kind === 'move-target-being') {
@@ -8434,9 +9065,9 @@ export const getLegalActions = (state, playerId) => {
         .filter(([, o]) => o?.type === 'being' && o.ownerId === playerId)
         .forEach(([cell]) => actions.push({ type: 'RESOLVE_MOVE_TARGET_BEING', fromCellId: cell }));
     } else if (state.pendingChoice.kind === 'modulate') {
-      const { delta, allowedCells } = state.pendingChoice;
+      const { delta, allowedCells, anyOwner } = state.pendingChoice;
       Object.entries(state.board).forEach(([cell, occupant]) => {
-        if (occupant?.ownerId !== playerId || !isModulateTarget(occupant)) return;
+        if (!(anyOwner ? occupant : occupant?.ownerId === playerId) || !isModulateTarget(occupant)) return;
         if (allowedCells && !allowedCells.includes(cell)) return;
         if (delta === 'choose') {
           actions.push({ type: 'RESOLVE_MODULATE', cellId: cell, delta: 1 });
@@ -8449,15 +9080,20 @@ export const getLegalActions = (state, playerId) => {
       // card's own instanceId since altars aren't board cells. Time
       // Keeper's own "a target this points to" (allowedCells) can never
       // point at an Altar (off-board entirely), so this is skipped then.
-      if (!allowedCells) (state.altars[playerId] || []).forEach(altar => {
-        if (!isModulateableAltar(altar)) return;
-        if (delta === 'choose') {
-          actions.push({ type: 'RESOLVE_MODULATE', altarInstanceId: altar.card.instanceId, delta: 1 });
-          actions.push({ type: 'RESOLVE_MODULATE', altarInstanceId: altar.card.instanceId, delta: -1 });
-        } else {
-          actions.push({ type: 'RESOLVE_MODULATE', altarInstanceId: altar.card.instanceId, delta });
-        }
-      });
+      // anyOwner (OPTIONAL_MODULATE_ANY_OWNER_RE) scans both players' own
+      // altar lists instead of just the activating player's.
+      if (!allowedCells) {
+        const altarOwners = anyOwner ? Object.keys(state.altars) : [playerId];
+        altarOwners.forEach((ownerId) => (state.altars[ownerId] || []).forEach(altar => {
+          if (!isModulateableAltar(altar)) return;
+          if (delta === 'choose') {
+            actions.push({ type: 'RESOLVE_MODULATE', altarInstanceId: altar.card.instanceId, delta: 1 });
+            actions.push({ type: 'RESOLVE_MODULATE', altarInstanceId: altar.card.instanceId, delta: -1 });
+          } else {
+            actions.push({ type: 'RESOLVE_MODULATE', altarInstanceId: altar.card.instanceId, delta });
+          }
+        }));
+      }
     } else if (state.pendingChoice.kind === 'damage-target') {
       // `typing: null` means "any Being on the board, either owner" (see
       // DAMAGE_ANY_TARGET_RE) — otherwise the original typed/owned filter.
@@ -8688,8 +9324,11 @@ export const getLegalActions = (state, playerId) => {
     } else if (state.pendingChoice.kind === 'bottom-of-deck') {
       state.players[playerId].hand.forEach(c => actions.push({ type: 'RESOLVE_BOTTOM_OF_DECK', instanceId: c.instanceId }));
     } else if (state.pendingChoice.kind === 'freeze-frame-target') {
+      // Also offers an Animated Armament acting as a Being (RULES.md >
+      // Keywords > Animated) — see the matching fix in resolveOrLogEffect's
+      // own GAIN_TIME_COUNTER_NO_DISENGAGE_RE handler.
       Object.entries(state.board)
-        .filter(([, o]) => o?.type === 'being' && o.engaged)
+        .filter(([, o]) => (o?.type === 'being' && o.engaged) || (o?.type === 'armament-stack' && animatedTopEntry(o)?.engaged))
         .forEach(([cell]) => actions.push({ type: 'RESOLVE_FREEZE_FRAME_TARGET', cellId: cell }));
     } else if (state.pendingChoice.kind === 'time-counter-block-move') {
       Object.entries(state.board)
@@ -8802,13 +9441,35 @@ export const getLegalActions = (state, playerId) => {
     } else if (state.pendingChoice.kind === 'shift-return') {
       state.pendingChoice.allowedCells.forEach(cell => actions.push({ type: 'RESOLVE_SHIFT_RETURN', cellId: cell }));
     } else if (state.pendingChoice.kind === 'give-different-typed-buff') {
-      state.pendingChoice.allowedCells.forEach(cell => actions.push({ type: 'RESOLVE_GIVE_DIFFERENT_TYPED_BUFF', cellId: cell }));
+      // allowedCells is a snapshot taken when this reaction fired — one of
+      // those Beings can die before the choice actually resolves (e.g. a
+      // multi-step turn with other things happening in between). Filtered
+      // live against the board, not trusted as still-accurate: self-play
+      // found that offering a since-emptied cell stayed legal forever (the
+      // reducer's own `if (!occupant) return state;` guard is a silent
+      // no-op, not a real resolution), so the AI just kept re-selecting it.
+      state.pendingChoice.allowedCells
+        .filter(cell => state.board[cell]?.type === 'being')
+        .forEach(cell => actions.push({ type: 'RESOLVE_GIVE_DIFFERENT_TYPED_BUFF', cellId: cell }));
     } else if (state.pendingChoice.kind === 'force-shift-target') {
       state.pendingChoice.allowedCells.forEach(cell => actions.push({ type: 'RESOLVE_FORCE_SHIFT_TARGET', cellId: cell }));
     } else if (state.pendingChoice.kind === 'copy-opponent-effect') {
       state.pendingChoice.allowedCells.forEach(cell => actions.push({ type: 'RESOLVE_COPY_OPPONENT_EFFECT', cellId: cell }));
     } else if (state.pendingChoice.kind === 'echoes-boundless-shift-instead') {
-      actions.push({ type: 'RESOLVE_ECHOES_BOUNDLESS_SHIFT_INSTEAD' });
+      // triggerEchoesOfBoundlessOffer only checks canPayCost once, at the
+      // moment this choice first opens — but self-play found the effigy
+      // pool can still fail this same check by the time it's actually
+      // resolved (the same "offer never re-verifies what the reducer still
+      // enforces" gap as give-different-typed-buff's own fix above), and
+      // the reducer's own `if (!canPayCost(...)) return state;` guard is a
+      // silent no-op, not a real resolution — the AI just kept
+      // re-selecting a permanently-unaffordable "pay to Shift instead"
+      // forever. RESOLVE_DECLINE (below, this pendingChoice's own
+      // `optional: true`) stays the only real way out once this fails.
+      const { playerId: choicePlayerId, dyingCard } = state.pendingChoice;
+      if (canPayCost(state.players[choicePlayerId].effigyPool, dyingCard.castingCost)) {
+        actions.push({ type: 'RESOLVE_ECHOES_BOUNDLESS_SHIFT_INSTEAD' });
+      }
     } else if (state.pendingChoice.kind === 'shift-from-purgatory-destination') {
       state.pendingChoice.allowedCells.forEach(cell => actions.push({ type: 'RESOLVE_SHIFT_FROM_PURGATORY_DESTINATION', cellId: cell }));
     } else if (state.pendingChoice.kind === 'udarik-shift-target') {
@@ -8993,6 +9654,32 @@ export const getLegalActions = (state, playerId) => {
     return actions;
   }
 
+  // A reactive window (Ethereal Conjuring timing — manageReactiveWindow,
+  // below) blocks everything else for BOTH players, same "one thing at a
+  // time" precedent the pendingChoice branch above already establishes —
+  // only its own owner (state.reactiveWindow.openFor) gets anything at
+  // all, and only PASS_PRIORITY plus casting an affordable Ethereal
+  // Conjuring from hand. Checked before the normal turnPlayer gate below
+  // so it applies on EITHER player's turn — the whole point is letting the
+  // non-active player act here.
+  if (state.reactiveWindow) {
+    if (state.reactiveWindow.openFor !== playerId) return actions;
+    actions.push({ type: 'PASS_PRIORITY' });
+    state.players[playerId].hand.forEach(card => {
+      if (card.kind !== 'ethereal-conjuring') return;
+      if (!canPayCost(state.players[playerId].effigyPool, effectiveCastingCost(card, state, playerId))) return;
+      if (!conjuringCastGateOk(state, playerId, card)) return;
+      actions.push({ type: 'CAST_CONJURING', instanceId: card.instanceId });
+    });
+    // Engage abilities are "ethereal speed" too — activatable during a
+    // reactive window, not just an Ethereal Conjuring — but this
+    // deliberately does NOT extend to attacking, moving, or Shifting
+    // (ACTIVATE_SHIFT), which all stay conjuring/sorcery-speed, main-phase
+    // only (confirmed with the user). See offerReactiveEngageActions, above.
+    offerReactiveEngageActions(state, playerId, actions);
+    return actions;
+  }
+
   if (state.phase !== 'playing' || state.turnPlayer !== playerId) return actions;
 
   const player = state.players[playerId];
@@ -9052,8 +9739,21 @@ export const getLegalActions = (state, playerId) => {
         if (!state.board[cell]) actions.push({ type: 'PLAY_PROPHECY', instanceId: card.instanceId, cellId: cell });
       });
     } else if (card.kind === 'relic') {
+      // A "Beings may move across this" Relic (Shifting Sands) still lives
+      // in groundRelics rather than `board` once placed (createInitialState's
+      // own comment), so it can share a tile with a Being or an Armament
+      // pile. The only things that actually block it are a DIFFERENT
+      // ground Relic already on that tile, or a plain (non-Armament) Relic
+      // sitting in `board` itself (that's a real distinct permanent
+      // occupying the tile in the ordinary sense, not something this can
+      // coexist under) — a Being or an armament-stack occupant is fine.
+      // Every other Relic keeps the stricter "tile must be fully empty" rule.
+      const coLocatesWithBeings = !!card.keywords?.beingsMayMoveAcross;
       mortalCellsFor(playerId).forEach(cell => {
-        if (!state.board[cell] && !state.groundRelics[cell]) actions.push({ type: 'PLACE_RELIC', instanceId: card.instanceId, cellId: cell });
+        const blocked = coLocatesWithBeings
+          ? !!state.groundRelics[cell] || state.board[cell]?.type === 'relic'
+          : !!state.board[cell] || !!state.groundRelics[cell];
+        if (!blocked) actions.push({ type: 'PLACE_RELIC', instanceId: card.instanceId, cellId: cell });
       });
     } else if (card.kind === 'altar') {
       // Altars aren't tied to a board cell at all (RULES.md > Card types) —
@@ -9074,21 +9774,14 @@ export const getLegalActions = (state, playerId) => {
         }
       });
     } else if (card.kind === 'conjuring' || card.kind === 'ethereal-conjuring') {
-      // An Ethereal Conjuring is only offered here (the turn player's own
-      // main-phase actions) for now — it's castable, but not yet castable
-      // *reactively* on the opponent's turn (RULES.md > Conjurings), the
-      // one real gap its own printed type still promises over a plain one.
-      // Strike Down is additionally gated on hasAttackerAvailable — see
-      // STRIKE_DOWN_RE's own comment for why. Desperate Finale is gated on
-      // having an affordable engaged Being to pay its own additional cost
-      // with — see hasAffordableEngagedTarget's own comment.
-      if (STRIKE_DOWN_RE.test(stripFlavorText(card.textBox) || '') && !hasAttackerAvailable(state.board, playerId)) return;
-      if (card.keywords?.conjureCost && LIFESPAN_EQUAL_TARGET_ENGAGED_RE.test(card.keywords.conjureCost)
-        && !hasAffordableEngagedTarget(state.board, state.players, playerId)) return;
-      // Deja Vu: never offered at all without at least one Being (or
-      // Deity, with its own surcharge) the player can actually afford the
-      // combined cost for — see dejaVuCandidates.
-      if (card.keywords?.dejaVu && dejaVuCandidates(state, playerId, card).length === 0) return;
+      // A plain Conjuring is main-phase-only; an Ethereal Conjuring is also
+      // offered reactively via the reactiveWindow branch above — both share
+      // every additional-cost/target-availability gate via
+      // conjuringCastGateOk (Strike Down's hasAttackerAvailable, Desperate
+      // Finale's hasAffordableEngagedTarget, Deja Vu's own candidate
+      // search, "Shuffle (N) <X>s..."'s fixed-count Purgatory search) so
+      // the two offer sites can never drift out of sync again.
+      if (!conjuringCastGateOk(state, playerId, card)) return;
       actions.push({ type: 'CAST_CONJURING', instanceId: card.instanceId });
     }
   });
@@ -9134,10 +9827,15 @@ export const getLegalActions = (state, playerId) => {
     }
 
     // Shift: an Engage-costed ability (RULES.md > Keywords > Shift) — the
-    // Being becomes a Prophecy in the Ethereal Realm. Offered whenever the
-    // Being is eligible; performShift/ACTIVATE_SHIFT's own reducer handles
-    // "no empty Ethereal tile" gracefully, same as every other placement.
-    if (occupant.card.keywords?.shift) {
+    // Being becomes a Prophecy in the Ethereal Realm. Only offered with a
+    // real empty Ethereal Realm tile to land on — the same "never offer a
+    // guaranteed whiff" precedent as Deja Vu/Strike Down elsewhere in this
+    // file, not the "always offer it, offerOrPerformShift gracefully
+    // no-ops" this used to be: self-play found that with the Ethereal
+    // Realm full, ACTIVATE_SHIFT stayed legal forever (the no-op looks
+    // identical to a real action to the AI), and it just kept
+    // re-activating it every turn instead of doing anything else.
+    if (occupant.card.keywords?.shift && ETHEREAL_CELLS.some(c => !state.board[c])) {
       actions.push({ type: 'ACTIVATE_SHIFT', cellId: cell });
     }
 
@@ -9169,7 +9867,13 @@ export const getLegalActions = (state, playerId) => {
       const conditionOk = engageConditionMet(engageKeywords.engageCondition, state.board, playerId, state.altars[playerId], state.groundRelics);
       const costOk = player.lifespan - (engageKeywords.engageLifespanCost || 0) > 0;
       const extraCostOk = engageExtraCostSacrificeCell(engageKeywords.engageExtraCost, state.board, playerId).payable;
-      if (conditionOk && costOk && extraCostOk) {
+      // A counter-gated Engage (Void Channeler: "Remove (3) Crossing
+      // Counters, Engage: ...") also needs this checked here — see the
+      // matching fix (and its own fuller comment) in
+      // offerReactiveEngageActions above.
+      const counterCost = engageKeywords.engageCounterCost;
+      const counterCostOk = !counterCost || (occupant.counters?.[counterCost.type] || 0) >= counterCost.amount;
+      if (conditionOk && costOk && extraCostOk && counterCostOk) {
         actions.push({ type: 'ACTIVATE_ENGAGE', cellId: cell });
       }
     }
@@ -9219,7 +9923,14 @@ export const getLegalActions = (state, playerId) => {
   (player.summonTypedFromPurgatoryWindows || []).forEach(typing => {
     if (emptyMortalCellsFor(state.board, playerId).length === 0) return;
     player.purgatory
-      .filter(c => c.kind === 'being' && (c.typing || '').toLowerCase().includes(typing.toLowerCase()))
+      .filter(c => c.kind === 'being' && (c.typing || '').toLowerCase().includes(typing.toLowerCase())
+        // Unlike the other Purgatory-summon effects nearby (Cemetery
+        // Physician, "summon a different X"), Mausoleum Gates' window is an
+        // alternate SOURCE for a normal summon, not its own free reanimation
+        // trigger — the Being's real casting cost still applies, same as
+        // summoning it from hand (effectiveCastingCost, same choke point
+        // SUMMON_BEING itself uses).
+        && canPayCost(player.effigyPool, effectiveCastingCost(c, state, playerId)))
       .forEach(c => actions.push({ type: 'ACTIVATE_SUMMON_TYPED_FROM_PURGATORY_WINDOW', instanceId: c.instanceId }));
   });
 
@@ -9383,6 +10094,15 @@ export const getLegalActions = (state, playerId) => {
   Object.entries(state.board).forEach(([cell, occupant]) => {
     if (!occupant || occupant.type !== 'relic' || occupant.ownerId !== playerId || occupant.engaged) return;
     if (occupant.card.keywords?.engage) {
+      // "If you control ... you may Engage" condition (a borrowed textbox
+      // via Wretched Remnants can carry one, e.g. condition: 'faithless-
+      // only') — same missing-check bug as offerReactiveEngageActions
+      // above, fixed the same way: the reducer's shared engageConditionMet
+      // check applies to a Relic's Engage exactly like a Being's, so the
+      // offer must check it too or a condition-failing Engage stays
+      // "legal" forever (silent no-op every time, looks identical to
+      // progress to the AI).
+      const conditionOk = engageConditionMet(occupant.card.keywords?.engageCondition, state.board, playerId, state.altars[playerId], state.groundRelics);
       // "Pay (N) Lifespan, Engage: X" applies to a Relic's own Engage too,
       // not just a Being's (Lesser Summoning Circle) — same "can't drop to
       // 0 or below" gate the Being-side scan above already uses.
@@ -9399,7 +10119,7 @@ export const getLegalActions = (state, playerId) => {
       const ownEffectCounterMatch = occupant.card.keywords.engage.match(REMOVE_OWN_COUNTERS_RE);
       const ownEffectCounterOk = !ownEffectCounterMatch
         || (occupant.counters?.[ownEffectCounterMatch[2].toLowerCase()] || 0) >= parseInt(ownEffectCounterMatch[1], 10);
-      if (lifespanCostOk && extraCostOk && counterCostOk && ownEffectCounterOk) {
+      if (conditionOk && lifespanCostOk && extraCostOk && counterCostOk && ownEffectCounterOk) {
         actions.push({ type: 'ACTIVATE_ENGAGE', cellId: cell });
       }
     }
@@ -9600,15 +10320,16 @@ const resolveAttackFrom = (state, playerId, fromCellId) => {
     });
   } else {
     const dmg = deathDamageFor(attackerView);
+    const realAttackerCard = realCardFor(occupant, attackerView);
     const owner = next.players[playerId];
     next = {
       ...next,
       players: {
         ...next.players,
-        [playerId]: { ...owner, lifespan: owner.lifespan - dmg, purgatory: purgatoryAfterAdding(owner.purgatory, attackerView.card) },
+        [playerId]: { ...owner, lifespan: owner.lifespan - dmg, purgatory: purgatoryAfterAdding(owner.purgatory, realAttackerCard) },
       },
     };
-    next = addLog(next, `${actorCard.name} dies; ${playerId} takes ${dmg} Lifespan damage.`);
+    next = addLog(next, `${realAttackerCard.name} dies; ${playerId} takes ${dmg} Lifespan damage.`);
     if (isBeing) next = incrementBeingsDiedThisTurn(next, playerId);
     // Vacate the cell in `next.board` before Depart fires — see the
     // dealDamageToBeing comment above for why.
@@ -9636,15 +10357,16 @@ const resolveAttackFrom = (state, playerId, fromCellId) => {
     });
   } else {
     const dmg = deathDamageFor(defenderView);
+    const realDefenderCard = realCardFor(target, defenderView);
     const owner = next.players[target.ownerId];
     next = {
       ...next,
       players: {
         ...next.players,
-        [target.ownerId]: { ...owner, lifespan: owner.lifespan - dmg, purgatory: purgatoryAfterAdding(owner.purgatory, defenderView.card) },
+        [target.ownerId]: { ...owner, lifespan: owner.lifespan - dmg, purgatory: purgatoryAfterAdding(owner.purgatory, realDefenderCard) },
       },
     };
-    next = addLog(next, `${defenderView.card.name} dies; ${target.ownerId} takes ${dmg} Lifespan damage.`);
+    next = addLog(next, `${realDefenderCard.name} dies; ${target.ownerId} takes ${dmg} Lifespan damage.`);
     if (target.type === 'being') next = incrementBeingsDiedThisTurn(next, target.ownerId);
     const defenderPriorArmaments = target.armaments;
     if (target.type === 'being') dropArmamentsOrDryadMount(board, toCellId, target);
@@ -9741,8 +10463,27 @@ const gameReducerCore = (state, action) => {
     'RESOLVE_TEETH_BOUNDS_SACRIFICE_HUNGER', 'RESOLVE_TEETH_BOUNDS_TIE_CHOICE', 'RESOLVE_MIDNIGHT_MASS_SACRIFICE_TARGET',
     'RESOLVE_LEGION_ONSET_LIFESPAN', 'RESOLVE_ENGAGE_GRANT_COUNTER_SOURCE', 'RESOLVE_MOVE_ADJACENT_ARMAMENT_SOURCE',
     'RESOLVE_AFTERIMAGE_TARGET',
+    // Not a real choice — the revealPopup overlay (Match.jsx) is purely
+    // informational (see REVEAL_TOP_SEED_RE's own comment above), so
+    // dismissing it must always work even while an unrelated real
+    // pendingChoice also happens to be open.
+    'DISMISS_REVEAL_POPUP',
   ];
   if (state.pendingChoice && !PENDING_CHOICE_ACTION_TYPES.includes(action.type)) return state;
+  // A reactive window (see manageReactiveWindow, below) only ever legally
+  // resolves via one of these action types — mirrors the pendingChoice
+  // whitelist immediately above. Casting an Ethereal Conjuring or
+  // activating an Engage ability are both "ethereal speed" (the getLegalActions
+  // reactiveWindow branch above only ever offers these plus PASS_PRIORITY
+  // in the first place — this is just the matching defensive re-check).
+  // Deliberately excludes MOVE_OR_ATTACK and ACTIVATE_SHIFT — attacking,
+  // moving, and Shifting all stay conjuring/sorcery-speed, main-phase only
+  // (confirmed with the user). The reactiveWindow/pendingChoice states
+  // can't actually coexist (a reactiveWindow only ever opens once
+  // state.pendingChoice is null, and this file forces it null again the
+  // instant a new pendingChoice opens), but this is ordered defensively
+  // right after that check anyway.
+  if (state.reactiveWindow && !['CAST_CONJURING', 'PASS_PRIORITY', 'ACTIVATE_ENGAGE', 'ACTIVATE_GROUND_RELIC_ENGAGE', 'ACTIVATE_ARMAMENT_ENGAGE'].includes(action.type)) return state;
 
   switch (action.type) {
     case 'MULLIGAN': {
@@ -10041,10 +10782,15 @@ const gameReducerCore = (state, action) => {
       const playerId = state.turnPlayer;
       const player = state.players[playerId];
       if (state.phase !== 'playing') return state;
-      if (state.board[action.cellId] || state.groundRelics[action.cellId]) return state;
-      if (!mortalCellsFor(playerId).includes(action.cellId)) return state;
       const card = player.hand.find(c => c.instanceId === action.instanceId);
       if (!card || card.kind !== 'relic') return state;
+      // Same "Beings may move across this" exception as this action's own
+      // getLegalActions offer above.
+      const blocked = card.keywords?.beingsMayMoveAcross
+        ? !!state.groundRelics[action.cellId] || state.board[action.cellId]?.type === 'relic'
+        : !!state.board[action.cellId] || !!state.groundRelics[action.cellId];
+      if (blocked) return state;
+      if (!mortalCellsFor(playerId).includes(action.cellId)) return state;
       const cost = effectiveCastingCost(card, state, playerId);
       if (!canPayCost(player.effigyPool, cost)) return state;
 
@@ -10840,14 +11586,16 @@ const gameReducerCore = (state, action) => {
       if (!state.pendingChoice || state.pendingChoice.kind !== 'freeze-frame-target') return state;
       const { cardName, label, amount } = state.pendingChoice;
       const occupant = state.board[action.cellId];
-      if (!occupant || occupant.type !== 'being' || !occupant.engaged) return state;
-      const have = occupant.counters?.time || 0;
-      let next = {
-        ...state,
-        pendingChoice: null,
-        board: { ...state.board, [action.cellId]: { ...occupant, counters: { ...occupant.counters, time: have + amount }, doesNotDisengageWhileHasTimeCounters: true } },
-      };
-      return addLog(next, `${cardName}'s ${label} gives ${occupant.card.name} ${amount} Time Counter(s); it won't disengage while it has any.`);
+      const isEngagedActor = occupant?.type === 'being' ? occupant.engaged : (occupant?.type === 'armament-stack' && animatedTopEntry(occupant)?.engaged);
+      if (!isEngagedActor) return state;
+      const actingCard = actorView(occupant).card;
+      const have = (occupant.type === 'being' ? occupant.counters : animatedTopEntry(occupant).counters)?.time || 0;
+      const updated = writeActorState(occupant, {
+        counters: { ...(occupant.type === 'being' ? occupant.counters : animatedTopEntry(occupant).counters), time: have + amount },
+        doesNotDisengageWhileHasTimeCounters: true,
+      });
+      let next = { ...state, pendingChoice: null, board: { ...state.board, [action.cellId]: updated } };
+      return addLog(next, `${cardName}'s ${label} gives ${actingCard.name} ${amount} Time Counter(s); it won't disengage while it has any.`);
     }
 
     case 'RESOLVE_TIME_COUNTER_BLOCK_MOVE': {
@@ -11131,11 +11879,11 @@ const gameReducerCore = (state, action) => {
 
     case 'RESOLVE_DISCARD_TYPED': {
       if (!state.pendingChoice || state.pendingChoice.kind !== 'discard-typed') return state;
-      const { playerId, cardName, label } = state.pendingChoice;
+      const { playerId, cardName, label, drawCount } = state.pendingChoice;
       const player = state.players[playerId];
       const card = player.hand.find(c => c.instanceId === action.instanceId);
       if (!card) return state;
-      const next = {
+      let next = {
         ...state,
         pendingChoice: null,
         players: {
@@ -11143,7 +11891,12 @@ const gameReducerCore = (state, action) => {
           [playerId]: { ...player, hand: player.hand.filter(c => c.instanceId !== action.instanceId), purgatory: purgatoryAfterAdding(player.purgatory, card) },
         },
       };
-      return addLog(next, `${playerId} discards ${card.name} for ${cardName}'s ${label}.`);
+      next = addLog(next, `${playerId} discards ${card.name} for ${cardName}'s ${label}.`);
+      if (drawCount) {
+        const { state: afterDraw, drawnCount } = drawCardsFor(next, playerId, drawCount);
+        next = addLog(afterDraw, `${cardName}'s ${label} draws ${drawnCount} card(s) for ${playerId}.`);
+      }
+      return next;
     }
 
     case 'RESOLVE_SHUFFLE_OR_KEEP': {
@@ -11683,7 +12436,7 @@ const gameReducerCore = (state, action) => {
 
     case 'RESOLVE_TOKEN_LOCATION': {
       if (!state.pendingChoice || state.pendingChoice.kind !== 'token-location') return state;
-      const { playerId, cardName, tokenName, purgatoryInstanceId, allowedCells, forceEngaged } = state.pendingChoice;
+      const { playerId, cardName, tokenName, purgatoryInstanceId, allowedCells, forceEngaged, remaining } = state.pendingChoice;
       if (state.board[action.cellId] || !mortalCellsFor(playerId).includes(action.cellId)
         || (allowedCells && !allowedCells.includes(action.cellId))) {
         return { ...state, pendingChoice: null };
@@ -11718,7 +12471,17 @@ const gameReducerCore = (state, action) => {
       if (!makeToken) return { ...state, pendingChoice: null };
       const token = makeToken();
       let next = placeTokenOnBoard({ ...state, pendingChoice: null }, playerId, token, action.cellId);
-      return addLog(next, `${cardName} summons ${token.name} at ${action.cellId}.`);
+      next = addLog(next, `${cardName} summons ${token.name} at ${action.cellId}.`);
+      // Multi-token summon (Scā-vuhk Hunger's own "create (2) ... tokens" —
+      // see the SUMMON_TOKEN_RE handler above): reopen the same choice for
+      // the next token instead of clearing it, as long as there's still
+      // both a token left to place and an empty tile left to place it on —
+      // degrades gracefully (stops early, same as any other "ran out of
+      // legal targets" case in this file) if the board fills up first.
+      if (remaining > 1 && emptyMortalCellsFor(next.board, playerId).length > 0) {
+        return { ...next, pendingChoice: { kind: 'token-location', playerId, cardName, tokenName, remaining: remaining - 1 } };
+      }
+      return next;
     }
 
     // "Summon a/an <Name> token ... on any tile this points to" (Blooming
@@ -11818,7 +12581,19 @@ const gameReducerCore = (state, action) => {
       const found = player.purgatory.find(c => c.instanceId === action.instanceId);
       if (!found || windows.length === 0) return state;
       if (!windows.some(typing => (found.typing || '').toLowerCase().includes(typing.toLowerCase()))) return state;
-      return summonFromPurgatoryToOpenCell(state, playerId, 'the Purgatory window', found);
+      // Still a real summon, still costs Effigy — see the matching comment
+      // on this action's own getLegalActions offer, above.
+      const cost = effectiveCastingCost(found, state, playerId);
+      if (!canPayCost(player.effigyPool, cost)) return state;
+      const { remaining, spent } = payCost(player.effigyPool, cost);
+      const paidState = {
+        ...state,
+        players: {
+          ...state.players,
+          [playerId]: { ...player, effigyPool: remaining, effigySpentThisTurn: [...player.effigySpentThisTurn, ...spent] },
+        },
+      };
+      return summonFromPurgatoryToOpenCell(paidState, playerId, 'the Purgatory window', found);
     }
 
     // Cemetery Physician's "Once per turn sacrifice (X) <Name>: Summon a
@@ -11840,6 +12615,18 @@ const gameReducerCore = (state, action) => {
       if (ownedFodderCells(state.board, playerId, sacrificeXSummon.fodderName).length === 0) return state;
       if (emptyMortalCellsFor(state.board, playerId).length === 0) return state;
       let next = addLog(state, `${playerId} begins choosing how many ${sacrificeXSummon.fodderName} to sacrifice for ${occupant.card.name}.`);
+      // "Once per turn" is consumed by ACTIVATING the ability, not by
+      // successfully completing it — set here, not (only) in
+      // RESOLVE_SACRIFICE_X_CONFIRM below. Self-play found that backing out
+      // via RESOLVE_DECLINE (no X value has a real Purgatory match, so
+      // CONFIRM is never even offered — see its own gate) never set this
+      // flag, leaving the ability re-activatable in the same turn: the AI
+      // would activate it, toggle, discover nothing matches, decline, and
+      // immediately activate it again, forever.
+      next = {
+        ...next,
+        board: { ...next.board, [action.cellId]: { ...occupant, usedSacrificeXThisTurn: true } },
+      };
       return {
         ...next,
         pendingChoice: {
@@ -11937,10 +12724,32 @@ const gameReducerCore = (state, action) => {
         const idx = pool.findIndex(e => e.effigyType === ability.color && !e.engaged);
         pool.splice(idx, 1);
       }
+      // payEffigyAbilityUsesThisTurn is tracked regardless of `ability.once`
+      // (unlike timesPerTurnUsed just above, which only matters for a
+      // printed cap) — a card whose own printed cost gets reduced all the
+      // way to 0 by another permanent (e.g. Nursery Attendant pointing at
+      // a Seed) has no real resource ever running out, so nothing else in
+      // this reducer ever stops it being re-legal every single time. Purely
+      // a hook for ai.js's own scoring (see scoreAction there) to
+      // deprioritize repeating a played-out free ability below PASS_TURN
+      // once it's already been used this turn — self-play found this exact
+      // shape (Samara Seed's "Pay (1) Living: Add (1) Growth Counter."
+      // reduced to Pay 0) as a real, otherwise-endless stall, since a
+      // Being that's already used its own Engage/Martyr this turn still
+      // has nothing else worth doing. Not a legality change: the ability
+      // stays exactly as repeatable as before at the reducer/getLegalActions
+      // level, only the greedy AI's own preference changes.
       let next = {
         ...state,
         players: { ...state.players, [playerId]: { ...player, effigyPool: pool } },
-        board: { ...state.board, [action.cellId]: { ...occupant, ...(ability.once ? { timesPerTurnUsed: (occupant.timesPerTurnUsed || 0) + 1 } : {}) } },
+        board: {
+          ...state.board,
+          [action.cellId]: {
+            ...occupant,
+            payEffigyAbilityUsesThisTurn: (occupant.payEffigyAbilityUsesThisTurn || 0) + 1,
+            ...(ability.once ? { timesPerTurnUsed: (occupant.timesPerTurnUsed || 0) + 1 } : {}),
+          },
+        },
       };
       next = addLog(next, `${playerId} pays ${cost} ${ability.color} for ${occupant.card.name}'s ability.`);
       return resolveOrLogEffect(next, playerId, occupant.card.name, ability.effect, 'ability', { selfCellId: action.cellId });
@@ -12219,7 +13028,12 @@ const gameReducerCore = (state, action) => {
     }
 
     case 'CAST_CONJURING': {
-      const playerId = state.turnPlayer;
+      // A reactive Ethereal Conjuring cast (state.reactiveWindow open) is
+      // cast by whoever currently holds the window, not necessarily
+      // state.turnPlayer — every other reference in this whole case body
+      // already goes through this same local `playerId`, never
+      // state.turnPlayer again, so this one line is sufficient.
+      const playerId = state.reactiveWindow?.openFor ?? state.turnPlayer;
       const player = state.players[playerId];
       if (state.phase !== 'playing') return state;
       const card = player.hand.find(c => c.instanceId === action.instanceId);
@@ -12428,11 +13242,14 @@ const gameReducerCore = (state, action) => {
       next = addLog(next, `${occupant.card.name}'s Martyr triggers.`);
       // selfCounters carries the sacrificed occupant's own Counters through
       // — needed by Time Capsule's own "repeat for each Time Counter on
-      // this", since the tile is already vacated by the time this resolves
-      // (same "captured before self-sacrifice" precedent context.selfArrows
-      // already established for Blooming Seed's Growth Counter ability).
-      // Harmlessly unread by every other Martyr text.
-      next = resolveOrLogEffect(next, playerId, occupant.card.name, martyrText, 'Martyr', { selfCellId: action.cellId, selfCounters: occupant.counters });
+      // this". selfArrows does the same for any "...on a tile this points
+      // to" Martyr text (Samara Seed's own Invoke) — both are captured
+      // here, before the sacrifice, since the tile is already vacated
+      // (`board` above) by the time this resolves, and effects reading
+      // context.selfCellId/context.selfArrows would otherwise find nothing
+      // there to read arrows/counters off of. Harmlessly unread by every
+      // other Martyr text.
+      next = resolveOrLogEffect(next, playerId, occupant.card.name, martyrText, 'Martyr', { selfCellId: action.cellId, selfCounters: occupant.counters, selfArrows: occupant.card.arrows });
       next = triggerMartyrTypedReactions(next, playerId, occupant.card);
       // Wretched Remnants' own offer waits until Martyr's own effect (which
       // may itself open a pendingChoice) has fully resolved — inserting it
@@ -12445,7 +13262,10 @@ const gameReducerCore = (state, action) => {
     }
 
     case 'ACTIVATE_ENGAGE': {
-      const playerId = state.turnPlayer;
+      // Engage abilities are "ethereal speed" — activatable reactively
+      // during an open priority window too, not just on the turn player's
+      // own main phase (see the matching getLegalActions branch above).
+      const playerId = state.reactiveWindow?.openFor ?? state.turnPlayer;
       if (state.phase !== 'playing') return state;
       const occupant = state.board[action.cellId];
       const isEngageable = occupant?.type === 'being' || occupant?.type === 'relic';
@@ -12509,8 +13329,16 @@ const gameReducerCore = (state, action) => {
       let sacrificedCardName = null;
       if (sacrificeCellId) {
         const sacrificed = next.board[sacrificeCellId];
-        sacrificedCardName = sacrificed.card.name;
-        next = addLog(next, `${playerId} sacrifices ${sacrificed.card.name} to engage ${occupant.card.name}.`);
+        // engageExtraCostSacrificeCell's own candidate search already
+        // matches an Animated Armament acting as a Being (e.g. Bag o'
+        // Bones animated via "Animate") — that occupant has no top-level
+        // `.card` (only `.armaments[i].card`), unlike a real Being/Relic.
+        // Reading `.card.name` unconditionally crashed the moment the
+        // sacrifice candidate was one of those (self-play found this a
+        // real, reachable crash).
+        const sacrificedCard = sacrificed.card || sacrificed.armaments[sacrificed.armaments.length - 1].card;
+        sacrificedCardName = sacrificedCard.name;
+        next = addLog(next, `${playerId} sacrifices ${sacrificedCardName} to engage ${occupant.card.name}.`);
         next = sacrificeOccupantAt(next, sacrificeCellId);
       }
       if (counterCost) {
@@ -12534,7 +13362,8 @@ const gameReducerCore = (state, action) => {
     }
 
     case 'ACTIVATE_GROUND_RELIC_ENGAGE': {
-      const playerId = state.turnPlayer;
+      // Same "ethereal speed" reactive-window exception as ACTIVATE_ENGAGE.
+      const playerId = state.reactiveWindow?.openFor ?? state.turnPlayer;
       if (state.phase !== 'playing') return state;
       const occupant = state.groundRelics[action.cellId];
       if (!occupant || occupant.ownerId !== playerId || occupant.engaged) return state;
@@ -12581,7 +13410,8 @@ const gameReducerCore = (state, action) => {
     }
 
     case 'ACTIVATE_ARMAMENT_ENGAGE': {
-      const playerId = state.turnPlayer;
+      // Same "ethereal speed" reactive-window exception as ACTIVATE_ENGAGE.
+      const playerId = state.reactiveWindow?.openFor ?? state.turnPlayer;
       if (state.phase !== 'playing') return state;
       const occupant = state.board[action.cellId];
       const isEngageable = occupant?.type === 'being' || occupant?.type === 'armament-stack';
@@ -12603,7 +13433,7 @@ const gameReducerCore = (state, action) => {
 
     case 'RESOLVE_CHOICE': {
       if (!state.pendingChoice || state.pendingChoice.kind !== 'search') return state;
-      const { playerId, source, query, cardName, costFilter, minCostFilter, sharedTypings } = state.pendingChoice;
+      const { playerId, source, query, cardName, costFilter, minCostFilter, sharedTypings, colorFilter } = state.pendingChoice;
       const player = state.players[playerId];
       const zone = player[source];
       const idx = zone.findIndex(c => c.instanceId === action.instanceId);
@@ -12612,6 +13442,7 @@ const gameReducerCore = (state, action) => {
       if (costFilter != null && totalCastingCost(found) !== costFilter) return state;
       if (minCostFilter != null && totalCastingCost(found) < minCostFilter) return state;
       if (sharedTypings != null && !(found.typing || '').split(',').map(t => t.trim().toLowerCase()).some(t => sharedTypings.includes(t))) return state;
+      if (colorFilter != null && found.effigyType !== colorFilter) return state;
       const updatedZone = [...zone.slice(0, idx), ...zone.slice(idx + 1)];
 
       let next = {
@@ -12645,15 +13476,21 @@ const gameReducerCore = (state, action) => {
 
     case 'RESOLVE_SHUFFLE_PURGATORY_INTO_DECK': {
       if (!state.pendingChoice || state.pendingChoice.kind !== 'shuffle-purgatory-into-deck') return state;
-      const { playerId, cardName, label, then } = state.pendingChoice;
-      const found = state.players[playerId].purgatory.find(c => c.instanceId === action.instanceId);
+      const { playerId, cardName, label, then, anyOwner } = state.pendingChoice;
+      // `action.ownerId` (Canopic Jar's own anyOwner case) is the offer's
+      // own explicit tag, not re-derived by searching both piles — see the
+      // offer branch's own comment on why instanceId alone can't safely
+      // disambiguate which player's Purgatory this candidate came from.
+      const owner = anyOwner ? action.ownerId : playerId;
+      if (anyOwner && !owner) return { ...state, pendingChoice: null };
+      const found = state.players[owner]?.purgatory.find(c => c.instanceId === action.instanceId);
       if (!found) return { ...state, pendingChoice: null };
-      let next = shuffleFromPurgatoryIntoDeck({ ...state, pendingChoice: null }, playerId, found);
-      next = addLog(next, `${cardName}'s ${label} shuffles ${found.name} into ${playerId}'s deck.`);
+      let next = shuffleFromPurgatoryIntoDeck({ ...state, pendingChoice: null }, owner, found);
+      next = addLog(next, `${cardName}'s ${label} shuffles ${found.name} into ${owner}'s deck.`);
       if (!then) return next;
-      if (!controlsOnlyFaithlessPermanents(next.board, playerId, next.altars[playerId], next.groundRelics)) return next;
-      const { state: afterDraw, drawnCount } = drawCardsFor(next, playerId, then.drawCount);
-      return addLog(afterDraw, `${cardName}'s ${label} draws ${drawnCount} card(s) for ${playerId} (only Faithless permanents controlled).`);
+      if (!anyOwner && !controlsOnlyFaithlessPermanents(next.board, owner, next.altars[owner], next.groundRelics)) return next;
+      const { state: afterDraw, drawnCount } = drawCardsFor(next, owner, then.drawCount);
+      return addLog(afterDraw, `${cardName}'s ${label} draws ${drawnCount} card(s) for ${owner}${anyOwner ? '' : ' (only Faithless permanents controlled)'}.`);
     }
 
     case 'RESOLVE_SUMMON_FROM_PURGATORY': {
@@ -12685,17 +13522,28 @@ const gameReducerCore = (state, action) => {
 
     case 'RESOLVE_MODULATE': {
       if (!state.pendingChoice || state.pendingChoice.kind !== 'modulate') return state;
-      const { playerId, cardName, label, repeatsRemaining = 0, thenDelta = null } = state.pendingChoice;
+      const { playerId, cardName, label, repeatsRemaining = 0, thenDelta = null, anyOwner = false } = state.pendingChoice;
 
       // Altar target (Eònion Altar) — addressed by instanceId, not a board
-      // cellId, since altars live in state.altars[playerId], not state.board.
-      // No Prophecy-shaped flip/Purgatory finalization applies here (an
-      // Altar's own "at 0 Time Counters" condition, e.g. its craft bonus, is
-      // read live off its counters wherever it matters — see turn.js — not
-      // triggered as an event), so this just writes the new count and
-      // continues any Time Capsule-style repeat, same as Hourglass below.
+      // cellId, since altars live in state.altars[<owner>], not state.board.
+      // anyOwner (OPTIONAL_MODULATE_ANY_OWNER_RE) can target either
+      // player's altar, so the owner has to be found by searching both
+      // lists rather than assuming it's always the activating playerId's
+      // own — getLegalActions' own anyOwner branch already offers the
+      // opponent's altars here too, and this reducer silently rejecting
+      // them (ownerId mismatch) would leave that offered action a
+      // permanent no-op, the same "offer allows it, reducer can't actually
+      // find it" gap fixed everywhere else in this file. No Prophecy-shaped
+      // flip/Purgatory finalization applies here (an Altar's own "at 0 Time
+      // Counters" condition, e.g. its craft bonus, is read live off its
+      // counters wherever it matters — see turn.js — not triggered as an
+      // event), so this just writes the new count and continues any Time
+      // Capsule-style repeat, same as Hourglass below.
       if (action.altarInstanceId) {
-        const altarList = state.altars[playerId] || [];
+        const altarOwnerId = anyOwner
+          ? Object.keys(state.altars).find(oid => (state.altars[oid] || []).some(a => a.card.instanceId === action.altarInstanceId))
+          : playerId;
+        const altarList = (altarOwnerId && state.altars[altarOwnerId]) || [];
         const altarIndex = altarList.findIndex(a => a.card.instanceId === action.altarInstanceId);
         const altar = altarList[altarIndex];
         if (altarIndex === -1 || !isModulateableAltar(altar)) return state;
@@ -12707,7 +13555,7 @@ const gameReducerCore = (state, action) => {
         let next = {
           ...state,
           pendingChoice: null,
-          altars: { ...state.altars, [playerId]: nextAltars },
+          altars: { ...state.altars, [altarOwnerId]: nextAltars },
         };
         next = addLog(next, `${playerId} Modulates ${altar.card.name} by ${sign}${action.delta} (now ${time}).`);
         // Temporal Anomaly: fires on any player-activated Modulate,
@@ -12718,7 +13566,7 @@ const gameReducerCore = (state, action) => {
       }
 
       const occupant = state.board[action.cellId];
-      if (!occupant || occupant.ownerId !== playerId || !isModulateTarget(occupant)) return state;
+      if (!occupant || (!anyOwner && occupant.ownerId !== playerId) || !isModulateTarget(occupant)) return state;
       const sign = action.delta > 0 ? '+' : '';
 
       if (occupant.type === 'prophecy') {
@@ -12789,6 +13637,16 @@ const gameReducerCore = (state, action) => {
       return addLog({ ...state, phase: 'gameover', winner }, `${action.player} concedes — ${winner} wins.`);
     }
 
+    // Dismisses the revealPopup overlay (Farm Hand's own bug report — see
+    // REVEAL_TOP_SEED_RE's comment) — a click, or the UI's own 30s auto-
+    // timeout. Purely clearing a transient display field; the real
+    // outcome (drawn vs. left on top) already happened when it was set.
+    case 'DISMISS_REVEAL_POPUP': {
+      if (!state.revealPopup) return state;
+      const { revealPopup: _dismissed, ...rest } = state;
+      return rest;
+    }
+
     default:
       return state;
   }
@@ -12812,9 +13670,129 @@ const clearStuckPendingChoice = (state) => {
   return addLog({ ...state, pendingChoice: null }, `${cardName ? `${cardName}'s ` : 'A'} pending "${kind}" choice has no legal option and is cleared automatically.`);
 };
 
+// Ethereal Conjuring reactive timing (RULES.md's own "the one real gap"
+// note): after ANY action, the player who didn't just act gets one
+// optional chance to respond by casting an affordable Ethereal Conjuring
+// from hand — and if they do, the ORIGINAL actor gets the same chance to
+// respond to THAT, alternating indefinitely (real, unlimited-depth
+// chaining) until whoever currently holds it either has nothing to cast or
+// explicitly declines. This is NOT a literal LIFO stack of unresolved
+// effects — every reactive cast resolves immediately, through the exact
+// same CAST_CONJURING reducer case / resolveOrLogEffect pipeline a normal
+// cast already uses (see that case's own playerId derivation). Chaining is
+// achieved purely by "does anyone want to respond to what just happened,"
+// asked once per event — a documented simplification that's safe because
+// no real card in this set needs deferred/queued resolution.
+//
+// state.reactiveWindow is `null | { openFor: playerId }` — no "who has
+// passed" bookkeeping is needed: PASS_PRIORITY from the current openFor
+// always closes the window outright (nobody else is ever simultaneously
+// "owed" a check); only a real CAST_CONJURING flips openFor to the other
+// player for a fresh, single opportunity to react to that specific cast.
+//
+// `prevState` is the state from BEFORE gameReducerCore + the recomputes
+// above ran (already in scope in gameReducer's own closure below), `state`
+// is the fully-resolved post-action state, `action` is what was just
+// dispatched.
+const manageReactiveWindow = (prevState, state, action) => {
+  if (state.phase !== 'playing' || state.winner || state.pendingChoice) {
+    // Always explicitly null (never left undefined) — createInitialState
+    // sets it to null too, so `reactiveWindow` is consistently either
+    // `null` or a real `{ openFor }` object everywhere, same as
+    // pendingChoice's own convention. Preserves reference equality when it
+    // was already null — many existing tests assert a rejected/no-op
+    // action returns the exact same state object, same discipline every
+    // other function in this recompute chain already follows.
+    return state.reactiveWindow == null ? state : { ...state, reactiveWindow: null };
+  }
+
+  const REACTIVE_RESPONSE_ACTION_TYPES = new Set(['CAST_CONJURING', 'ACTIVATE_ENGAGE', 'ACTIVATE_GROUND_RELIC_ENGAGE', 'ACTIVATE_ARMAMENT_ENGAGE']);
+  // The whole point of the window is "someone else just did something you
+  // might want to respond to" — so it carries a human-readable description
+  // of exactly what that was, shown above the Pass Priority button
+  // (Match.jsx) instead of leaving the player to guess. Reuses the log
+  // message the triggering action's own reducer case already wrote (every
+  // action addLog()s a description of itself) rather than maintaining a
+  // second, parallel switch over action types here that would inevitably
+  // drift out of sync with the real one.
+  const lastLogMessage = state.log.length > 0 ? state.log[state.log.length - 1].message : null;
+  let next = state;
+  if (prevState.reactiveWindow) {
+    // This action is itself how an already-open window continues — only
+    // PASS_PRIORITY or one of REACTIVE_RESPONSE_ACTION_TYPES can ever
+    // reach here (enforced by both getLegalActions and gameReducerCore's
+    // own whitelist above).
+    const reactor = prevState.reactiveWindow.openFor;
+    if (action.type === 'PASS_PRIORITY') {
+      next = { ...next, reactiveWindow: null };
+    } else if (REACTIVE_RESPONSE_ACTION_TYPES.has(action.type)) {
+      // Defense in depth, mirroring the no-op check in the "no window was
+      // open" branch below: a REACTIVE_RESPONSE_ACTION_TYPES entry that the
+      // offer side legally listed but whose reducer case then silently
+      // no-oped (any gate the offer doesn't yet mirror — self-play found
+      // this exact shape for Strike Down/Deja Vu's own additional-target
+      // gates, now fixed at the offer via conjuringCastGateOk, but this
+      // guards against the next one) must never flip the window —
+      // flipping on a no-op is indistinguishable from real progress to the
+      // AI and ping-pongs forever between the two players. Leaving the
+      // window open for the same reactor instead means the AI just tries
+      // something else (or PASS_PRIORITY) next. PASS_PRIORITY itself is
+      // deliberately checked above this, before this no-op test, since its
+      // own "close the window" effect lives entirely here in
+      // manageReactiveWindow rather than in gameReducerCore, so `state ===
+      // prevState` is always true for it and would otherwise wrongly
+      // short-circuit its real close-the-window behavior.
+      if (state === prevState) return next;
+      next = { ...next, reactiveWindow: { openFor: opponentOf(reactor), triggerDescription: lastLogMessage } };
+    } else {
+      return next;
+    }
+  } else {
+    // No window was open — did a real, complete action just happen that
+    // the OTHER player might want to respond to? A no-op dispatch (state
+    // unchanged) or one of a small set of action types never opens one:
+    // PASS_TURN (its own begin/endTurn pipeline stays atomic within this
+    // one dispatch — a deliberate, documented scope boundary, not an
+    // oversight), the test-only recompute sentinel, and the mulligan
+    // actions (redundant with the phase check above, kept explicit).
+    if (state === prevState) return next;
+    const NON_REACTIVE_ACTION_TYPES = new Set(['PASS_TURN', '__TEST_RECOMPUTE_ONLY__', 'MULLIGAN', 'KEEP_HAND']);
+    if (NON_REACTIVE_ACTION_TYPES.has(action.type)) return next;
+    // The real actor isn't always prevState.turnPlayer — a RESOLVE_*
+    // finishing a multi-step pendingChoice chain can be dispatched by
+    // EITHER player (getLegalActions' own pendingChoice branch already
+    // establishes this: "it can fire on either player's turn, e.g. a
+    // defender's Depart triggers during the attacker's turn"), so the
+    // choice's own owner is the real actor whenever one was just pending.
+    const actor = prevState.pendingChoice ? prevState.pendingChoice.playerId : prevState.turnPlayer;
+    next = { ...next, reactiveWindow: { openFor: opponentOf(actor), triggerDescription: lastLogMessage } };
+  }
+
+  // Auto-close (not flip-and-check-the-other-side — per the state shape
+  // above, nobody else is owed a check) whenever the current holder has
+  // nothing real to cast — same "auto-resolve what nobody can act on"
+  // philosophy clearStuckPendingChoice uses just below. In the
+  // overwhelming majority of actions (neither side holding an affordable
+  // Ethereal Conjuring), this collapses the window shut within the same
+  // dispatch, completely invisible to either player.
+  while (next.reactiveWindow) {
+    const { openFor } = next.reactiveWindow;
+    const hasRealOption = getLegalActions(next, openFor).some(a => REACTIVE_RESPONSE_ACTION_TYPES.has(a.type));
+    if (hasRealOption) break;
+    next = { ...next, reactiveWindow: null };
+  }
+  return next;
+};
+
 // Horological Horror's "X" is a live, continuously-checked aura (see
 // recomputeXBeings above) — refreshed after every single action, not just
 // once at the start of a turn, so a mid-turn Time Counter change (an Engage
 // cost, Freeze Frame, Moment of Doubt, etc.) is reflected immediately.
 export const gameReducer = (state, action) =>
-  clearStuckPendingChoice(recomputeKalmahkaOverrides(recomputeBoardWideAuraBonuses(recomputeConditionalBonuses(recomputeDeathCountBonuses(recomputeXBeings(gameReducerCore(state, action)))))));
+  clearStuckPendingChoice(
+    manageReactiveWindow(
+      state,
+      recomputeKalmahkaOverrides(recomputeBoardWideAuraBonuses(recomputeConditionalBonuses(recomputeDeathCountBonuses(recomputeXBeings(gameReducerCore(state, action)))))),
+      action
+    )
+  );

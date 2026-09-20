@@ -12,16 +12,23 @@ import {
 } from '../engine/deck.js';
 import { PRECON_DECKS } from '../decks/precons.js';
 
-// One of the same 3 precons a human can pick (see PreconSelect.jsx),
-// chosen at random — falls back to the old random-mono-color auto-build
-// only if the loaded card set doesn't actually contain that precon's cards
-// (a heavily customized CSV missing the bundled precon's names), so the AI
+// The AI opponent's own deck, scoped by the human's chosen AI Difficulty
+// (PreconSelect.jsx's toggle, precons.js's own `aiDifficulty` tag on each
+// precon) — never the same thing as which precon the human picked for
+// themself. Easy skips precons entirely, same plain random mono-color deck
+// as the old (pre-difficulty) default. Standard/Hard pick at random among
+// only the precons tagged that way, falling back to the plain random build
+// only if the loaded card set doesn't actually contain any of that tier's
+// precons' cards (a heavily customized CSV missing their names), so the AI
 // always ends up with a real, legal 40-card deck either way.
-const pickAiDeck = (pool) => {
-  const shuffled = [...PRECON_DECKS].sort(() => Math.random() - 0.5);
-  for (const precon of shuffled) {
-    const { entries, effigyCounts } = resolvePreconEntries(pool, precon);
-    if (validateMainDeck(entries).length === 0) return { entries, effigyCounts };
+const pickAiDeck = (pool, aiDifficulty) => {
+  if (aiDifficulty !== 'easy') {
+    const tierDecks = PRECON_DECKS.filter((p) => p.aiDifficulty === aiDifficulty);
+    const shuffled = [...tierDecks].sort(() => Math.random() - 0.5);
+    for (const precon of shuffled) {
+      const { entries, effigyCounts } = resolvePreconEntries(pool, precon);
+      if (validateMainDeck(entries).length === 0) return { entries, effigyCounts };
+    }
   }
   const color = randomEffigyColor();
   return { entries: autoBuildMainDeckEntries(pool, color), effigyCounts: autoBuildEffigyCounts(color) };
@@ -33,6 +40,13 @@ export default function GameApp({ onExitToMenu }) {
   const [matchState, setMatchState] = useState(null);
   const [matchKey, setMatchKey] = useState(0);
   const [lastConfig, setLastConfig] = useState(null);
+  // Casual (default) leaves the Ethereal Conjuring reactive window
+  // (Match.jsx) open indefinitely, same as before this toggle existed.
+  // Competitive turns on its 20s-then-10s auto-decline timer.
+  const [competitiveMode, setCompetitiveMode] = useState(false);
+  // Which precons (precons.js > aiDifficulty) pickAiDeck draws the AI
+  // opponent's own deck from — 'standard' as the default middle ground.
+  const [aiDifficulty, setAiDifficulty] = useState('standard');
 
   const handleImported = (cards) => {
     setPool(cards);
@@ -54,12 +68,12 @@ export default function GameApp({ onExitToMenu }) {
   };
 
   const handleStart = ({ entries, effigyCounts }) => {
-    // The AI opponent plays one of the same 3 precons a human can pick,
-    // chosen at random (pickAiDeck, above) — same mono-color-deck guarantee
-    // the old random auto-build had (every colored card it draws is
-    // actually payable from its own mono-color Effigy Deck), just a real
-    // curated list instead of a random legal pile.
-    const { entries: aiEntries, effigyCounts: aiEffigyCounts } = pickAiDeck(pool);
+    // The AI opponent plays a precon scoped to the chosen AI Difficulty
+    // (pickAiDeck, above) — same mono-color-deck guarantee the old random
+    // auto-build had (every colored card it draws is actually payable from
+    // its own mono-color Effigy Deck) whenever a precon is used, just a
+    // real curated list instead of a random legal pile.
+    const { entries: aiEntries, effigyCounts: aiEffigyCounts } = pickAiDeck(pool, aiDifficulty);
     const config = { entries, effigyCounts, aiEntries, aiEffigyCounts };
     setLastConfig(config);
     setScreen('coinflip');
@@ -84,7 +98,18 @@ export default function GameApp({ onExitToMenu }) {
     // Import auto-loads the active CSV and immediately advances here, so
     // routing "back" through it would just bounce straight back — go all
     // the way out to the menu instead.
-    return <PreconSelect pool={pool} onStart={handleStart} onCustom={() => setScreen('build')} onBack={onExitToMenu} />;
+    return (
+      <PreconSelect
+        pool={pool}
+        onStart={handleStart}
+        onCustom={() => setScreen('build')}
+        onBack={onExitToMenu}
+        competitiveMode={competitiveMode}
+        onToggleCompetitiveMode={setCompetitiveMode}
+        aiDifficulty={aiDifficulty}
+        onChangeAiDifficulty={setAiDifficulty}
+      />
+    );
   }
   if (screen === 'build') {
     return <DeckBuilder pool={pool} onStart={handleStart} onBack={() => setScreen('select')} />;
@@ -100,6 +125,7 @@ export default function GameApp({ onExitToMenu }) {
       onExit={onExitToMenu}
       onRematch={handleRematch}
       deckEntries={lastConfig?.entries}
+      competitiveMode={competitiveMode}
     />
   );
 }

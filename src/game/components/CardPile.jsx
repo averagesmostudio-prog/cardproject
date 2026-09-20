@@ -19,17 +19,17 @@ export default function CardPile({ label, count, clickable, onClick, tone = 'sto
     >
       <div
         onClick={clickable ? onClick : undefined}
-        className={`relative w-16 h-24 ${clickable ? 'cursor-pointer' : ''}`}
+        className={`relative w-20 h-28 ${clickable ? 'cursor-pointer' : ''}`}
       >
         {count > 0 && (
           <div className={`absolute inset-0 translate-x-1 translate-y-1 rounded border-2 ${toneClasses.back}`} />
         )}
         <div
-          className={`relative w-full h-full rounded border-2 flex flex-col items-center justify-center gap-0.5 text-white transition
+          className={`relative w-full h-full rounded border-2 flex flex-col items-center justify-center gap-1 text-white transition
             ${toneClasses.front} ${clickable ? 'hover:brightness-125' : ''} ${highlight ? 'ring-2 ring-amber-400 animate-pulse' : ''}`}
         >
-          <span className="text-[10px] uppercase tracking-wide opacity-80">{label}</span>
-          <span className="text-xl font-extrabold">{count}</span>
+          <span className="text-xs uppercase tracking-wide opacity-80">{label}</span>
+          <span className="text-2xl font-extrabold">{count}</span>
         </div>
       </div>
       {hover && (

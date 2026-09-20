@@ -10,3 +10,82 @@
   align-items: center;
   justify-content: center;
 }
+
+/* Board.jsx > DamageFlash — a Hearthstone-style impact burst, popping in
+   with a little overshoot rather than fading in flatly, since the whole
+   point is to read as a hit landing. */
+@keyframes damage-burst-pop {
+  0% { transform: scale(0.2) rotate(-10deg); opacity: 0; }
+  45% { transform: scale(1.3) rotate(5deg); opacity: 1; }
+  65% { transform: scale(0.92) rotate(-3deg); }
+  100% { transform: scale(1) rotate(0deg); }
+}
+.damage-burst-pop {
+  animation: damage-burst-pop 320ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* Board.jsx > lungeOffsetFor — an attacking Being/Armament lifts off the
+   tile, lunges toward whichever cell it's attacking (--lunge-x/--lunge-y,
+   set inline per-cell since the direction differs every time), then
+   settles back in place. Runs independently of CardTile's own `engaged`
+   rotate transition on its inner wrapper — this is the outer wrapper, so
+   the two compose instead of fighting over the same transform. */
+@keyframes attack-lunge {
+  0% { transform: translate(0, 0) scale(1); }
+  20% { transform: translate(0, -6px) scale(1.05); }
+  55% { transform: translate(var(--lunge-x, 0px), var(--lunge-y, 0px)) scale(1.12); }
+  80% { transform: translate(calc(var(--lunge-x, 0px) * 0.25), calc(var(--lunge-y, 0px) * 0.25)) scale(1.04); }
+  100% { transform: translate(0, 0) scale(1); }
+}
+.attack-lunge {
+  /* ease-in-out, not damage-burst-pop's bouncy overshoot curve above — this
+     animation has three phases to read (lift, lunge, return) rather than
+     one single "pop," and the overshoot curve was found (via a slow-motion
+     scrub of this exact keyframe set) to front-load so hard that the lift
+     and lunge blurred into one motion instead of reading as distinct. */
+  animation: attack-lunge 500ms ease-in-out both;
+  z-index: 15;
+}
+
+/* Hand.jsx > justDrawnIds (useStagedBoard.js > useJustDrawn) — a freshly
+   drawn card pops up into the hand from below rather than just appearing,
+   since Hand.jsx has no reliable on-screen deck position to travel FROM
+   (the Deck pile lives in a separate part of Match.jsx's layout, outside
+   the board's own grid math attack-lunge could reuse) — a generic
+   "arriving" motion reads fine without that. */
+@keyframes card-draw-in {
+  0% { transform: translateY(40px) scale(0.85) rotate(-6deg); opacity: 0; }
+  60% { transform: translateY(-6px) scale(1.04) rotate(2deg); opacity: 1; }
+  100% { transform: translateY(0) scale(1) rotate(0deg); opacity: 1; }
+}
+.card-draw-in {
+  animation: card-draw-in 450ms ease-out both;
+}
+
+/* Match.jsx > useTurnBanner — a "Your Turn"/"Opponent's Turn" announcement
+   at the start of each turn: a soft radial glow behind a pill banner,
+   both popping in with a slight overshoot then holding before fading, in
+   the same spirit as a Hearthstone-style turn transition. Pure CSS/
+   gradients, no image assets, so it fits the existing flat visual style
+   instead of trying to imitate painted fantasy art. */
+@keyframes turn-banner-glow {
+  0% { opacity: 0; transform: scale(0.4); }
+  25% { opacity: 1; transform: scale(1.15); }
+  40% { opacity: 1; transform: scale(1); }
+  75% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1); }
+}
+.turn-banner-glow {
+  animation: turn-banner-glow 1500ms ease-in-out both;
+  background: radial-gradient(circle, rgba(251,191,36,0.55) 0%, rgba(251,191,36,0.25) 35%, rgba(251,191,36,0) 70%);
+}
+@keyframes turn-banner-text {
+  0% { opacity: 0; transform: scale(0.7) translateY(10px); }
+  20% { opacity: 1; transform: scale(1.05) translateY(0); }
+  30% { opacity: 1; transform: scale(1) translateY(0); }
+  80% { opacity: 1; transform: scale(1) translateY(0); }
+  100% { opacity: 0; transform: scale(1) translateY(0); }
+}
+.turn-banner-text {
+  animation: turn-banner-text 1500ms ease-in-out both;
+}

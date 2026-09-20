@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { beginTurn, endTurn, checkWin } from './turn.js';
+import { gameReducer } from './actions.js';
 
 const player = (overrides = {}) => ({
   id: 'A',
@@ -629,44 +630,92 @@ describe('endTurn', () => {
     const mouthOfMadness = { type: 'relic', ownerId: 'A', card: { id: 'mouth', instanceId: 'mouth#0', name: 'Mouth of Madness', kind: 'relic', keywords: { duringEndStepForceShift: 1 } } };
     const terraneanGates = { type: 'relic', ownerId: 'A', card: { id: 'gates', instanceId: 'gates#0', name: 'Terranean Gates', kind: 'relic', keywords: { duringEndStepLoseTimeCounters: 2 } } };
 
-    it('drains the opponent 1 damage per bounce until it wins, without hanging or needing any player choice', () => {
+    // Regression: per the user's own ruling, this named 3-piece combo
+    // doesn't grind out repeated real damage instances at all anymore —
+    // the moment Immen Gorta returns to the Mortal Realm for the 3RD time
+    // with both Relics still in play, the loop is declared and its
+    // controller wins outright (win-by-loop, not by Lifespan exhaustion).
+    // `bounceCount` is 0 on the first (non-forced) return, so the 3rd
+    // occurrence is bounceCount === 2 — the first two returns still deal
+    // their own real 1 damage each beforehand (2 damage total), then the
+    // 3rd short-circuits before dealing any more.
+    it('declares the loop and ends the game after the 3rd return, rather than draining Lifespan indefinitely', () => {
       const state = baseState({
         turnPlayer: 'A',
         board: { r3c1: shiftedImmenGorta(1), r2c1: mouthOfMadness, r2c2: terraneanGates },
-        players: { A: player(), B: player({ lifespan: 5 }) },
+        players: { A: player(), B: player({ lifespan: 1000 }) },
       });
       const next = endTurn(state);
       expect(next.phase).toBe('gameover');
       expect(next.winner).toBe('A');
-      expect(next.players.B.lifespan).toBeLessThanOrEqual(0);
-      expect(next.pendingChoice).toBeFalsy(); // never had to pause for a target/destination choice
+      expect(next.players.B.lifespan).toBe(998); // only the first 2 returns dealt real damage
+      expect(next.pendingChoice).toBeFalsy();
+      expect(next.loopWin).toEqual({
+        winnerId: 'A',
+        cards: expect.arrayContaining([
+          expect.objectContaining({ name: 'Mouth of Madness' }),
+          expect.objectContaining({ name: 'Terranean Gates' }),
+          expect.objectContaining({ name: 'Immen Gorta, the Boundless Hunger' }),
+        ]),
+      });
+      expect(next.log.some(e => e.message.includes('assembled the Boundless Hunger loop'))).toBe(true);
     });
 
-    it('caps at 100 bounces instead of looping forever when the opponent has enough Lifespan to survive them all', () => {
-      // endTurn hands off into B's own beginTurn once the game isn't over
-      // (see its own tail call below) — a real draw deck avoids B's empty-
-      // deck draw penalty from confounding the Lifespan math here.
+    it('still wins outright via the loop even when the opponent would easily have survived 1-damage-per-bounce forever (no more 100-bounce grind for this specific combo)', () => {
       const state = baseState({
         turnPlayer: 'A',
         board: { r3c1: shiftedImmenGorta(1), r2c1: mouthOfMadness, r2c2: terraneanGates },
+        players: { A: player(), B: player({ lifespan: 1_000_000 }) },
+      });
+      const next = endTurn(state);
+      expect(next.phase).toBe('gameover');
+      expect(next.winner).toBe('A');
+    });
+
+    // The general 100-bounce safety net (offerOrPerformShift/
+    // placeReturnedFromShift) stays in place for the underlying mechanism
+    // itself — only Immen Gorta BY NAME gets the loop-declaration
+    // short-circuit, so a different card sharing the same Shift-decay +
+    // "deal damage on return" shape (hypothetical — no other real card
+    // does today) would still need it.
+    it('the general 100-bounce cap still applies to a differently-named card sharing the same mechanic shape', () => {
+      const otherCard = { ...immenGortaCard, name: 'Some Other Hunger', instanceId: 'other#0' };
+      const shiftedOther = {
+        type: 'prophecy', ownerId: 'A',
+        card: { ...otherCard, textBox: 'At the end of your turn, this loses (2) Time Counters', typing: '', keywords: { endOfTurnRemoveOwnTimeCounters: 2 } },
+        timer: 1, faceDown: false, shiftedFromCard: otherCard,
+      };
+      const state = baseState({
+        turnPlayer: 'A',
+        board: { r3c1: shiftedOther, r2c1: mouthOfMadness, r2c2: terraneanGates },
         players: { A: player(), B: player({ lifespan: 1000, mainDeck: [{ instanceId: 'd1' }] }) },
       });
       const next = endTurn(state);
       expect(next.phase).toBe('playing'); // not lethal — the 100-bounce cap stopped it first
       expect(next.players.B.lifespan).toBe(900); // 1000 - 100 bounces x 1 damage each
-      expect(next.log.filter(e => e.message.includes("Reaction deals 1 damage directly to B"))).toHaveLength(100);
+      expect(next.loopWin).toBeUndefined();
     });
 
-    it('does not bounce at all without both Relics in play — only its own quoted decay applies', () => {
+    // Regression: with no Mouth of Madness on the board, the loop can
+    // never re-trigger after this single return — so unlike the two tests
+    // above (which genuinely have nowhere safe to pause), this ordinary
+    // end-of-turn return now opens a REAL "any target" choice for the
+    // player instead of silently auto-hitting the opponent, per the
+    // user's own ruling ("Immen Gorta returning should allow the player
+    // to target where the damage goes").
+    it('does not bounce at all without both Relics in play — only its own quoted decay applies, and opens a real target choice for the damage', () => {
       const state = baseState({
         turnPlayer: 'A',
         board: { r3c1: shiftedImmenGorta(1) },
         players: { A: player(), B: player({ lifespan: 50, mainDeck: [{ instanceId: 'd1' }] }) },
       });
       const next = endTurn(state);
-      expect(next.players.B.lifespan).toBe(49); // returned once, dealt 1 damage, then stayed a Being
+      expect(next.players.B.lifespan).toBe(50); // no damage yet — a real choice is pending, not auto-resolved
       const returned = Object.values(next.board).find(o => o?.card?.name === 'Immen Gorta, the Boundless Hunger');
       expect(returned?.type).toBe('being');
+      expect(next.pendingChoice).toEqual(expect.objectContaining({ kind: 'damage-target', playerId: 'A', damage: 1, includesPlayers: true }));
+      const resolved = gameReducer(next, { type: 'RESOLVE_DAMAGE_TARGET_PLAYER', targetPlayerId: 'B' });
+      expect(resolved.players.B.lifespan).toBe(49);
     });
   });
 });

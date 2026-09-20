@@ -5,7 +5,7 @@ const SIZE_PX = { sm: 64, md: 96, lg: 144, xl: 192 };
 const MAX_GHOSTS = 2; // extra copies peeking out behind the front card
 const GHOST_OFFSET = 5; // px shift per ghost layer
 
-export default function Hand({ cards, playableIds, selectedInstanceId, onSelect, borderImages, borderImagesLoaded, artImages, artBorderImages, artImagesLoaded, fontLoaded, cardSize = 'md', stack = true }) {
+export default function Hand({ cards, playableIds, selectedInstanceId, onSelect, borderImages, borderImagesLoaded, artImages, artBorderImages, artImagesLoaded, fontLoaded, cardSize = 'md', stack = true, justDrawnIds }) {
   if (cards.length === 0) {
     return <div className="text-xs text-stone-400 italic py-4">Hand is empty.</div>;
   }
@@ -55,6 +55,7 @@ export default function Hand({ cards, playableIds, selectedInstanceId, onSelect,
                   dimmed={!playableIds.has(card.instanceId)}
                   size={cardSize}
                   onboard
+                  hoverDelayMs={0}
                   borderImages={borderImages}
                   borderImagesLoaded={borderImagesLoaded}
                   artImages={artImages}
@@ -64,7 +65,10 @@ export default function Hand({ cards, playableIds, selectedInstanceId, onSelect,
                 />
               </div>
             ))}
-            <div className="relative">
+            <div
+              key={justDrawnIds?.has(front.instanceId) ? `drawn-${front.instanceId}` : undefined}
+              className={`relative ${justDrawnIds?.has(front.instanceId) ? 'card-draw-in' : ''}`}
+            >
               <CardTile
                 card={front}
                 selected={selectedInstanceId === front.instanceId}
@@ -78,6 +82,7 @@ export default function Hand({ cards, playableIds, selectedInstanceId, onSelect,
                 fontLoaded={fontLoaded}
                 size={cardSize}
                 onboard
+                hoverDelayMs={0}
               />
               {group.cards.length > 1 && (
                 <span className="absolute -bottom-1 -right-1 z-10 bg-stone-900 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center shadow">

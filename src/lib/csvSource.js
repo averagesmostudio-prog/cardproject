@@ -2,6 +2,10 @@
 // Play a Game. A custom CSV set via the Settings panel (passcode-gated) is
 // stored in localStorage and takes priority over the bundled default file.
 
+// Shared with every CSV-upload gate in the app (Landing's Settings panel and
+// Build's own upload box) so there's exactly one passcode to keep in sync.
+export const CSV_PASSCODE = 'WellPlayedGG';
+
 const CUSTOM_CSV_KEY = 'scripturas-custom-csv';
 const CUSTOM_CSV_NAME_KEY = 'scripturas-custom-csv-name';
 // Relative (no leading slash): the packaged Electron app loads index.html via

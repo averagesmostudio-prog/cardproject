@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, Download, ChevronLeft, ChevronRight, ChevronDown, Settings2, LayoutGrid, Search, Plus, Minus, Trash2, X } from 'lucide-react';
+import { Upload, Download, ChevronLeft, ChevronRight, ChevronDown, Settings2, LayoutGrid, Search, Plus, Minus, Trash2, X, Lock } from 'lucide-react';
 import { getColumnData, BORDER_IMAGE_SRC, BORDER_STYLES, getBorderTypeForCard, getCardKind, parseEffigyCost, parseCSV as sharedParseCSV, resolveCardArt } from '../lib/cardData.js';
 import { buildDeckExport, parseDeckImport } from '../lib/deckExport.js';
-import { getActiveCsvText } from '../lib/csvSource.js';
+import { getActiveCsvText, CSV_PASSCODE } from '../lib/csvSource.js';
 import {
   CARD_PX_WIDTH, CARD_PX_HEIGHT, ONBOARD_CARD_PX_WIDTH, ONBOARD_CARD_PX_HEIGHT, MPC_PX_WIDTH, MPC_PX_HEIGHT, DEFAULT_POSITIONS,
   renderCardOnCanvas, renderCardWithBleed, SHEET_COLS, SHEET_ROWS, CARDS_PER_SHEET, pngBlobWithDpi,
@@ -24,6 +24,11 @@ const TradingCardGenerator = () => {
   const deckPreviewCanvasRef = useRef(null);
   const [showPositioning, setShowPositioning] = useState(false);
   const [borderStyle, setBorderStyle] = useState('default');
+  // Gates Build's own CSV upload box behind the same passcode as the Landing
+  // Settings panel — otherwise it was an unlocked back door around that lock.
+  const [csvUploadUnlocked, setCsvUploadUnlocked] = useState(false);
+  const [csvUploadPasscode, setCsvUploadPasscode] = useState('');
+  const [csvUploadError, setCsvUploadError] = useState('');
   const fontLoaded = useCardFont();
   const canvasRef = useRef(null);
 
@@ -45,6 +50,16 @@ const TradingCardGenerator = () => {
   const cardHeight = borderStyle === 'onboard' ? ONBOARD_CARD_PX_HEIGHT : CARD_PX_HEIGHT;
   const thumbWidth = 180;
   const thumbHeight = Math.round(thumbWidth * (cardHeight / cardWidth));
+
+  const submitCsvUploadPasscode = (e) => {
+    e.preventDefault();
+    if (csvUploadPasscode === CSV_PASSCODE) {
+      setCsvUploadUnlocked(true);
+      setCsvUploadError('');
+    } else {
+      setCsvUploadError('Incorrect passcode.');
+    }
+  };
 
   const handleCSVUpload = (e) => {
     const file = e.target.files[0];
@@ -582,11 +597,27 @@ const TradingCardGenerator = () => {
         <p className="text-stone-400 mb-8 text-sm">Upload a CSV of card data to batch-generate finished cards. The border art is chosen automatically for each card from its Card Typing (Being/Prophecy, Relic/Altar, or Ethereal Conjuring/Conjuring).</p>
 
         <div className="bg-white p-6 rounded-lg shadow-sm border border-stone-200 mb-8 max-w-sm">
-          <label className="flex flex-col items-center justify-center h-32 border-2 border-dashed border-stone-300 rounded cursor-pointer hover:border-blue-500 transition-colors">
-            <Upload className="w-8 h-8 text-stone-400 mb-2" />
-            <span className="text-sm text-stone-600">Upload CSV File</span>
-            <input type="file" accept=".csv" onChange={handleCSVUpload} className="hidden" />
-          </label>
+          {!csvUploadUnlocked ? (
+            <form onSubmit={submitCsvUploadPasscode} className="flex flex-col items-center justify-center h-32 border-2 border-dashed border-stone-300 rounded px-4">
+              <Lock className="w-6 h-6 text-stone-400 mb-2" />
+              <p className="text-xs text-stone-500 mb-2 text-center">Enter the passcode to upload a CSV file.</p>
+              <input
+                type="password"
+                value={csvUploadPasscode}
+                onChange={(e) => { setCsvUploadPasscode(e.target.value); setCsvUploadError(''); }}
+                placeholder="Passcode"
+                className="w-full px-2 py-1 border border-stone-300 rounded text-sm mb-1 focus:outline-none focus:ring-1 focus:ring-stone-400"
+              />
+              {csvUploadError && <p className="text-xs text-red-600">{csvUploadError}</p>}
+              <button type="submit" className="text-xs text-blue-600 hover:underline mt-1">Unlock</button>
+            </form>
+          ) : (
+            <label className="flex flex-col items-center justify-center h-32 border-2 border-dashed border-stone-300 rounded cursor-pointer hover:border-blue-500 transition-colors">
+              <Upload className="w-8 h-8 text-stone-400 mb-2" />
+              <span className="text-sm text-stone-600">Upload CSV File</span>
+              <input type="file" accept=".csv" onChange={handleCSVUpload} className="hidden" />
+            </label>
+          )}
           {csvData.length > 0 && <p className="text-green-600 mt-2 text-sm">✓ {csvData.length} cards loaded</p>}
         </div>
 

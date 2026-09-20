@@ -24,3 +24,4 @@ print_sheet*.png
 *.njsproj
 *.sln
 *.sw?
+scripts/self-play/out*/

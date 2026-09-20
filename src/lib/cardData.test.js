@@ -1,5 +1,28 @@
 import { describe, it, expect } from 'vitest';
-import { parseKeywords, stripFlavorText, parseEffigyCost, totalCastingCost, createTokenCard, getCardKind, toGameCard, getBorderTypeForCard } from './cardData.js';
+import { parseKeywords, stripFlavorText, parseEffigyCost, totalCastingCost, createTokenCard, getCardKind, toGameCard, getBorderTypeForCard, parseCSV } from './cardData.js';
+
+describe('parseCSV', () => {
+  it('collapses an RFC4180 doubled quote ("") inside a quoted field into one literal quote, instead of dropping both', () => {
+    // Mirrors Scā-vuhk Hunger's real printed row (public/default-card-set.csv):
+    // the Text Box field is itself CSV-quoted, and prints a literal quoted
+    // clause — "Shift (1): "At the end..."" — encoded per RFC4180 as a
+    // doubled "" pair. A parser that just toggles in-quotes on every `"`
+    // (the pre-fix behavior) drops BOTH characters of the pair, silently
+    // stripping the literal quote marks the downstream shiftMatch regex
+    // requires (cardData.js's own onOwnBeingShift-style anchored patterns).
+    const csv = 'Card Name,Text Box\n'
+      + 'Test Card,"Shift (1): ""At the end of your turn remove (1) Time Counter from this""\nSecond line."';
+    const rows = parseCSV(csv);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]['Text Box']).toBe('Shift (1): "At the end of your turn remove (1) Time Counter from this"\nSecond line.');
+  });
+
+  it('still strips the outer CSV-quoting quotes from a field with no embedded quotes', () => {
+    const csv = 'Card Name,Text Box\nTest Card,"Gain +1/+1."';
+    const rows = parseCSV(csv);
+    expect(rows[0]['Text Box']).toBe('Gain +1/+1.');
+  });
+});
 
 describe('parseKeywords', () => {
   it('returns all-false/null for text with no keywords', () => {
@@ -399,9 +422,15 @@ describe('parseKeywords', () => {
     expect(kw.onLifespanPaidGrowth).toEqual({ strength: 1, lifespan: 1 });
   });
 
-  it('captures Roots of Eternity\'s Purgatory reanimate ability (real CSV text)', () => {
+  it('captures Roots of Eternity\'s Purgatory reanimate ability (real CSV text), and does NOT also duplicate it into the generic timesPerTurnAbility field', () => {
     const kw = parseKeywords('Once per turn you may sacrifice a Vine token, summon this from Purgatory on the tile that the sacrificed vine token was on ');
     expect(kw.reanimateOnSacrificedTypedToken).toEqual({ typing: 'Vine' });
+    // Without this exclusion, the same "Once per turn ..." text also
+    // matched the generic bare-timesPerTurnMatch below, which — unlike
+    // the dedicated reanimate path — is only ever readable while this
+    // card is still on the board, offering a second, broken activation
+    // button that always fell through to "isn't automated yet".
+    expect(kw.timesPerTurnAbility).toBeNull();
   });
 
   it('captures "Whenever a different Being you control Fights, gain +1/+0 until the end of turn." (Spirit of War, real CSV text)', () => {
@@ -568,6 +597,12 @@ describe('parseKeywords', () => {
     expect(kw.onOwnBeingShift).toEqual({ effect: 'Gain (1) Crossing Counter', exceptEndStep: false });
   });
 
+  it('still captures it when the REAL printed card has a second line after it (Sanative Siphon\'s actual full CSV row — a bare `$`-anchored regex here would silently never match the real card at all)', () => {
+    const kw = parseKeywords('Gain (1) Crossing Counter whenever a Being you control Shifts.\nRemove (X) Crossing Counters, Engage: Restore (X) Lifespan to target.');
+    expect(kw.onOwnBeingShift).toEqual({ effect: 'Gain (1) Crossing Counter', exceptEndStep: false });
+    expect(kw.removeCountersEngageRestoreLifespan).toEqual({ counterType: 'crossing' });
+  });
+
   it('captures Thōgrakin Hunger\'s "Whenever a Being you control Shifts, except during the end step, add (1) Formless Essence" (real CSV text, effect after "whenever")', () => {
     const kw = parseKeywords('Whenever a Being you control Shifts, except during the end step, add (1) Formless Essence.');
     expect(kw.onOwnBeingShift).toEqual({ effect: 'add (1) Formless Essence', exceptEndStep: true });
@@ -710,6 +745,33 @@ describe('createTokenCard', () => {
   });
 });
 
+describe('toGameCard trims a stray leading/trailing space off "Card Name"', () => {
+  // Regression: the real CSV has dozens of rows with an accidental trailing
+  // (or, for Sporangium, leading) space in "Card Name" — confirmed real
+  // example: "Locust swarm " (public/default-card-set.csv). Left untrimmed,
+  // that space survives into `.name` and breaks anything doing exact-string
+  // matching against it — concretely, actions.js's own
+  // selfReferentialWhenSummonedText substitutes a card's own printed name
+  // for "this" in its own text (Locust Swarm's Depart: "Locust Swarm Shifts
+  // (3)."); the untrimmed name's own trailing space gets consumed as part
+  // of the matched span, producing "thisShifts (3)." — no space — which no
+  // longer matches SELF_SHIFT_RE, so the Shift silently never fires.
+  it('produces a clean .name with no leading/trailing whitespace', () => {
+    const card = toGameCard({ 'Card Name': 'Locust swarm ', 'Card Typing': 'Insect, Being', 'Text Box': 'Depart: Locust Swarm Shifts (3).' }, 0);
+    expect(card.name).toBe('Locust swarm');
+  });
+
+  it('trims a leading space too (real example: "  Sporangium")', () => {
+    const card = toGameCard({ 'Card Name': '  Sporangium', 'Card Typing': 'Being', 'Text Box': '' }, 0);
+    expect(card.name).toBe('Sporangium');
+  });
+
+  it('leaves the untrimmed raw CSV row intact under .raw (cardRender.js reads display fields from there)', () => {
+    const card = toGameCard({ 'Card Name': 'Locust swarm ', 'Card Typing': 'Insect, Being', 'Text Box': '' }, 0);
+    expect(card.raw['Card Name']).toBe('Locust swarm ');
+  });
+});
+
 describe('"Ethereal, Conjuring" classification (RULES.md > Conjurings)', () => {
   it('classifies as "ethereal-conjuring", not "conjuring" — the real CSV always separates the words with a comma', () => {
     expect(getCardKind({ 'Card Typing': 'Ethereal, Conjuring' })).toBe('ethereal-conjuring');
@@ -837,6 +899,23 @@ describe('"Relic, Being" (RULES.md > Card types — Training dummy, Crumbling Sp
     }), 0);
     expect(card.isRelicBeing).toBe(true);
     expect(card.keywords.engage).toBe('Deal (1) Lifespan Damage to a Being you control and (1) to a different Being.');
+  });
+
+  it('does not mistake a summoned token\'s own granted "Engage:" ability (inside a parenthetical description) for this card\'s own — Blooming Seed / Elderflower Ancient', () => {
+    // Real CSV text (after CSV unescaping strips away the "" ""-quoting
+    // the source file uses around the token's own reminder text, leaving
+    // no quote character to key off — only the parenthetical nesting is
+    // left as a signal). Neither card prints a real top-level Engage line.
+    const bloomingSeed = parseKeywords('Pay (1) Living: Add (1) Growth Counter.\nRemove (1) Growth Counter: Sacrifice this, summon (1) Blooming Vine Token (0/3 Being - vine token with Engage: Add (1) Living) on any tile this points to.');
+    expect(bloomingSeed.engage).toBeNull();
+    const elderflowerAncient = parseKeywords('Depart: Restore (6) Lifespan or Summon (2) Blooming Vine tokens  (0/3 Being - Vine token with Engage: Add (1) Living).');
+    expect(elderflowerAncient.engage).toBeNull();
+    expect(elderflowerAncient.depart).toBe('Restore (6) Lifespan or Summon (2) Blooming Vine tokens  (0/3 Being - Vine token with Engage: Add (1) Living).');
+  });
+
+  it('still parses a real Engage ability normally when a token-description parenthetical is also present elsewhere in the text', () => {
+    const kw = parseKeywords('Pay (1) Living Essence, Engage: Until end of turn Plants summoned on this tile come in Disengaged.\nIf this is Engaged at the end of the turn, sacrifice it.\nBeings may move across this Relic.');
+    expect(kw.engage).toBe('Until end of turn Plants summoned on this tile come in Disengaged.');
   });
 
   it('Smithing Tools: two bare activated abilities, "Engage a Being, Gain (1) Forge Counter" and "Engage, Remove (X) Forge Counters: ..."', () => {

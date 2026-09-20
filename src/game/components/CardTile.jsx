@@ -1,7 +1,18 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import CardThumbnail from './CardThumbnail.jsx';
 
-const SIZE_CLASSES = { sm: 'w-16', md: 'w-24', lg: 'w-36', xl: 'w-48' };
+// 'lg' matches Board.jsx's onboard cell width at both breakpoints (w-36 /
+// sm:w-44) so onboard cards fill the tile instead of leaving a gap once the
+// cell itself grows at sm:.
+const SIZE_CLASSES = { sm: 'w-16', md: 'w-24', lg: 'w-36 sm:w-44', xl: 'w-48' };
+// A deliberate pause before the zoom appears — a mouse merely passing over
+// (or resting briefly while aiming a click) shouldn't pop up the preview;
+// only a real, sustained hover should. This is the default for an onboard
+// tile specifically; Hand.jsx overrides it to 0 (instant) for its own
+// cards via the `hoverDelayMs` prop below — a card already in hand is
+// small and known, so there's no accidental-hover risk worth guarding
+// against the way there is for a crowded board.
+const HOVER_DELAY_MS = 2000;
 const HOVER_WIDTH = 260;
 // The hover zoom always shows the *default* portrait frame — even for an
 // On Board tile — since the On Board frame deliberately omits the text box
@@ -12,13 +23,14 @@ const HOVER_HEIGHT = Math.round(HOVER_WIDTH * 7 / 5);
 
 export default function CardTile({
   card, currentLifespan, strength, engaged, faceDown, isOwn, horizontal, selected, dimmed, onClick, size = 'md',
-  onboard = false, borderImages, borderImagesLoaded, artImages, artBorderImages, artImagesLoaded, fontLoaded,
+  onboard = false, hoverDelayMs = HOVER_DELAY_MS, disableHoverPreview = false, borderImages, borderImagesLoaded, artImages, artBorderImages, artImagesLoaded, fontLoaded,
 }) {
   const dims = SIZE_CLASSES[size] || SIZE_CLASSES.md;
   const wrapRef = useRef(null);
   const [hoverPos, setHoverPos] = useState(null);
+  const hoverTimerRef = useRef(null);
 
-  const handleMouseEnter = () => {
+  const showPreview = () => {
     const rect = wrapRef.current?.getBoundingClientRect();
     if (!rect) return;
     let top = rect.top - HOVER_HEIGHT - 12;
@@ -27,7 +39,28 @@ export default function CardTile({
     left = Math.max(8, Math.min(left, window.innerWidth - HOVER_WIDTH - 8));
     setHoverPos({ left, top });
   };
-  const handleMouseLeave = () => setHoverPos(null);
+  const handleMouseEnter = () => {
+    // The mulligan screen's star layout drives its own centered expand
+    // preview instead of this tile's near-tile popup — see Match.jsx.
+    if (disableHoverPreview) return;
+    if (hoverDelayMs <= 0) {
+      showPreview();
+      return;
+    }
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = setTimeout(() => {
+      hoverTimerRef.current = null;
+      showPreview();
+    }, hoverDelayMs);
+  };
+  const handleMouseLeave = () => {
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+    setHoverPos(null);
+  };
+  useEffect(() => () => { if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current); }, []);
 
   if (faceDown) {
     // Prophecies sit in the Ethereal Realm (Row 3), which is laid out

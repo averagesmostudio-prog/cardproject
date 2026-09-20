@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { History, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Flag } from 'lucide-react';
 import { useGameEngine } from '../state/useGameEngine.js';
+import { useStagedBoard, useStagedLife, useTurnBanner, useJustDrawn } from '../state/useStagedBoard.js';
 import { getLegalActions, effectiveEngage, animatedTopEntry, effectiveCastingCost, faithlessPaymentNeedsChoice, faithlessPaymentCandidates, searchZoneCandidates } from '../engine/actions.js';
 import { effectiveStrength } from '../engine/combat.js';
 import { STARTING_LIFESPAN } from '../engine/constants.js';
@@ -12,6 +13,7 @@ import Hand from './Hand.jsx';
 import ActionLog from './ActionLog.jsx';
 import CardPile from './CardPile.jsx';
 import CardTile from './CardTile.jsx';
+import CardThumbnail from './CardThumbnail.jsx';
 
 const HUMAN = 'A';
 const AI = 'B';
@@ -39,11 +41,37 @@ const lifeColor = (value) => {
   return LIFE_COLOR_BANDS.find(band => ratio >= band.atOrAbove).color;
 };
 
-function LifeBadge({ value }) {
+// `flash` (useStagedLife.js) is `{ amount }` for the brief window right
+// after a direct hit to this player's Lifespan — same staged-pause /
+// starburst treatment Board.jsx's DamageFlash gives a damaged Being, just
+// sized down to sit next to a number instead of over a whole board tile.
+// `targetAction`, when set, means this life total is a legal "any target"
+// destination right now (Sharpshoot-style direct damage, restore-lifespan
+// -target) — the whole badge becomes a clickable, highlighted target
+// instead of the separate "A's Lifespan" / "B's Lifespan" buttons this
+// used to need.
+function LifeBadge({ value, flash, targetAction, onSelectTarget }) {
   return (
-    <div className="text-center leading-tight">
-      <div className="text-3xl font-extrabold" style={{ color: lifeColor(value) }}>{value}</div>
-      <div className="text-[10px] text-stone-400 uppercase tracking-wide">Life</div>
+    <div
+      className={`relative text-center leading-tight rounded-lg transition ${targetAction ? 'cursor-pointer ring-2 ring-amber-400 ring-offset-2 ring-offset-black animate-pulse hover:bg-amber-400/10' : ''}`}
+      onClick={targetAction ? () => onSelectTarget(targetAction) : undefined}
+      role={targetAction ? 'button' : undefined}
+      title={targetAction ? 'Target this Lifespan total' : undefined}
+    >
+      {flash && (
+        <div className="absolute -top-2 -right-3 z-30 w-9 h-9 damage-burst-pop pointer-events-none">
+          <div className="absolute inset-0 bg-gradient-to-br from-amber-300 via-orange-500 to-red-600 rounded-md shadow-[0_0_6px_rgba(0,0,0,0.6)] rotate-45" />
+          <div className="absolute inset-0 bg-gradient-to-br from-amber-300 via-orange-500 to-red-600 rounded-md shadow-[0_0_6px_rgba(0,0,0,0.6)]" />
+          <div
+            className="absolute inset-0 flex items-center justify-center text-red-600 font-extrabold text-xs"
+            style={{ textShadow: '0 0 2px #000, 0 0 3px #000, 0 1px 1px #000' }}
+          >
+            -{flash.amount}
+          </div>
+        </div>
+      )}
+      <div className="text-5xl font-extrabold" style={{ color: lifeColor(value) }}>{value}</div>
+      <div className="text-xs text-stone-400 uppercase tracking-wide">Life</div>
     </div>
   );
 }
@@ -113,6 +141,12 @@ const SINGLE_CELL_CHOICE_KINDS = {
   'trigger-depart-target': { actionType: 'RESOLVE_TRIGGER_DEPART_TARGET', cellField: 'cellId' },
   'minus-counter-target': { actionType: 'RESOLVE_MINUS_COUNTER_TARGET', cellField: 'cellId' },
   'invoke-destination': { actionType: 'RESOLVE_INVOKE_DESTINATION', cellField: 'cellId' },
+  // Crathea's own token-choice ("create a face up Blooming Life token... or
+  // a Withering Life token...") only opens this SECOND pendingChoice once
+  // the Ethereal Realm has more than one empty cell for the chosen token to
+  // land on (RESOLVE_CREATE_TOKEN_CHOICE, actions.js) — the same board-
+  // native highlighted-tile click every other single-cell choice above uses.
+  'ethereal-token-location': { actionType: 'RESOLVE_ETHEREAL_TOKEN_LOCATION', cellField: 'cellId' },
   'add-counter-typed-pointed-target': { actionType: 'RESOLVE_ADD_COUNTER_TYPED_POINTED_TARGET', cellField: 'cellId' },
   'move-armament-destination': { actionType: 'RESOLVE_MOVE_ARMAMENT_DESTINATION', cellField: 'cellId' },
   'restore-lifespan-target': { actionType: 'RESOLVE_RESTORE_LIFESPAN_TARGET', cellField: 'cellId' },
@@ -292,8 +326,54 @@ function formatDuration(ms) {
   return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
-export default function Match({ initialState, onExit, onRematch, deckEntries }) {
-  const [state, dispatch] = useGameEngine(initialState, AI);
+// "Reveal the top of your deck..." popups (Farm Hand — bug report: "Reveal
+// the card large scale (size of a card when hovered) on the center of the
+// board in a pop up window... allow the player to view the card for 30
+// seconds before force closing that window") — `revealPopup` (actions.js)
+// is a purely transient, informational field: the real outcome (drawn vs.
+// left on top) already happened by the time this shows, so the one button
+// here is just an acknowledgment that matches whichever outcome actually
+// occurred, not a live choice. Auto-dismisses after 30s either way.
+const REVEAL_POPUP_WIDTH = 260;
+const REVEAL_POPUP_HEIGHT = Math.round(REVEAL_POPUP_WIDTH * 7 / 5);
+function RevealPopup({ revealPopup, dispatch, cardArtProps }) {
+  useEffect(() => {
+    const id = setTimeout(() => dispatch({ type: 'DISMISS_REVEAL_POPUP' }), 30000);
+    return () => clearTimeout(id);
+  }, [revealPopup, dispatch]);
+  const drawn = revealPopup.outcome === 'drawn';
+  return (
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+      <div className="bg-white rounded-lg shadow-2xl p-4 flex flex-col items-center gap-3">
+        <div className="font-semibold text-stone-800 text-center">
+          {revealPopup.cardName}'s {revealPopup.label} reveals {revealPopup.playerId === HUMAN ? 'your' : "the opponent's"} top card
+        </div>
+        <div style={{ width: REVEAL_POPUP_WIDTH, height: REVEAL_POPUP_HEIGHT }}>
+          <CardThumbnail card={revealPopup.card} width={REVEAL_POPUP_WIDTH} height={REVEAL_POPUP_HEIGHT} {...cardArtProps} />
+        </div>
+        <p className="text-xs text-stone-500 text-center">
+          {drawn ? `${revealPopup.card.name} is added to hand.` : `${revealPopup.card.name} doesn't qualify — it stays on top of the deck.`}
+        </p>
+        <button
+          onClick={() => dispatch({ type: 'DISMISS_REVEAL_POPUP' })}
+          className={`px-4 py-2 rounded-lg text-white font-semibold ${drawn ? 'bg-amber-600 hover:bg-amber-500' : 'bg-stone-600 hover:bg-stone-500'}`}
+        >
+          {drawn ? 'Draw' : 'Put Back on Top'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export default function Match({ initialState, onExit, onRematch, deckEntries, competitiveMode }) {
+  const [state, dispatch, lastAttack] = useGameEngine(initialState, AI);
+  // Purely a rendering concern — game logic/AI/legality below all keep
+  // reading the real state.board; only what gets painted onto <Board> is
+  // staged (see useStagedBoard.js).
+  const { displayBoard, flashes } = useStagedBoard(state.board);
+  const { displayLifespans, lifeFlashes } = useStagedLife(state.players);
+  const turnBanner = useTurnBanner(state);
+  const justDrawnIds = useJustDrawn(state.players[HUMAN].hand);
   const [selectedHand, setSelectedHand] = useState(null);
   const [selectedCell, setSelectedCell] = useState(null);
   // Set when the human clicks a highlighted Modulate target that offers
@@ -488,12 +568,110 @@ export default function Match({ initialState, onExit, onRematch, deckEntries }) 
   const isHumanTurn = state.phase === 'playing' && state.turnPlayer === HUMAN;
   // A pending search effect can belong to the human even outside their own
   // turn (e.g. their Being Departs during the AI's attack) — getLegalActions
-  // still needs to run so the choice modal has candidates to show.
-  const humanCanAct = state.pendingChoice ? state.pendingChoice.playerId === HUMAN : isHumanTurn;
+  // still needs to run so the choice modal has candidates to show. An open
+  // Ethereal Conjuring reactive window (actions.js > manageReactiveWindow)
+  // is the same shape, just for a real optional action instead of a forced
+  // choice — the human may hold priority during the AI's own turn.
+  const humanCanAct = state.pendingChoice
+    ? state.pendingChoice.playerId === HUMAN
+    : state.reactiveWindow
+      ? state.reactiveWindow.openFor === HUMAN
+      : isHumanTurn;
   const legalActions = useMemo(
     () => (humanCanAct ? getLegalActions(state, HUMAN) : []),
     [state, humanCanAct]
   );
+
+  // "Any target" effects that can hit a player's Lifespan directly
+  // (Sharpshoot-style damage, restore-lifespan-target) resolve onto
+  // whichever player's own LifeBadge the human clicks, rather than a
+  // separate "A's Lifespan" / "B's Lifespan" button pair — see the
+  // LifeBadge highlight/onClick wiring below and singleCellChoiceLabel's
+  // own banner (still shown as a text reminder, minus the old buttons).
+  const playerTargetActionType = state.pendingChoice?.kind === 'restore-lifespan-target'
+    ? 'RESOLVE_RESTORE_LIFESPAN_TARGET_PLAYER'
+    : state.pendingChoice?.kind === 'damage-target' && state.pendingChoice.includesPlayers
+      ? 'RESOLVE_DAMAGE_TARGET_PLAYER'
+      : null;
+  const playerTargetActions = useMemo(
+    () => (playerTargetActionType ? legalActions.filter(a => a.type === playerTargetActionType) : []),
+    [legalActions, playerTargetActionType]
+  );
+  const playerTargetActionFor = (id) => playerTargetActions.find(a => a.targetPlayerId === id);
+
+  // Competitive Mode's reactive-window clock: the human's own turn is never
+  // timed (only PASS_TURN ends it, at their own pace) — this only times an
+  // open Ethereal Conjuring reactive window (state.reactiveWindow), since
+  // that's the one place the human can otherwise sit indefinitely on the
+  // AI's turn. Ref-tracked (not state) since it must survive across many
+  // windows without itself triggering re-renders: 3 consecutive timeouts
+  // (no response before the clock hits 0) speeds every window after that
+  // down to 10s, until the human actually responds — casts, or hits Pass —
+  // before time runs out, which resets it back to a fresh 20s baseline.
+  const reactiveWindowOpenForHuman = state.reactiveWindow?.openFor === HUMAN;
+  const reactiveTimeoutStreakRef = useRef(0);
+  const reactiveAutoPassRef = useRef(false);
+  const [reactiveSecondsLeft, setReactiveSecondsLeft] = useState(null);
+  useEffect(() => {
+    if (!competitiveMode || !reactiveWindowOpenForHuman) return undefined;
+    const duration = reactiveTimeoutStreakRef.current >= 3 ? 10 : 20;
+    setReactiveSecondsLeft(duration);
+    const tickInterval = setInterval(() => {
+      setReactiveSecondsLeft(s => (s === null ? null : Math.max(0, s - 1)));
+    }, 1000);
+    const autoPassTimeout = setTimeout(() => {
+      reactiveAutoPassRef.current = true;
+      dispatch({ type: 'PASS_PRIORITY' });
+    }, duration * 1000);
+    return () => {
+      clearInterval(tickInterval);
+      clearTimeout(autoPassTimeout);
+      setReactiveSecondsLeft(null);
+      if (reactiveAutoPassRef.current) {
+        reactiveAutoPassRef.current = false;
+        reactiveTimeoutStreakRef.current += 1;
+      } else {
+        // The window closed for some other reason — the human cast an
+        // Ethereal Conjuring or hit Pass themselves before time ran out.
+        reactiveTimeoutStreakRef.current = 0;
+      }
+    };
+  }, [reactiveWindowOpenForHuman, competitiveMode, dispatch]);
+
+  // Opening-hand clock: 60 seconds to Keep or Mulligan the very first hand,
+  // then 40 seconds for every hand redrawn by a Mulligan after that — auto-
+  // Keeps whichever hand is showing once time runs out, same "don't let the
+  // game stall waiting on a human who's stepped away" reasoning the
+  // Competitive Mode reactive-window clock above already follows (always
+  // on here, though, not gated to Competitive Mode — this is about opening
+  // pace, not in-match priority). `mulliganCount` is bumped locally by the
+  // Mulligan button's own onClick (below) — the single place a new hand can
+  // ever be requested — rather than derived from engine state, since
+  // nothing else needs to track it. The effect re-arms whenever the human's
+  // own hand reference actually changes (a fresh deal or a Mulligan
+  // redraw — KEEP_HAND never reassigns `hand`, so clicking Keep doesn't
+  // spuriously restart it).
+  const humanMulliganHand = state.players[HUMAN]?.hand;
+  const [mulliganCount, setMulliganCount] = useState(0);
+  const [mulliganSecondsLeft, setMulliganSecondsLeft] = useState(null);
+  const [mulliganPreviewCard, setMulliganPreviewCard] = useState(null);
+  useEffect(() => {
+    if (state.phase !== 'mulligan' || state.players[HUMAN].keptHand) return undefined;
+    const duration = mulliganCount === 0 ? 60 : 40;
+    setMulliganSecondsLeft(duration);
+    const tickInterval = setInterval(() => {
+      setMulliganSecondsLeft(s => (s === null ? null : Math.max(0, s - 1)));
+    }, 1000);
+    const autoKeepTimeout = setTimeout(() => {
+      dispatch({ type: 'KEEP_HAND', player: HUMAN });
+    }, duration * 1000);
+    return () => {
+      clearInterval(tickInterval);
+      clearTimeout(autoKeepTimeout);
+      setMulliganSecondsLeft(null);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.phase, humanMulliganHand, mulliganCount, dispatch]);
 
   const playableIds = useMemo(() => new Set(
     legalActions.filter(a => CELL_TARGET_TYPES.includes(a.type) || a.type === 'CAST_CONJURING' || a.type === 'PLACE_ALTAR').map(a => a.instanceId)
@@ -622,7 +800,13 @@ export default function Match({ initialState, onExit, onRematch, deckEntries }) 
   // so a misclick here (Desecration and friends) can still be backed out
   // of before anything is paid or a target picker opens.
   const onHandSelect = (instanceId) => {
-    if (!isHumanTurn) return;
+    // Scoped narrowly to this one gate (not the broader humanCanAct, which
+    // is also true during an unrelated pendingChoice and would leave a
+    // confusing dead-end hand selection there) — during a reactive window
+    // opened for the human, state.turnPlayer is still the OTHER player, so
+    // isHumanTurn alone would wrongly block selecting an Ethereal Conjuring
+    // to cast in response.
+    if (!isHumanTurn && state.reactiveWindow?.openFor !== HUMAN) return;
     setSelectedCell(null);
     setSelectedHand(prev => (prev === instanceId ? null : instanceId));
   };
@@ -720,7 +904,16 @@ export default function Match({ initialState, onExit, onRematch, deckEntries }) 
       return;
     }
 
-    if (!isHumanTurn) return;
+    // Same reactive-window exception onHandSelect's own gate already uses —
+    // Engage abilities are "ethereal speed" too (actions.js >
+    // offerReactiveEngageActions), so selecting a cell to bring up its
+    // Engage banner below needs to work during an open window, not just on
+    // the human's own turn. Everything past this point that isn't actually
+    // legal right now (moving, summoning from hand, ...) simply won't find
+    // a matching action in `legalActions` and no-ops, same safety net as
+    // always — getLegalActions itself is what actually restricts a
+    // reactive window down to PASS_PRIORITY/CAST_CONJURING/Engage.
+    if (!isHumanTurn && state.reactiveWindow?.openFor !== HUMAN) return;
 
     if (selectedHand) {
       const action = legalActions.find(a =>
@@ -790,6 +983,18 @@ export default function Match({ initialState, onExit, onRematch, deckEntries }) 
   // confirm rather than piggybacking on the move/attack cell-click flow.
   const martyrAction = useMemo(
     () => (selectedCell ? legalActions.find(a => a.type === 'ACTIVATE_MARTYR' && a.cellId === selectedCell) : null),
+    [legalActions, selectedCell]
+  );
+
+  // Shown next to the board when the selected friendly Being has a legal
+  // Shift activation ("Shift (X)." — RULES.md > Keywords) — a single
+  // engage-and-move action, same explicit-confirm treatment as Martyr/Engage
+  // since it isn't part of the ordinary move/attack cell-click flow. The
+  // engine already offers ACTIVATE_SHIFT as one legal action (actions.js);
+  // this button was simply never wired up, so a bare "Shift (X)." card
+  // (Ounati Hunger, Shifting Shade, ...) had no way to ever be Shifted.
+  const shiftAction = useMemo(
+    () => (selectedCell ? legalActions.find(a => a.type === 'ACTIVATE_SHIFT' && a.cellId === selectedCell) : null),
     [legalActions, selectedCell]
   );
 
@@ -938,6 +1143,17 @@ export default function Match({ initialState, onExit, onRematch, deckEntries }) 
       .filter(Boolean);
   }, [legalActions, state.pendingChoice, state.players]);
 
+  // Candidate named tokens for a pending "create a token, choose one of two"
+  // choice (Crathea's own "create a face up Blooming Life token... or a
+  // Withering Life token..." — see CREATE_TOKEN_CHOICE_RE, actions.js).
+  // Unlike pendingInvokeCardCandidates above, each option is a plain token
+  // key string (Crathea's own printed effect names both outcomes directly —
+  // there's no deck search here), not a real card to look up.
+  const pendingCreateTokenChoiceCandidates = useMemo(() => {
+    if (!state.pendingChoice || state.pendingChoice.kind !== 'create-token-choice' || state.pendingChoice.playerId !== HUMAN) return [];
+    return legalActions.filter(a => a.type === 'RESOLVE_CREATE_TOKEN_CHOICE').map(a => a.tokenKey);
+  }, [legalActions, state.pendingChoice]);
+
   // Candidate hand cards for a pending "put a card from hand on the bottom
   // of deck" choice (Weaver).
   const pendingBottomOfDeckCandidates = useMemo(() => {
@@ -954,6 +1170,22 @@ export default function Match({ initialState, onExit, onRematch, deckEntries }) 
     if (!state.pendingChoice || state.pendingChoice.kind !== 'discard-kind-draw' || state.pendingChoice.playerId !== HUMAN) return [];
     return legalActions
       .filter(a => a.type === 'RESOLVE_DISCARD_KIND_DRAW')
+      .map(a => state.players[HUMAN].hand.find(c => c.instanceId === a.instanceId))
+      .filter(Boolean);
+  }, [legalActions, state.pendingChoice, state.players]);
+
+  // Candidate hand cards for a pending "Discard a <Typing>" cost (Onagīous
+  // Hunger's own "Engage: Discard a Hunger, then draw (1) card.") — same
+  // shape as pendingDiscardKindDrawCandidates above. This pendingChoice kind
+  // (RESOLVE_DISCARD_TYPED, actions.js) previously had no UI at all, so it
+  // silently froze the game: the "then draw" half of the effect already ran
+  // (the engine-wide "then"-split has no pendingChoice bail-out — documented,
+  // shared behavior, not unique to this card), but the player had no way to
+  // ever resolve the still-open discard choice blocking every other action.
+  const pendingDiscardTypedCandidates = useMemo(() => {
+    if (!state.pendingChoice || state.pendingChoice.kind !== 'discard-typed' || state.pendingChoice.playerId !== HUMAN) return [];
+    return legalActions
+      .filter(a => a.type === 'RESOLVE_DISCARD_TYPED')
       .map(a => state.players[HUMAN].hand.find(c => c.instanceId === a.instanceId))
       .filter(Boolean);
   }, [legalActions, state.pendingChoice, state.players]);
@@ -1120,13 +1352,21 @@ export default function Match({ initialState, onExit, onRematch, deckEntries }) 
 
   // Candidate Purgatory cards for a pending "Shuffle a <query> into deck
   // from your Purgatory" choice (Melting Clock / Temple of Dubiety) — same
-  // shape as pendingSummonFromPurgatoryCandidates above.
+  // shape as pendingSummonFromPurgatoryCandidates above. Canopic Jar's own
+  // anyOwner case (its printed text has no "your Purgatory" restriction)
+  // can offer a candidate from EITHER player's Purgatory, each action
+  // carrying its own explicit `ownerId` (actions.js — instanceId alone
+  // can't safely disambiguate which pile it came from), so each candidate
+  // here looks itself up in its own owner's Purgatory, not always HUMAN's.
   const pendingShufflePurgatoryCandidates = useMemo(() => {
     if (!state.pendingChoice || state.pendingChoice.kind !== 'shuffle-purgatory-into-deck' || state.pendingChoice.playerId !== HUMAN) return [];
-    const purgatory = state.players[HUMAN].purgatory;
     return legalActions
       .filter(a => a.type === 'RESOLVE_SHUFFLE_PURGATORY_INTO_DECK')
-      .map(a => purgatory.find(c => c.instanceId === a.instanceId))
+      .map(a => {
+        const owner = a.ownerId || HUMAN;
+        const card = state.players[owner]?.purgatory.find(c => c.instanceId === a.instanceId);
+        return card ? { card, ownerId: a.ownerId } : null;
+      })
       .filter(Boolean);
   }, [legalActions, state.pendingChoice, state.players]);
 
@@ -1197,43 +1437,111 @@ export default function Match({ initialState, onExit, onRematch, deckEntries }) 
 
   if (state.phase === 'mulligan') {
     const human = state.players[HUMAN];
+    // Five-point star layout (percent-of-container positions, each card
+    // centered on its own point via translate(-50%,-50%)) instead of a
+    // plain row — Keep sits in the open center the five points form;
+    // Mulligan sits below the whole shape, sharing Keep's own horizontal
+    // center (both are centered within the same container) rather than
+    // being explicitly coordinated. A true regular pentagon (72° apart,
+    // R=260px against a 700×760 container — see the geometry worked out
+    // for this) so a card's own footprint (CardTile 'xl' — 192×269px)
+    // never overlaps its neighbors.
+    const STAR_POSITIONS = [
+      { left: '50%', top: '18%' },  // top point
+      { left: '85%', top: '41%' },  // upper right
+      { left: '72%', top: '80%' },  // lower right
+      { left: '28%', top: '80%' },  // lower left
+      { left: '15%', top: '41%' },  // upper left
+    ];
+    // Hovering a point card expands it — full portrait frame, text box
+    // included — right in the star's own open center (same spot Keep sits),
+    // instead of CardTile's usual near-tile popup, which for a card this
+    // small (compact On Board frame, no text box) wouldn't actually show
+    // the text at all. Sized to stay clear of the neighboring points.
+    const MULLIGAN_PREVIEW_WIDTH = 210;
+    const MULLIGAN_PREVIEW_HEIGHT = Math.round(MULLIGAN_PREVIEW_WIDTH * 7 / 5);
     return (
       <div className="min-h-screen flex items-center justify-center bg-black p-8">
-        <div className="max-w-4xl w-full text-center bg-white rounded-lg shadow p-6">
-          <h2 className="text-lg font-bold text-stone-800 mb-4">Your opening hand</h2>
-          <Hand
-            cards={human.hand}
-            // Nothing is "unplayable" on this screen — it's just a preview
-            // of the dealt hand, not the real game board — so every card
-            // shown here counts as playable (Hand.jsx dims anything that
-            // isn't), instead of every card being pointlessly dimmed.
-            playableIds={new Set(human.hand.map(c => c.instanceId))}
-            selectedInstanceId={null}
-            onSelect={() => {}}
-            borderImages={borderImages}
-            borderImagesLoaded={borderImagesLoaded}
-            artImages={artImages}
-            artBorderImages={artBorderImages}
-            artImagesLoaded={artImagesLoaded}
-            fontLoaded={fontLoaded}
-            cardSize="xl"
-            stack={false}
-          />
-          {human.keptHand ? (
-            <p className="text-sm text-stone-500 mt-4">Waiting on the opponent…</p>
-          ) : (
-            <div className="flex gap-3 justify-center mt-4">
-              <button onClick={() => dispatch({ type: 'KEEP_HAND', player: HUMAN })} className="px-4 py-2 bg-stone-800 text-white rounded-lg">
-                Keep hand
-              </button>
-              <button
-                onClick={() => dispatch({ type: 'MULLIGAN', player: HUMAN })}
-                disabled={human.lifespan - 5 <= 0}
-                className="px-4 py-2 border border-stone-300 rounded-lg disabled:opacity-30"
-              >
-                Mulligan (−5 Lifespan)
-              </button>
+        <div className="relative max-w-3xl w-full text-center bg-white rounded-lg shadow p-6">
+          {mulliganSecondsLeft !== null && (
+            <div className="absolute top-3 right-4 text-sm font-mono tabular-nums text-stone-400">
+              {mulliganSecondsLeft}s
             </div>
+          )}
+          <h2 className="text-lg font-bold text-stone-800 mb-2">Your opening hand</h2>
+          <div className="relative mx-auto" style={{ width: 'min(100%, 540px)', aspectRatio: '700 / 760' }}>
+            {human.hand.map((card, i) => {
+              const pos = STAR_POSITIONS[i] || STAR_POSITIONS[STAR_POSITIONS.length - 1];
+              return (
+                <div
+                  key={card.instanceId}
+                  className="absolute"
+                  style={{ left: pos.left, top: pos.top, transform: 'translate(-50%, -50%)' }}
+                  onMouseEnter={() => setMulliganPreviewCard(card)}
+                  onMouseLeave={() => setMulliganPreviewCard(null)}
+                >
+                  <CardTile
+                    card={card}
+                    // Nothing is "unplayable" on this screen — it's just a
+                    // preview of the dealt hand, not the real game board —
+                    // so it's shown fully undimmed (no `dimmed` prop),
+                    // same intent the old row layout's playableIds-for-
+                    // everything achieved.
+                    size="lg"
+                    onboard
+                    hoverDelayMs={0}
+                    disableHoverPreview
+                    borderImages={borderImages}
+                    borderImagesLoaded={borderImagesLoaded}
+                    artImages={artImages}
+                    artBorderImages={artBorderImages}
+                    artImagesLoaded={artImagesLoaded}
+                    fontLoaded={fontLoaded}
+                  />
+                </div>
+              );
+            })}
+            {!human.keptHand && (
+              <button
+                onClick={() => dispatch({ type: 'KEEP_HAND', player: HUMAN })}
+                className="absolute px-5 py-2.5 bg-stone-800 text-white rounded-full shadow-lg font-semibold text-sm hover:bg-stone-700 transition"
+                style={{ left: '50%', top: '52%', transform: 'translate(-50%, -50%)' }}
+              >
+                Keep
+              </button>
+            )}
+            {mulliganPreviewCard && (
+              <div
+                className="absolute z-20 pointer-events-none drop-shadow-2xl"
+                style={{
+                  left: '50%', top: '52%', transform: 'translate(-50%, -50%)',
+                  width: MULLIGAN_PREVIEW_WIDTH,
+                }}
+              >
+                <CardThumbnail
+                  card={mulliganPreviewCard}
+                  borderImages={borderImages}
+                  borderImagesLoaded={borderImagesLoaded}
+                  artImages={artImages}
+                  artBorderImages={artBorderImages}
+                  artImagesLoaded={artImagesLoaded}
+                  fontLoaded={fontLoaded}
+                  width={MULLIGAN_PREVIEW_WIDTH}
+                  height={MULLIGAN_PREVIEW_HEIGHT}
+                />
+              </div>
+            )}
+          </div>
+          {human.keptHand ? (
+            <p className="text-sm text-stone-500 mt-2">Waiting on the opponent…</p>
+          ) : (
+            <button
+              onClick={() => { dispatch({ type: 'MULLIGAN', player: HUMAN }); setMulliganCount(c => c + 1); }}
+              disabled={human.lifespan - 5 <= 0}
+              className="mt-2 px-4 py-2 border border-stone-300 rounded-lg disabled:opacity-30"
+            >
+              Mulligan (−5 Lifespan)
+            </button>
           )}
         </div>
       </div>
@@ -1242,12 +1550,39 @@ export default function Match({ initialState, onExit, onRematch, deckEntries }) 
 
   if (state.phase === 'gameover') {
     const elapsed = elapsedMs != null ? formatDuration(elapsedMs) : '—';
+    // Boundless Hunger loop declaration (Mouth of Madness + Terranean
+    // Gates + Immen Gorta — see placeReturnedFromShift, actions.js): a
+    // distinct game-over presentation from a normal Lifespan-exhaustion
+    // win, naming the 3 combo pieces and framed from whichever side
+    // actually lost it, per the user's own phrasing for the losing side
+    // ("Your opponent has presented a loop! You Lose!").
+    const humanWonLoop = state.loopWin && state.loopWin.winnerId === HUMAN;
     return (
       <div className="min-h-screen flex items-center justify-center bg-black p-8">
-        <div className="text-center bg-white rounded-lg shadow p-8">
+        <div className="text-center bg-white rounded-lg shadow p-8 max-w-lg">
           <h2 className="text-2xl font-bold text-stone-800 mb-2">
-            {state.winner ? `${state.winner === HUMAN ? 'You win!' : 'The AI wins.'}` : 'Draw.'}
+            {state.loopWin
+              ? (humanWonLoop ? 'You have presented a loop! Opponent loses!' : 'Your opponent has presented a loop! You Lose!')
+              : (state.winner ? `${state.winner === HUMAN ? 'You win!' : 'The AI wins.'}` : 'Draw.')}
           </h2>
+          {state.loopWin && (
+            <div className="flex gap-3 justify-center flex-wrap my-4">
+              {state.loopWin.cards.map((card) => (
+                <CardTile
+                  key={card.instanceId || card.name}
+                  card={card}
+                  size="sm"
+                  disableHoverPreview
+                  borderImages={borderImages}
+                  borderImagesLoaded={borderImagesLoaded}
+                  artImages={artImages}
+                  artBorderImages={artBorderImages}
+                  artImagesLoaded={artImagesLoaded}
+                  fontLoaded={fontLoaded}
+                />
+              ))}
+            </div>
+          )}
           <p className="text-sm text-stone-500 mb-4">
             {state.turnNumber} turns — {elapsed} played
           </p>
@@ -1267,6 +1602,19 @@ export default function Match({ initialState, onExit, onRematch, deckEntries }) 
 
   return (
     <div className="h-screen bg-black p-4 flex flex-col gap-3 relative overflow-hidden">
+      {turnBanner && (
+        <div
+          key={`turn-${turnBanner.seq}`}
+          className="absolute inset-0 z-40 flex items-center justify-center pointer-events-none"
+        >
+          <div className="absolute w-[420px] h-[420px] rounded-full turn-banner-glow" />
+          <div className="relative turn-banner-text px-8 py-3 bg-stone-900/85 border-2 border-amber-400 rounded-full shadow-2xl">
+            <span className="text-2xl font-extrabold tracking-wide text-amber-300 uppercase">
+              {turnBanner.player === HUMAN ? 'Your Turn' : "Opponent's Turn"}
+            </span>
+          </div>
+        </div>
+      )}
       <div className="flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
           <button onClick={onExit} className="text-sm text-stone-400 hover:text-stone-200">← Menu</button>
@@ -1302,33 +1650,64 @@ export default function Match({ initialState, onExit, onRematch, deckEntries }) 
         const pool = state.players[HUMAN].effigyPool;
         const candidates = faithlessPaymentCandidates(pool, pendingPaymentAction.cost);
         const needed = pendingPaymentAction.cost.faithless;
+        // Grouped by color ("Timeless(3)") instead of one button per
+        // fungible unit — which specific instanceId within a color gets
+        // spent never matters, so +/- just grabs/releases any untouched
+        // candidate of that color.
+        const byColor = new Map();
+        candidates.forEach(e => {
+          if (!byColor.has(e.effigyType)) byColor.set(e.effigyType, []);
+          byColor.get(e.effigyType).push(e);
+        });
+        const totalSelected = selectedPaymentIds.length;
+        const selectedCountFor = (units) => selectedPaymentIds.filter(id => units.some(e => e.instanceId === id)).length;
+        const adjust = (units, delta) => {
+          setSelectedPaymentIds(prev => {
+            if (delta > 0) {
+              if (prev.length >= needed) return prev;
+              const free = units.find(e => !prev.includes(e.instanceId));
+              return free ? [...prev, free.instanceId] : prev;
+            }
+            const lastIndex = [...prev].reverse().findIndex(id => units.some(e => e.instanceId === id));
+            if (lastIndex === -1) return prev;
+            const removeAt = prev.length - 1 - lastIndex;
+            return [...prev.slice(0, removeAt), ...prev.slice(removeAt + 1)];
+          });
+        };
         return (
           <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={() => setPendingPaymentAction(null)}>
             <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
               <div className="font-semibold text-stone-800 mb-1">
                 {pendingPaymentAction.cardName}: choose {needed} Effigy{needed === 1 ? '' : 's'} to spend
               </div>
-              <p className="text-xs text-stone-500 mb-3">More than one Effigy color is available for its Faithless cost — pick which to spend.</p>
+              <p className="text-xs text-stone-500 mb-3">More than one Effigy color is available for its Faithless cost — use +/- to pick how many of each to spend.</p>
               <div className="overflow-y-auto space-y-1">
-                {candidates.map(e => {
-                  const selected = selectedPaymentIds.includes(e.instanceId);
-                  const disabled = !selected && selectedPaymentIds.length >= needed;
+                {[...byColor.entries()].map(([color, units]) => {
+                  const selectedCount = selectedCountFor(units);
+                  const canIncrement = selectedCount < units.length && totalSelected < needed;
+                  const canDecrement = selectedCount > 0;
                   return (
-                    <button
-                      key={e.instanceId}
-                      disabled={disabled}
-                      onClick={() => setSelectedPaymentIds(prev => (selected ? prev.filter(id => id !== e.instanceId) : [...prev, e.instanceId]))}
-                      className={`w-full text-left text-sm px-2 py-1.5 rounded border flex items-center justify-between transition-colors ${
-                        selected
-                          ? 'border-amber-600 bg-amber-50 text-stone-800'
-                          : disabled
-                          ? 'border-stone-100 text-stone-300 cursor-not-allowed'
-                          : 'border-stone-200 text-stone-700 hover:bg-stone-100'
-                      }`}
-                    >
-                      <span className="capitalize">{e.effigyType}</span>
-                      {selected && <span className="text-amber-700 text-xs font-semibold">✓</span>}
-                    </button>
+                    <div key={color} className="w-full flex items-center gap-2 px-2 py-1.5 rounded border border-stone-200">
+                      <button
+                        onClick={() => adjust(units, 1)}
+                        disabled={!canIncrement}
+                        aria-label={`Spend one more ${color} Essence`}
+                        className="w-6 h-6 shrink-0 flex items-center justify-center rounded border border-stone-300 text-stone-600 hover:bg-stone-100 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                      >
+                        +
+                      </button>
+                      <button
+                        onClick={() => adjust(units, -1)}
+                        disabled={!canDecrement}
+                        aria-label={`Spend one less ${color} Essence`}
+                        className="w-6 h-6 shrink-0 flex items-center justify-center rounded border border-stone-300 text-stone-600 hover:bg-stone-100 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                      >
+                        −
+                      </button>
+                      <span className={`text-sm font-medium capitalize ${selectedCount > 0 ? 'text-stone-800' : 'text-stone-500'}`}>
+                        {color}({units.length}){selectedCount > 0 ? `x${selectedCount}` : ''}
+                      </span>
+                    </div>
                   );
                 })}
               </div>
@@ -1341,10 +1720,10 @@ export default function Match({ initialState, onExit, onRematch, deckEntries }) 
                     dispatch({ ...pendingPaymentAction.action, faithlessInstanceIds: selectedPaymentIds });
                     setPendingPaymentAction(null);
                   }}
-                  disabled={selectedPaymentIds.length !== needed}
+                  disabled={totalSelected !== needed}
                   className="px-3 py-1.5 bg-amber-700 text-white rounded text-xs font-semibold hover:bg-amber-600 transition disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  Confirm ({selectedPaymentIds.length}/{needed})
+                  Confirm ({totalSelected}/{needed})
                 </button>
               </div>
             </div>
@@ -1420,6 +1799,35 @@ export default function Match({ initialState, onExit, onRematch, deckEntries }) 
         </div>
       )}
 
+      {pendingCreateTokenChoiceCandidates.length > 0 && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
+            <div className="font-semibold text-stone-800 mb-1">
+              {state.pendingChoice.cardName}: choose a token to create
+            </div>
+            <div className="overflow-y-auto space-y-1">
+              {pendingCreateTokenChoiceCandidates.map((tokenKey) => (
+                <button
+                  key={tokenKey}
+                  onClick={() => dispatch({ type: 'RESOLVE_CREATE_TOKEN_CHOICE', tokenKey })}
+                  className="w-full text-left text-sm px-2 py-1.5 rounded hover:bg-stone-100 text-stone-700 border border-stone-200"
+                >
+                  {tokenKey.replace(/\b\w/g, (c) => c.toUpperCase())}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {state.revealPopup && (
+        <RevealPopup
+          revealPopup={state.revealPopup}
+          dispatch={dispatch}
+          cardArtProps={{ borderImages, borderImagesLoaded, artImages, artBorderImages, artImagesLoaded, fontLoaded }}
+        />
+      )}
+
       {pendingBottomOfDeckCandidates.length > 0 && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
           <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
@@ -1454,6 +1862,27 @@ export default function Match({ initialState, onExit, onRematch, deckEntries }) 
                 <button
                   key={card.instanceId}
                   onClick={() => dispatch({ type: 'RESOLVE_DISCARD_KIND_DRAW', instanceId: card.instanceId })}
+                  className="w-full text-left text-sm px-2 py-1.5 rounded hover:bg-stone-100 text-stone-700 border border-stone-200"
+                >
+                  {card.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingDiscardTypedCandidates.length > 0 && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
+            <div className="font-semibold text-stone-800 mb-1">
+              {state.pendingChoice.cardName}: choose a {state.pendingChoice.typing} to discard
+            </div>
+            <div className="overflow-y-auto space-y-1">
+              {pendingDiscardTypedCandidates.map((card) => (
+                <button
+                  key={card.instanceId}
+                  onClick={() => dispatch({ type: 'RESOLVE_DISCARD_TYPED', instanceId: card.instanceId })}
                   className="w-full text-left text-sm px-2 py-1.5 rounded hover:bg-stone-100 text-stone-700 border border-stone-200"
                 >
                   {card.name}
@@ -1875,30 +2304,16 @@ export default function Match({ initialState, onExit, onRematch, deckEntries }) 
         // being chosen, shared by every SINGLE_CELL_CHOICE_KINDS kind.
         if (!state.pendingChoice || state.pendingChoice.playerId !== HUMAN) return null;
         if (!SINGLE_CELL_CHOICE_KINDS[state.pendingChoice.kind]) return null;
-        // "any target" (unlike a typed/Being-only "target Being") also
-        // includes either player's own Lifespan directly — not a board
-        // cell, so it can't be a highlighted tile like the rest of this
-        // choice; offered here as its own pair of buttons instead.
-        // restore-lifespan-target (Elderflower Ancient) always includes
-        // players too, unconditionally (confirmed with the user).
-        const playerTargetActionType = state.pendingChoice.kind === 'restore-lifespan-target'
-          ? 'RESOLVE_RESTORE_LIFESPAN_TARGET_PLAYER'
-          : state.pendingChoice.includesPlayers ? 'RESOLVE_DAMAGE_TARGET_PLAYER' : null;
-        const playerTargets = playerTargetActionType
-          ? legalActions.filter(a => a.type === playerTargetActionType)
-          : [];
         return (
           <div className="shrink-0 flex items-center gap-2 bg-stone-900 border border-amber-700 rounded-lg px-3 py-2">
-            <span className="text-xs text-stone-300">{singleCellChoiceLabel(state.pendingChoice)}</span>
-            {playerTargets.map(a => (
-              <button
-                key={a.targetPlayerId}
-                onClick={() => dispatch(a)}
-                className="shrink-0 px-2 py-1 bg-red-800 text-white rounded text-xs font-semibold hover:bg-red-700 transition"
-              >
-                {a.targetPlayerId}'s Lifespan
-              </button>
-            ))}
+            <span className="text-xs text-stone-300">
+              {singleCellChoiceLabel(state.pendingChoice)}
+              {/* "any target" (unlike a typed/Being-only "target Being")
+                  also includes either player's own Lifespan directly — not
+                  a board cell, so it's chosen by clicking the highlighted
+                  LifeBadge itself (below) rather than a tile here. */}
+              {playerTargetActions.length > 0 ? ' — including either player\'s own Lifespan total.' : ''}
+            </span>
             {state.pendingChoice.kind === 'diablerie-select-mover' && (
               <button
                 onClick={() => dispatch({ type: 'RESOLVE_DIABLERIE_DONE' })}
@@ -2125,16 +2540,16 @@ export default function Match({ initialState, onExit, onRematch, deckEntries }) 
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
           <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
             <div className="font-semibold text-stone-800 mb-1">
-              {state.pendingChoice.cardName}: choose a card to shuffle into your deck
+              {state.pendingChoice.cardName}: choose a card to shuffle into {state.pendingChoice.anyOwner ? "its owner's" : 'your'} deck
             </div>
             <div className="overflow-y-auto space-y-1">
-              {pendingShufflePurgatoryCandidates.map((card) => (
+              {pendingShufflePurgatoryCandidates.map(({ card, ownerId }) => (
                 <button
-                  key={card.instanceId}
-                  onClick={() => dispatch({ type: 'RESOLVE_SHUFFLE_PURGATORY_INTO_DECK', instanceId: card.instanceId })}
+                  key={`${ownerId || HUMAN}-${card.instanceId}`}
+                  onClick={() => dispatch({ type: 'RESOLVE_SHUFFLE_PURGATORY_INTO_DECK', instanceId: card.instanceId, ...(ownerId ? { ownerId } : {}) })}
                   className="w-full text-left text-sm px-2 py-1.5 rounded hover:bg-stone-100 text-stone-700 border border-stone-200"
                 >
-                  {card.name}
+                  {card.name}{ownerId ? ` (${ownerId === HUMAN ? 'yours' : "opponent's"})` : ''}
                 </button>
               ))}
             </div>
@@ -2346,12 +2761,15 @@ export default function Match({ initialState, onExit, onRematch, deckEntries }) 
             </div>
             <div className={`${ETHEREAL_ROW_H} flex items-center justify-start gap-2`}>
               <div className="w-14 shrink-0" />
-              <LifeBadge value={state.players[AI].lifespan} />
+              <LifeBadge value={displayLifespans[AI]} flash={lifeFlashes[AI]} targetAction={playerTargetActionFor(AI)} onSelectTarget={dispatch} />
             </div>
           </div>
 
           <Board
             state={state}
+            displayBoard={displayBoard}
+            flashes={flashes}
+            lastAttack={lastAttack}
             viewerId={HUMAN}
             highlightCells={highlightCells}
             selectedCell={selectedCell}
@@ -2375,7 +2793,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries }) 
                 abilityActionBanners near selectedHandImmediateAction. */}
             <div className="flex-1" />
             <div className={`${ETHEREAL_ROW_H} flex items-center justify-start gap-2`}>
-              <LifeBadge value={state.players[HUMAN].lifespan} />
+              <LifeBadge value={displayLifespans[HUMAN]} flash={lifeFlashes[HUMAN]} targetAction={playerTargetActionFor(HUMAN)} onSelectTarget={dispatch} />
             </div>
             <div className={`${ROW_H} flex items-center justify-start gap-2`}>
               <CardPile
@@ -2412,12 +2830,58 @@ export default function Match({ initialState, onExit, onRematch, deckEntries }) 
                 </button>
               )}
             </div>
+            {/* Ethereal Conjuring reactive window (actions.js >
+                manageReactiveWindow) — a compact notification instead of a
+                full-width banner, sitting beside the human's own Deck/Hand
+                piles (right next to the board's own Effigy Zone corner,
+                r1c5 — board.js). The description line names exactly what
+                the opponent just did (reactiveWindow.triggerDescription —
+                the same log message that action's own reducer case
+                already wrote), so the player knows what they're being
+                asked to respond to instead of just seeing a bare "Respond"
+                pill. "Respond" itself is just a status pill, not a
+                dispatchable action — casting still happens by clicking a
+                highlighted card in Hand (onHandSelect's own gate already
+                covers this window), same as before. "Pass Priority" is the
+                one real button here, dispatching PASS_PRIORITY — a
+                genuinely different action from the "Pass turn" button
+                above (PASS_TURN, isHumanTurn-gated). */}
+            {state.reactiveWindow?.openFor === HUMAN && (
+              <div className={`${ROW_H} flex flex-col justify-center gap-1`}>
+                {state.reactiveWindow.triggerDescription && (
+                  <p className="text-[11px] leading-snug text-stone-300 line-clamp-3">
+                    {state.reactiveWindow.triggerDescription}
+                  </p>
+                )}
+                <div className="flex items-center justify-start gap-1.5">
+                  <span className="shrink-0 flex items-center gap-1 px-2 py-1 bg-amber-500 text-stone-900 rounded text-xs font-bold animate-pulse">
+                    Respond
+                    {competitiveMode && reactiveSecondsLeft !== null && (
+                      <span className="tabular-nums">{reactiveSecondsLeft}s</span>
+                    )}
+                  </span>
+                  <button
+                    onClick={() => dispatch({ type: 'PASS_PRIORITY' })}
+                    className="shrink-0 px-2 py-1 bg-stone-700 text-white rounded text-xs font-semibold hover:bg-stone-600 transition"
+                  >
+                    Pass Priority
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
           </div>
         </div>
       </div>
 
       <div className="shrink-0">
+        {/* Ethereal Conjuring reactive window (actions.js >
+            manageReactiveWindow) — the notification/Pass Priority pair for
+            it now lives beside the human's own Deck/Hand piles (see
+            reactiveWindowOpenForHuman below), not here. Casting itself
+            still reuses the existing hand-select -> "cast this?" confirm
+            flow (onHandSelect/selectedHandImmediateAction, above) once
+            playableIds picks up the now-legal CAST_CONJURING options. */}
         {/* Ability-activation banners (Martyr/Engage/a bare activated
             ability) for the selected Being/Relic — positioned here, under
             the human's own front row and above the Hand, the same
@@ -2434,6 +2898,19 @@ export default function Match({ initialState, onExit, onRematch, deckEntries }) 
               className="ml-auto shrink-0 px-3 py-1 bg-red-800 text-white rounded text-xs font-semibold hover:bg-red-700 transition"
             >
               Martyr
+            </button>
+          </div>
+        )}
+        {shiftAction && (
+          <div className="flex items-center gap-2 bg-stone-900 border border-stone-700 rounded-lg px-3 py-2 mb-1">
+            <span className="text-xs text-stone-300">
+              {state.board[selectedCell].card.name}: Shift — engage and move onto the Ethereal Realm as a Prophecy
+            </span>
+            <button
+              onClick={() => { dispatch(shiftAction); setSelectedCell(null); }}
+              className="ml-auto shrink-0 px-3 py-1 bg-indigo-800 text-white rounded text-xs font-semibold hover:bg-indigo-700 transition"
+            >
+              Shift
             </button>
           </div>
         )}
@@ -2641,6 +3118,8 @@ export default function Match({ initialState, onExit, onRematch, deckEntries }) 
             artBorderImages={artBorderImages}
             artImagesLoaded={artImagesLoaded}
             fontLoaded={fontLoaded}
+            cardSize="lg"
+            justDrawnIds={justDrawnIds}
           />
         )}
       </div>
@@ -2676,6 +3155,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries }) 
                 fontLoaded={fontLoaded}
                 cardSize="lg"
                 stack={false}
+                justDrawnIds={justDrawnIds}
               />
             </div>
           </div>

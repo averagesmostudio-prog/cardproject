@@ -152,5 +152,10 @@ export const resolvePreconEntries = (pool, precon) => {
     const clamped = Math.max(0, Math.min(limit, count));
     entries.push({ card: found, count: clamped });
   });
-  return { entries, effigyCounts: autoBuildEffigyCounts(precon.color), warnings };
+  // A precon can print its own explicit multi-color Effigy split (e.g. a
+  // deck mixing two colors' Main Deck cards, like "Call of the Void") via
+  // `precon.effigyCounts: { <color>: n, ... }` — falls back to the plain
+  // mono-color autoBuildEffigyCounts(precon.color) every existing precon
+  // already relies on when it's not set.
+  return { entries, effigyCounts: precon.effigyCounts || autoBuildEffigyCounts(precon.color), warnings };
 };

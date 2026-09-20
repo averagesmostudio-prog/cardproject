@@ -3,6 +3,7 @@ import { gameReducer, getLegalActions, createInitialState, canPayCost, resolveOr
 import { beginTurn, endTurn } from './turn.js';
 import { effectiveStrength, deathDamageFor } from './combat.js';
 import { computeMoveDestination } from './board.js';
+import { toGameCard } from '../../lib/cardData.js';
 
 const player = (overrides = {}) => ({
   id: 'A',
@@ -28,6 +29,7 @@ const baseState = (overrides = {}) => ({
   log: [],
   players: { A: player({ id: 'A' }), B: player({ id: 'B' }) },
   pendingChoice: null,
+  reactiveWindow: null,
   ...overrides,
 });
 
@@ -57,6 +59,19 @@ describe('canPayCost / SUMMON_BEING', () => {
     expect(next.board.r1c2.engaged).toBe(true);
     expect(next.players.A.hand).toHaveLength(0);
     expect(next.players.A.effigyPool).toHaveLength(0);
+  });
+
+  it('spends temporary (end-of-turn) Essence before a real Effigy of the same color, given a choice', () => {
+    const card = beingCard({ castingCost: { faithless: 0, colored: { bleeding: 1 } } });
+    const permanentEffigy = effigy('bleeding', 1);
+    const temporaryEssence = { instanceId: 'bleeding-temp#0', effigyType: 'bleeding', kind: 'effigy', temporary: true };
+    const state = baseState({
+      players: { A: player({ hand: [card], effigyPool: [permanentEffigy, temporaryEssence] }), B: player() },
+    });
+    const next = gameReducer(state, { type: 'SUMMON_BEING', instanceId: card.instanceId, cellId: 'r1c2' });
+    // The permanent Effigy survives — the temporary one (which expires at
+    // end of turn regardless) was spent instead.
+    expect(next.players.A.effigyPool).toEqual([permanentEffigy]);
   });
 
   it('a Deity enters the board disengaged', () => {
@@ -993,6 +1008,60 @@ describe('PLACE_RELIC', () => {
     const next = gameReducer(state, { type: 'PLACE_RELIC', instanceId: 'relic-1#0', cellId: 'r2c1' });
     expect(next).toBe(state);
   });
+
+  describe('"Beings may move across this" (Shifting Sands) — coexists with a Being or an Armament pile, blocked only by a different ground/plain Relic', () => {
+    const movesAcrossCard = (overrides = {}) => ({
+      id: 'ss', instanceId: 'ss#0', name: 'Shifting Sands', kind: 'relic',
+      castingCost: { faithless: 0, colored: {} }, keywords: { beingsMayMoveAcross: true }, ...overrides,
+    });
+
+    it('can be placed on a tile a Being already occupies — both coexist', () => {
+      const occupant = { type: 'being', ownerId: 'A', card: beingCard(), currentLifespan: 5, engaged: false };
+      const state = baseState({ board: { r2c1: occupant }, players: { A: player({ hand: [movesAcrossCard()] }), B: player() } });
+      expect(getLegalActions(state, 'A').some(a => a.type === 'PLACE_RELIC' && a.cellId === 'r2c1')).toBe(true);
+      const next = gameReducer(state, { type: 'PLACE_RELIC', instanceId: 'ss#0', cellId: 'r2c1' });
+      expect(next.board.r2c1).toEqual(occupant); // the Being is untouched
+      expect(next.groundRelics.r2c1.card.name).toBe('Shifting Sands');
+    });
+
+    it('can be placed on a tile with only an Armament pile (relic-armament) on it', () => {
+      const armamentPile = { type: 'armament-stack', ownerId: 'A', armaments: [{ card: { id: 'ds', instanceId: 'ds#0', name: 'Dancing Swords', kind: 'relic-armament', keywords: {} }, engaged: false }] };
+      const state = baseState({ board: { r2c1: armamentPile }, players: { A: player({ hand: [movesAcrossCard()] }), B: player() } });
+      expect(getLegalActions(state, 'A').some(a => a.type === 'PLACE_RELIC' && a.cellId === 'r2c1')).toBe(true);
+      const next = gameReducer(state, { type: 'PLACE_RELIC', instanceId: 'ss#0', cellId: 'r2c1' });
+      expect(next.board.r2c1).toEqual(armamentPile);
+      expect(next.groundRelics.r2c1.card.name).toBe('Shifting Sands');
+    });
+
+    it('is still blocked by a DIFFERENT plain (non-Armament) Relic already on the tile', () => {
+      const plainRelic = { type: 'relic', ownerId: 'A', card: { id: 'pr', instanceId: 'pr#0', name: 'Plain Relic', kind: 'relic', keywords: {} } };
+      const state = baseState({ board: { r2c1: plainRelic }, players: { A: player({ hand: [movesAcrossCard()] }), B: player() } });
+      expect(getLegalActions(state, 'A').some(a => a.type === 'PLACE_RELIC' && a.cellId === 'r2c1')).toBe(false);
+      const next = gameReducer(state, { type: 'PLACE_RELIC', instanceId: 'ss#0', cellId: 'r2c1' });
+      expect(next).toBe(state);
+    });
+
+    it('is still blocked by a different ground Relic already on the tile', () => {
+      const groundRelic = { type: 'relic', ownerId: 'A', card: { id: 'ss2', instanceId: 'ss2#0', name: 'Other Ground Relic', kind: 'relic', keywords: { beingsMayMoveAcross: true } } };
+      const state = baseState({ groundRelics: { r2c1: groundRelic }, players: { A: player({ hand: [movesAcrossCard()] }), B: player() } });
+      expect(getLegalActions(state, 'A').some(a => a.type === 'PLACE_RELIC' && a.cellId === 'r2c1')).toBe(false);
+      const next = gameReducer(state, { type: 'PLACE_RELIC', instanceId: 'ss#0', cellId: 'r2c1' });
+      expect(next).toBe(state);
+    });
+
+    it('a Being can move onto a tile a groundRelic already occupies via a normal arrow move — no Engage/Crossing Counter needed', () => {
+      const mover = { type: 'being', ownerId: 'A', card: beingCard({ arrows: [3] }), currentLifespan: 5, engaged: false };
+      const groundRelic = { type: 'relic', ownerId: 'A', card: movesAcrossCard(), counters: { crossing: 2 } };
+      const state = baseState({ board: { r2c1: mover }, groundRelics: { r2c2: groundRelic }, players: { A: player(), B: player() } });
+      expect(getLegalActions(state, 'A').some(a => a.type === 'MOVE_OR_ATTACK' && a.fromCellId === 'r2c1' && a.toCellId === 'r2c2')).toBe(true);
+      const next = gameReducer(state, { type: 'MOVE_OR_ATTACK', fromCellId: 'r2c1', direction: 3, isAttack: false });
+      expect(next.board.r2c2.type).toBe('being');
+      expect(next.board.r2c1).toBeUndefined();
+      // The relic stays put, untouched, and still has its Crossing Counters —
+      // the move used no Engage ability and spent no counter.
+      expect(next.groundRelics.r2c2).toEqual(groundRelic);
+    });
+  });
 });
 
 describe('PLACE_ALTAR', () => {
@@ -1434,6 +1503,13 @@ describe('Dryad — "This Being may move onto another Being with the TreeFolk, V
     expect(next.board.r2c1.type).toBe('being');
     expect(next.board.r2c1.card.name).toBe('Seed of Divinity');
     expect(next.board.r2c1.dryadAttached).toBeUndefined();
+    // The left-behind mount is not itself moving — only the Dryad-attached
+    // Being riding it is — so it stays exactly as Engaged/Disengaged as it
+    // was stashed at attach time (`dryadAttached.engaged`, captured here
+    // as `false`), same as an Animated Armament pile dying leaves the next
+    // entry down in whatever state it was already in, rather than
+    // suddenly becoming Engaged just because the thing on top of it moved.
+    expect(next.board.r2c1.engaged).toBe(false);
     expect(next.board.r2c2.card.name).toBe('Dryad');
     expect(next.board.r2c2.dryadAttached).toBeUndefined();
   });
@@ -1485,6 +1561,19 @@ describe('Shift — "Engage: Move this onto a tile in the Ethereal Realm, it bec
     expect(getLegalActions(engagedState, 'A').some(a => a.type === 'ACTIVATE_SHIFT')).toBe(false);
   });
 
+  it('is not offered with the Ethereal Realm completely full — self-play found this staying "legal" forever otherwise, an AI infinite loop', () => {
+    const fullEthereal = ['r3c1', 'r3c2', 'r3c3', 'r3c4', 'r3c5'].reduce((board, cell, i) => {
+      board[cell] = { type: 'prophecy', ownerId: 'A', card: { name: `Filler ${i}` }, timer: 1, faceDown: true };
+      return board;
+    }, { r2c1: shade });
+    const state = baseState({ board: fullEthereal, players: { A: player(), B: player() } });
+    expect(getLegalActions(state, 'A').some(a => a.type === 'ACTIVATE_SHIFT')).toBe(false);
+    // Even a direct dispatch stays a graceful no-op, matching the offer.
+    const next = gameReducer(state, { type: 'ACTIVATE_SHIFT', cellId: 'r2c1' });
+    expect(next.board.r2c1).toEqual(shade); // untouched — still a Being, never shifted
+    expect(next.log.some(e => e.message.includes('has no empty tile in the Ethereal Realm'))).toBe(true);
+  });
+
   it('offers a choice among the 5 empty Ethereal Realm tiles, and becomes a stripped-down face-up Prophecy on the chosen one', () => {
     const state = baseState({ board: { r2c1: shade }, players: { A: player(), B: player() } });
     const opened = gameReducer(state, { type: 'ACTIVATE_SHIFT', cellId: 'r2c1' });
@@ -1509,7 +1598,23 @@ describe('Shift — "Engage: Move this onto a tile in the Ethereal Realm, it bec
     expect(resolved.board.r2c1).toEqual({ type: 'armament-stack', ownerId: 'A', armaments: [{ card: armamentCard, engaged: false }] });
   });
 
-  it('returns to an empty Mortal Realm tile, Engaged, at full printed Lifespan, once its Time Counters hit 0 — offering a choice among multiple candidates', () => {
+  it('auto-places (single empty tile) directly within the same beginTurn call, landing Disengaged by the time it returns — the one real path where the normal turn.js > disengage() step still catches it naturally, same final result as every other path', () => {
+    const filler = (id) => ({ type: 'being', ownerId: 'A', card: beingCard({ instanceId: id, strength: 0, lifespan: 1 }), currentLifespan: 1, engaged: false });
+    const shifted = { type: 'prophecy', ownerId: 'A', card: { ...shade.card, textBox: '', typing: '', keywords: {} }, timer: 1, faceDown: false, shiftedFromCard: shade.card };
+    const state = baseState({
+      board: {
+        r3c1: shifted,
+        r1c2: filler('f1#0'), r1c3: filler('f2#0'), r1c4: filler('f3#0'),
+        r2c1: filler('f4#0'), r2c2: filler('f5#0'), r2c3: filler('f6#0'), r2c4: filler('f7#0'),
+      },
+      turnPlayer: 'A', players: { A: player(), B: player() },
+    });
+    const next = beginTurn(state); // ticks to 0, auto-places on the sole empty tile (r2c5), all within this one call
+    expect(next.pendingChoice).toBeNull();
+    expect(next.board.r2c5).toMatchObject({ type: 'being', ownerId: 'A', engaged: false, currentLifespan: shade.card.lifespan });
+  });
+
+  it('returns to an empty Mortal Realm tile at full printed Lifespan once its Time Counters hit 0 — offering a choice among multiple candidates, then immediately Disengaging since that turn\'s own Disengage step already passed by the time the choice is resolved', () => {
     const shifted = { type: 'prophecy', ownerId: 'A', card: { ...shade.card, textBox: '', typing: '', keywords: {} }, timer: 1, faceDown: false, shiftedFromCard: shade.card };
     const state = baseState({ board: { r3c1: shifted }, turnPlayer: 'A', players: { A: player(), B: player() } });
     const next = beginTurn(state); // the automatic per-turn tick: 1 -> 0
@@ -1522,9 +1627,31 @@ describe('Shift — "Engage: Move this onto a tile in the Ethereal Realm, it bec
     const resolved = gameReducer(next, options[0]);
     expect(resolved.board.r3c1).toBeUndefined();
     const landed = resolved.board[options[0].cellId];
-    expect(landed).toMatchObject({ type: 'being', ownerId: 'A', engaged: true, currentLifespan: shade.card.lifespan });
+    expect(landed).toMatchObject({ type: 'being', ownerId: 'A', engaged: false, currentLifespan: shade.card.lifespan });
     expect(landed.card.keywords.shift).toBeTruthy(); // gets its real card back, not the stripped Prophecy-form one
     expect(resolved.players.A.purgatory).toHaveLength(0);
+  });
+
+  it('enforces the legend rule when a returning Shifted Deity would duplicate a same-named Deity already on the board', () => {
+    const deityCard = { ...shade.card, isDeity: true, name: 'Test Deity' };
+    const shifted = { type: 'prophecy', ownerId: 'A', card: { ...deityCard, textBox: '', typing: '', keywords: {} }, timer: 1, faceDown: false, shiftedFromCard: deityCard };
+    const existingCopy = { type: 'being', ownerId: 'A', card: deityCard, currentLifespan: 3, engaged: false };
+    // Fill every other Mortal Realm tile of A's so the return auto-places
+    // immediately (single empty tile) instead of opening a shift-return
+    // tile choice first — isolates the legend-rule check itself.
+    const filler = (id) => ({ type: 'being', ownerId: 'A', card: beingCard({ instanceId: id, strength: 0, lifespan: 1 }), currentLifespan: 1, engaged: false });
+    const state = baseState({
+      board: {
+        r3c1: shifted, r2c1: existingCopy,
+        r1c2: filler('f1#0'), r1c3: filler('f2#0'), r1c4: filler('f3#0'),
+        r2c2: filler('f4#0'), r2c3: filler('f5#0'), r2c4: filler('f6#0'),
+      },
+      turnPlayer: 'A', players: { A: player(), B: player() },
+    });
+    const next = beginTurn(state); // ticks to 0, auto-places on the one remaining empty tile (r2c5)
+    expect(next.board.r2c5).toMatchObject({ type: 'being', card: { name: 'Test Deity' } });
+    expect(next.pendingChoice?.kind).toBe('legend-rule-keep');
+    expect(next.pendingChoice.deityName).toBe('Test Deity');
   });
 });
 
@@ -1562,21 +1689,38 @@ describe('Shift — Scā-vuhk Hunger\'s own quoted "At the end of your turn remo
     expect(next.log.some(e => e.message.includes('loses 1 Time Counter'))).toBe(true);
     expect(next.board.r3c1).toBeUndefined();
     const returned = next.board.r2c5;
-    expect(returned).toMatchObject({ type: 'being', ownerId: 'A', engaged: true });
+    // Lands Engaged per its own printed text, but this is an End Phase
+    // decay tick — that turn's own Disengage step already ran at its
+    // start, so it's immediately Disengaged again rather than sitting
+    // Engaged for a whole extra turn (see placeReturnedFromShift).
+    expect(returned).toMatchObject({ type: 'being', ownerId: 'A', engaged: false });
     // onMovedIntoMortalRealm: "Draw (1) card." really drew.
     expect(next.players.A.hand).toHaveLength(1);
   });
 
-  it('its own REAL printed reaction — "sacrifice this and create (2) Scā-vuhk Hunger tokens" — tolerates "create" (not just "summon") and the "and" connector left after SACRIFICE_THIS_THEN_RE\'s own capture', () => {
+  it('its own REAL printed reaction — "sacrifice this and create (2) Scā-vuhk Hunger tokens" — tolerates "create" (not just "summon") and the "and" connector left after SACRIFICE_THIS_THEN_RE\'s own capture, and lets the player choose where each token lands', () => {
     const being = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'sv#0', name: 'Scā-vuhk Hunger' }), currentLifespan: 2, engaged: false };
     const state = baseState({ board: { r2c1: being }, players: { A: player(), B: player() } });
-    const next = resolveOrLogEffect(
+    const opened = resolveOrLogEffect(
       state, 'A', 'Scā-vuhk Hunger',
       'sacrifice this and create (2) Scā-vuhk Hunger tokens.',
       'Reaction', { selfCellId: 'r2c1' }
     );
-    expect(next.board.r2c1).toBeUndefined(); // the original sacrificed itself
-    const tokenCells = Object.entries(next.board).filter(([, o]) => o?.card?.name === 'Scā-vuhk Hunger');
+    expect(opened.board.r2c1).toBeUndefined(); // the original sacrificed itself
+    // Nothing is auto-placed — the player picks each of the 2 tiles.
+    expect(opened.pendingChoice).toMatchObject({ kind: 'token-location', tokenName: 'scā-vuhk hunger', remaining: 2 });
+    expect(getLegalActions(opened, 'A').filter(a => a.type === 'RESOLVE_TOKEN_LOCATION').length).toBeGreaterThan(1);
+
+    const afterFirst = gameReducer(opened, { type: 'RESOLVE_TOKEN_LOCATION', cellId: 'r1c2' });
+    expect(afterFirst.board.r1c2.card.name).toBe('Scā-vuhk Hunger');
+    // The choice reopens for the second token instead of clearing.
+    expect(afterFirst.pendingChoice).toMatchObject({ kind: 'token-location', tokenName: 'scā-vuhk hunger', remaining: 1 });
+
+    const afterSecond = gameReducer(afterFirst, { type: 'RESOLVE_TOKEN_LOCATION', cellId: 'r1c3' });
+    expect(afterSecond.board.r1c3.card.name).toBe('Scā-vuhk Hunger');
+    expect(afterSecond.pendingChoice).toBeNull();
+
+    const tokenCells = Object.entries(afterSecond.board).filter(([, o]) => o?.card?.name === 'Scā-vuhk Hunger');
     expect(tokenCells).toHaveLength(2);
     tokenCells.forEach(([, o]) => expect(o.card.isToken).toBe(true));
   });
@@ -1637,6 +1781,41 @@ describe('Shift — Ounati Hunger\'s own bare "Shift (1)." and "When this moves 
     const resolved = gameReducer(next, options[0]);
     const returned = resolved.board[options[0].cellId];
     expect(returned.permanentBonus).toBeUndefined();
+  });
+
+  it('two Ounati Hunger returning in the same tick both actually land — the second isn\'t left stuck behind the first\'s own multi-tile choice', () => {
+    // Exactly 2 empty Mortal Realm tiles for A (r2c4, r2c5) — enough for
+    // the first return to need a real choice, and for the retry to then
+    // auto-place the second on whatever's left.
+    const filler = (id) => ({ type: 'being', ownerId: 'A', card: beingCard({ instanceId: id, strength: 0, lifespan: 1 }), currentLifespan: 1, engaged: false });
+    const shiftedOunati = (id) => ({ type: 'prophecy', ownerId: 'A', card: { ...ounati(id).card, textBox: '', typing: '', keywords: {} }, timer: 1, faceDown: false, shiftedFromCard: ounati(id).card });
+    const state = baseState({
+      turnPlayer: 'A',
+      board: {
+        r3c1: shiftedOunati('ou1#0'), r3c2: shiftedOunati('ou2#0'),
+        r1c2: filler('f1#0'), r1c3: filler('f2#0'), r1c4: filler('f3#0'),
+        r2c1: filler('f4#0'), r2c2: filler('f5#0'), r2c3: filler('f6#0'),
+      },
+      players: { A: player(), B: player() },
+    });
+    const afterTick = beginTurn(state); // both tick 1 -> 0 in the same modulate() pass
+    expect(afterTick.pendingChoice?.kind).toBe('shift-return'); // the first one's choice
+    const firstOptions = getLegalActions(afterTick, 'A').filter(a => a.type === 'RESOLVE_SHIFT_RETURN');
+    expect(firstOptions.length).toBeGreaterThan(1);
+    const afterFirst = gameReducer(afterTick, firstOptions[0]);
+    // The retry inside placeReturnedFromShift should have immediately
+    // auto-placed the second one on the one remaining empty tile — not
+    // left it stuck as a Prophecy waiting for next turn.
+    expect(afterFirst.pendingChoice).toBeNull();
+    expect(afterFirst.board.r3c1).toBeUndefined();
+    expect(afterFirst.board.r3c2).toBeUndefined();
+    const landedOunati = Object.values(afterFirst.board).filter(o => o?.card?.name === 'Ounati Hunger');
+    expect(landedOunati).toHaveLength(2);
+    // Both resolve through RESOLVE_SHIFT_RETURN/its own retry (not the
+    // direct modulate()-tick auto-place path), so both land Disengaged —
+    // that turn's own Disengage step already ran by the time either
+    // choice is actually resolved (see placeReturnedFromShift).
+    landedOunati.forEach(o => expect(o).toMatchObject({ type: 'being', ownerId: 'A', engaged: false }));
   });
 });
 
@@ -1757,6 +1936,30 @@ describe('Shift — Echoes of the Boundless: "Whenever another Being dies it\'s 
     const state = baseState({ board: { r2c1: dyingEchoes }, players: { A: player({ effigyPool: [effigy('faithless')] }), B: player() } });
     const afterMartyr = gameReducer(state, { type: 'ACTIVATE_MARTYR', cellId: 'r2c1' });
     expect(afterMartyr.pendingChoice).toBe(null);
+  });
+
+  it('stops offering RESOLVE_ECHOES_BOUNDLESS_SHIFT_INSTEAD (leaving only RESOLVE_DECLINE) once the cost is no longer affordable, even with the pendingChoice already open', () => {
+    // Regression: triggerEchoesOfBoundlessOffer only checks canPayCost once,
+    // at the moment the choice first opens — the offer here used to push
+    // RESOLVE_ECHOES_BOUNDLESS_SHIFT_INSTEAD unconditionally afterward,
+    // never re-checking it, even though the reducer's own `if
+    // (!canPayCost(...)) return state;` guard makes it a silent no-op once
+    // unaffordable. Self-play found this a real, reachable stall: the AI
+    // kept re-selecting the same permanently-unaffordable action forever
+    // instead of ever reaching RESOLVE_DECLINE.
+    const state = baseState({
+      pendingChoice: {
+        kind: 'echoes-boundless-shift-instead', playerId: 'A',
+        dyingCard: { instanceId: 'dying#0', name: 'Dying Being', castingCost: { faithless: 1, colored: {} } },
+        amount: 1, optional: true,
+      },
+      players: { A: player({ effigyPool: [] }), B: player() }, // can't afford it
+    });
+    const legal = getLegalActions(state, 'A');
+    expect(legal).not.toContainEqual({ type: 'RESOLVE_ECHOES_BOUNDLESS_SHIFT_INSTEAD' });
+    expect(legal).toContainEqual({ type: 'RESOLVE_DECLINE' });
+    const next = gameReducer(state, { type: 'RESOLVE_ECHOES_BOUNDLESS_SHIFT_INSTEAD' });
+    expect(next).toBe(state); // the reducer's own guard still refuses it — confirms it really would have been a no-op
   });
 });
 
@@ -2125,6 +2328,27 @@ describe('Animated Armaments (RULES.md > Keywords > Animated)', () => {
     expect(getLegalActions(next, 'A').some(a => a.type === 'MOVE_OR_ATTACK' && a.fromCellId === 'r2c1')).toBe(true);
   });
 
+  it('an Animated entry buried mid-stack (not already topmost) is moved to the top once its wielder dies', () => {
+    // Simulates how a mover's own armaments (with an Animated one already
+    // on top) can end up with that entry buried after MOVE_OR_ATTACK's own
+    // reposition branch concatenates a picked-up waiting pile's armaments
+    // after them, with no reordering — dropArmaments (called here via
+    // dealDamageToBeing's own death branch) is the one choke point that
+    // restores the invariant.
+    const below = equip(plainArmamentCard({ instanceId: 'below#0' }));
+    const above = equip(plainArmamentCard({ instanceId: 'above#0' }));
+    const buried = {
+      type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'w#0', lifespan: 1 }), currentLifespan: 1, engaged: false,
+      armaments: [below, animatedEntry(), above], // Animated sits in the middle, not last
+    };
+    const state = baseState({ board: { r2c1: buried }, players: { A: player({ lifespan: 30 }), B: player() } });
+    const next = dealDamageToBeing(state, 'r2c1', 1);
+    expect(next.board.r2c1.type).toBe('armament-stack');
+    const names = next.board.r2c1.armaments.map(a => a.card.instanceId);
+    expect(names).toEqual(['below#0', 'above#0', 'ds#0']); // Animated ('ds#0') moved to the top
+    expect(next.board.r2c1.armaments[names.length - 1].card.keywords?.animated).toBe(true);
+  });
+
   it('moves under its own arrows, engaging just the topmost entry', () => {
     const state = baseState({ board: { r1c2: animatedPile() } }); // direction 1: forward, into the front row
     const next = gameReducer(state, { type: 'MOVE_OR_ATTACK', fromCellId: 'r1c2', direction: 1 });
@@ -2250,7 +2474,7 @@ describe('CAST_CONJURING', () => {
     expect(next).toBe(state);
   });
 
-  it('an Ethereal Conjuring is castable the same way (main-phase, for now — RULES.md > Conjurings)', () => {
+  it('an Ethereal Conjuring is castable at main-phase speed too, same as any other Conjuring (it\'s also castable reactively now — see the "Eighteenth wave" describe block below)', () => {
     const card = conjuringCard({ kind: 'ethereal-conjuring' });
     const state = baseState({ players: { A: player({ hand: [card], lifespan: 50 }), B: player() } });
     expect(getLegalActions(state, 'A').some(a => a.type === 'CAST_CONJURING' && a.instanceId === 'conj-1#0')).toBe(true);
@@ -3370,6 +3594,27 @@ describe('"Target Engaged Being gains: (2) Time Counters and \'While this has at
     const next = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'ff-1#0' });
     expect(next.log.some(e => e.message.includes('no Engaged Being'))).toBe(true);
   });
+
+  it('can target an Engaged Animated Armament acting as a Being (topmost of its own pile), writing visible Time Counters onto that entry', () => {
+    const animatedTop = {
+      card: { id: 'aa', instanceId: 'aa#0', name: 'Animated Armament', kind: 'relic-armament', keywords: { animated: true } },
+      engaged: true, currentLifespan: 2,
+    };
+    const stack = { type: 'armament-stack', ownerId: 'B', armaments: [animatedTop] };
+    const state = baseState({
+      board: { r4c1: stack },
+      players: { A: player({ hand: [freezeFrame] }), B: player() },
+    });
+    const afterCast = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'ff-1#0' });
+    expect(afterCast.board.r4c1.type).toBe('armament-stack');
+    // Counters and the disengage-prevention flag land on the topmost
+    // ARMAMENT ENTRY (where Board.jsx's CounterBadges actually reads them
+    // from for this occupant shape), not the stack occupant itself.
+    expect(afterCast.board.r4c1.armaments[0].counters).toEqual({ time: 2 });
+    expect(afterCast.board.r4c1.armaments[0].doesNotDisengageWhileHasTimeCounters).toBe(true);
+    const bTurn = beginTurn({ ...afterCast, turnPlayer: 'B' });
+    expect(bTurn.board.r4c1.armaments[0].engaged).toBe(true); // still engaged — the Time Counters kept it tapped
+  });
 });
 
 describe('"Restore (N) Lifespan" self-gain (Priestly Practitioner\'s own Engage)', () => {
@@ -3825,6 +4070,34 @@ describe('"Target Being loses all abilities and becomes a 0/5 TreeFolk Being unt
   });
 });
 
+describe('Being Engage with a counter cost (Void Channeler) — not offered/dispatchable without enough Counters', () => {
+  const voidChanneler = () => ({
+    id: 'vc-1', instanceId: 'vc-1#0', name: 'Void Channeler', kind: 'being',
+    castingCost: { faithless: 0, colored: {} }, strength: 1, lifespan: 3, timerMax: 0, arrows: [1],
+    textBox: 'Gain (1) Crossing Counter each time you Conjure.\nRemove (3) Crossing Counters, Engage: Add a Formless Being to hand from deck.',
+    keywords: { engageCounterCost: { type: 'crossing', amount: 3 }, engage: 'Add a Formless Being to hand from deck.' },
+  });
+
+  it('is not offered by getLegalActions with fewer than the required Counters — self-play found this staying "legal" forever otherwise, an AI infinite loop', () => {
+    const occupant = { type: 'being', ownerId: 'A', card: voidChanneler(), currentLifespan: 3, engaged: false, counters: { crossing: 2 } };
+    const state = baseState({ board: { r2c1: occupant }, players: { A: player(), B: player() } });
+    expect(getLegalActions(state, 'A').some(a => a.type === 'ACTIVATE_ENGAGE' && a.cellId === 'r2c1')).toBe(false);
+    // Even a direct dispatch stays a no-op — matches the reducer's own
+    // pre-existing counter-cost gate, which this offer-side fix now agrees with.
+    const next = gameReducer(state, { type: 'ACTIVATE_ENGAGE', cellId: 'r2c1' });
+    expect(next).toBe(state);
+  });
+
+  it('is offered once enough Counters are banked, and really engages', () => {
+    const occupant = { type: 'being', ownerId: 'A', card: voidChanneler(), currentLifespan: 3, engaged: false, counters: { crossing: 3 } };
+    const state = baseState({ board: { r2c1: occupant }, players: { A: player({ mainDeck: [beingCard({ instanceId: 'formless#0', typing: 'Formless, Being' })] }), B: player() } });
+    expect(getLegalActions(state, 'A').some(a => a.type === 'ACTIVATE_ENGAGE' && a.cellId === 'r2c1')).toBe(true);
+    const next = gameReducer(state, { type: 'ACTIVATE_ENGAGE', cellId: 'r2c1' });
+    expect(next.board.r2c1.engaged).toBe(true);
+    expect(next.board.r2c1.counters.crossing).toBe(0);
+  });
+});
+
 describe('Relic Engage fixes: Ferryman\'s Boat, Claws of Onoushara, Pruning Sheers', () => {
   it('Ferryman\'s Boat: "Sacrifice a Being on a tile this points to" sacrifices only a pointed-to Being', () => {
     // Arrow direction 3 (right) from r2c1, for player A, resolves to r2c2 —
@@ -4061,6 +4334,23 @@ describe('"Add X to hand from deck" search effects', () => {
     const state = baseState({ players: { A: player({ hand: [card], mainDeck: [armamentInDeck(1)] }), B: player() } });
     const next = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'conj-1#0' });
     expect(next.pendingChoice).toEqual({ kind: 'search', playerId: 'A', source: 'mainDeck', query: 'Armament', cardName: 'Blacksmithing' });
+  });
+
+  it('also recognizes "from YOUR deck" (Seed of Divinity), and a leading Effigy-color word filters by color, not typing', () => {
+    const card = { id: 'sod', instanceId: 'sod#0', name: 'Seed of Divinity', kind: 'being',
+      castingCost: { faithless: 0, colored: {} }, keywords: { martyr: 'Add a Living Deity to hand from your deck' } };
+    const livingDeity = { id: 'crathea', instanceId: 'crathea#0', name: 'Crathea', kind: 'deity', typing: 'Deity, Being', effigyType: 'living' };
+    const shiftingDeity = { id: 'other', instanceId: 'other#0', name: 'Other Deity', kind: 'deity', typing: 'Deity, Being', effigyType: 'shifting' };
+    const state = baseState({
+      board: { r2c1: { type: 'being', ownerId: 'A', card, currentLifespan: 3, engaged: false } },
+      players: { A: player({ mainDeck: [livingDeity, shiftingDeity] }), B: player() },
+    });
+    const next = gameReducer(state, { type: 'ACTIVATE_MARTYR', cellId: 'r2c1' });
+    expect(next.pendingChoice).toEqual({ kind: 'search', playerId: 'A', source: 'mainDeck', query: 'Deity', colorFilter: 'living', cardName: 'Seed of Divinity' });
+    const legal = getLegalActions(next, 'A').filter(a => a.type === 'RESOLVE_CHOICE');
+    expect(legal).toEqual([{ type: 'RESOLVE_CHOICE', instanceId: 'crathea#0' }]); // only the Living one, not the Shifting one
+    const resolved = gameReducer(next, { type: 'RESOLVE_CHOICE', instanceId: 'crathea#0' });
+    expect(resolved.players.A.hand.map(c => c.instanceId)).toEqual(['crathea#0']);
   });
 
   describe('RESOLVE_CHOICE', () => {
@@ -4539,13 +4829,27 @@ describe('"Once per turn sacrifice (X) <Name>: Summon a Being from your Purgator
     expect(getLegalActions(state, 'A').some(a => a.type === 'ACTIVATE_SACRIFICE_X_SUMMON')).toBe(false);
   });
 
-  it('ACTIVATE_SACRIFICE_X_SUMMON opens an empty toggle-selection pendingChoice', () => {
+  it('ACTIVATE_SACRIFICE_X_SUMMON opens an empty toggle-selection pendingChoice, and marks used-this-turn immediately (not only on a successful confirm)', () => {
     const state = baseState({ board: { r2c1: cemeteryPhysician(), r2c2: bagOBones('bag#0') } });
     const next = gameReducer(state, { type: 'ACTIVATE_SACRIFICE_X_SUMMON', cellId: 'r2c1' });
     expect(next.pendingChoice).toEqual({
       kind: 'sacrifice-x-toggle', playerId: 'A', cardName: 'Cemetery Physician', cellId: 'r2c1',
       fodderName: "Bag o' Bones", selected: [], optional: true,
     });
+    expect(next.board.r2c1.usedSacrificeXThisTurn).toBe(true);
+  });
+
+  it('declining after activating (no X value has a real Purgatory match) still consumes the once-per-turn use — self-play found the AI looping forever re-activating otherwise', () => {
+    const state = baseState({
+      board: { r2c1: cemeteryPhysician(), r2c2: bagOBones('bag#0') },
+      players: { A: player({ purgatory: [purgatoryBeing('pb#0', 9)] }), B: player() }, // no cost-1 match
+    });
+    const opened = gameReducer(state, { type: 'ACTIVATE_SACRIFICE_X_SUMMON', cellId: 'r2c1' });
+    const toggled = gameReducer(opened, { type: 'RESOLVE_SACRIFICE_X_TOGGLE', cellId: 'r2c2' });
+    expect(getLegalActions(toggled, 'A').some(a => a.type === 'RESOLVE_SACRIFICE_X_CONFIRM')).toBe(false);
+    const declined = gameReducer(toggled, { type: 'RESOLVE_DECLINE' });
+    expect(declined.pendingChoice).toBeNull();
+    expect(getLegalActions(declined, 'A').some(a => a.type === 'ACTIVATE_SACRIFICE_X_SUMMON')).toBe(false);
   });
 
   it('RESOLVE_SACRIFICE_X_TOGGLE toggles a fodder cell in, then back out', () => {
@@ -4950,6 +5254,33 @@ describe('Zealots with an extra Engage cost or condition', () => {
     const state = baseState({ board: { r2c1: zealot } });
     expect(getLegalActions(state, 'A')).toContainEqual({ type: 'ACTIVATE_ENGAGE', cellId: 'r2c1' });
   });
+
+  it('also gates a Relic\'s own Engage on the Faithless-only condition (e.g. a borrowed "Wretched Remnants" textbox) — never offers a guaranteed no-op', () => {
+    const relic = {
+      type: 'relic', ownerId: 'A',
+      card: { id: 'wr', instanceId: 'wr#0', name: 'Wretched Remnants', keywords: { engage: 'Add (1) Faithless Essence.', engageCondition: 'faithless-only' } },
+      engaged: false,
+    };
+    const onlyRelic = baseState({ board: { r2c1: relic } });
+    expect(getLegalActions(onlyRelic, 'A')).toContainEqual({ type: 'ACTIVATE_ENGAGE', cellId: 'r2c1' });
+
+    const coloredBeing = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'colored#0', castingCost: { faithless: 0, colored: { living: 1 } } }), currentLifespan: 3, engaged: false };
+    const withColoredPermanent = baseState({ board: { r2c1: relic, r2c2: coloredBeing } });
+    expect(getLegalActions(withColoredPermanent, 'A')).not.toContainEqual({ type: 'ACTIVATE_ENGAGE', cellId: 'r2c1' });
+    const next = gameReducer(withColoredPermanent, { type: 'ACTIVATE_ENGAGE', cellId: 'r2c1' });
+    expect(next).toBe(withColoredPermanent);
+  });
+
+  it('gates the same Relic Engage condition inside a reactive window (offerReactiveEngageActions)', () => {
+    const relic = {
+      type: 'relic', ownerId: 'B',
+      card: { id: 'wr', instanceId: 'wr#0', name: 'Wretched Remnants', keywords: { engage: 'Add (1) Faithless Essence.', engageCondition: 'faithless-only' } },
+      engaged: false,
+    };
+    const coloredBeing = { type: 'being', ownerId: 'B', card: beingCard({ instanceId: 'colored#0', castingCost: { faithless: 0, colored: { living: 1 } } }), currentLifespan: 3, engaged: false };
+    const state = baseState({ reactiveWindow: { openFor: 'B' }, board: { r2c1: relic, r2c2: coloredBeing } });
+    expect(getLegalActions(state, 'B')).not.toContainEqual({ type: 'ACTIVATE_ENGAGE', cellId: 'r2c1' });
+  });
 });
 
 describe('"Engage, X: Y" — a required second cost paid alongside Engage (e.g. "Osteomancer")', () => {
@@ -4989,6 +5320,44 @@ describe('"Engage, X: Y" — a required second cost paid alongside Engage (e.g. 
     expect(getLegalActions(state, 'A')).not.toContainEqual({ type: 'ACTIVATE_ENGAGE', cellId: 'r2c1' });
     const next = gameReducer(state, { type: 'ACTIVATE_ENGAGE', cellId: 'r2c1' });
     expect(next).toBe(state);
+  });
+
+  it('sacrifices an Animated Armament (e.g. Bag o\' Bones animated via "Animate") as the extra cost without crashing', () => {
+    // Regression: the sacrifice candidate search (engageExtraCostSacrificeCell)
+    // already matches an Animated Armament acting as a Being the same way it
+    // matches a real Being/Relic, but the caller here read `.card.name`
+    // straight off the sacrificed occupant — an armament-stack occupant has
+    // no top-level `.card` (only `.armaments[i].card`), so this crashed the
+    // moment the sacrifice target was an Animated Armament rather than a
+    // plain Relic. Self-play found this as a real, reachable crash.
+    const osteomancer = {
+      type: 'being', ownerId: 'A',
+      card: beingCard({
+        name: 'Osteomancer',
+        keywords: { engage: 'Add an Undead to hand from your Purgatory', engageExtraCost: "Sacrfiice a Bag o' Bones" },
+      }),
+      currentLifespan: 3, engaged: false,
+    };
+    const animatedBagOBones = {
+      type: 'armament-stack', ownerId: 'A',
+      armaments: [{
+        card: { id: 'bag', instanceId: 'bag#0', name: "Bag o' Bones", typing: 'Relic, Token, Armament', kind: 'relic-armament', keywords: { animated: true } },
+        engaged: false, currentLifespan: 1,
+      }],
+    };
+    const undead = { id: 'u1', instanceId: 'u1#0', name: 'Rotting Ghoul', typing: 'Undead, Being' };
+    const state = baseState({
+      board: { r2c1: osteomancer, r2c2: animatedBagOBones },
+      players: { A: player({ purgatory: [undead] }), B: player() },
+    });
+    expect(getLegalActions(state, 'A')).toContainEqual({ type: 'ACTIVATE_ENGAGE', cellId: 'r2c1' });
+    let next;
+    expect(() => {
+      next = gameReducer(state, { type: 'ACTIVATE_ENGAGE', cellId: 'r2c1' });
+    }).not.toThrow();
+    expect(next.board.r2c2).toBeUndefined(); // the Animated Bag o' Bones was sacrificed
+    expect(next.log.some(e => e.message.includes("sacrifices Bag o' Bones to engage Osteomancer"))).toBe(true);
+    expect(next.pendingChoice).toEqual({ kind: 'search', playerId: 'A', source: 'purgatory', query: 'Undead', cardName: 'Osteomancer' });
   });
 
   it('does not offer Engage for an unrecognized extra-cost shape (e.g. "Remove (X) Forge Counters" — Relic counters aren\'t modeled)', () => {
@@ -5170,15 +5539,39 @@ describe('Modulate (±X) as an activated effect', () => {
     card: { id: 'proph-1', instanceId: 'proph-1#0', name: 'Test Prophecy', kind: 'prophecy', ...overrides },
   });
 
-  it('a fixed-sign Modulate (-X) parks a pendingChoice targeting the caster\'s own Prophecies', () => {
+  it('a fixed-sign Modulate (-X) with an explicit "you control" parks a pendingChoice targeting only the caster\'s own Prophecies', () => {
+    // "on a target you control" (matching Dial of Metatoris's own printed
+    // text) — own-only is the printed restriction here, not an assumed
+    // default (see the any-owner default test below).
     const being = {
       type: 'being', ownerId: 'A',
-      card: beingCard({ keywords: { engage: 'Modulate (-1).' } }),
+      card: beingCard({ keywords: { engage: 'Modulate (-1) on a target you control.' } }),
       currentLifespan: 5, engaged: false,
     };
     const state = baseState({ board: { r2c1: being, r3c1: prophecy('A', 3) } });
     const next = gameReducer(state, { type: 'ACTIVATE_ENGAGE', cellId: 'r2c1' });
     expect(next.pendingChoice).toEqual({ kind: 'modulate', playerId: 'A', cardName: 'Test Being', delta: -1 });
+  });
+
+  // Regression: with NO "you control" anywhere in the text at all (unlike
+  // the test above), a bare Modulate now defaults to targeting EITHER
+  // player's Time Counter — see the real CSV's own internal contrast
+  // (Hurry Up and Wait spells out "This may only target Time Counters
+  // that you control" as an explicit second clause exactly when that
+  // restriction applies, and leaves it off otherwise: Charge Forward,
+  // Roll Back, the Conjuring literally named "Modulate", and MetaToris
+  // all print a bare, unrestricted Modulate).
+  it('a fixed-sign Modulate (-X) with no "you control" anywhere defaults to targeting either player\'s Prophecies', () => {
+    const being = {
+      type: 'being', ownerId: 'A',
+      card: beingCard({ keywords: { engage: 'Modulate (-1).' } }),
+      currentLifespan: 5, engaged: false,
+    };
+    const state = baseState({ board: { r2c1: being, r3c1: prophecy('B', 3) }, players: { A: player(), B: player() } });
+    const next = gameReducer(state, { type: 'ACTIVATE_ENGAGE', cellId: 'r2c1' });
+    expect(next.pendingChoice).toEqual({ kind: 'modulate', playerId: 'A', cardName: 'Test Being', delta: -1, anyOwner: true });
+    const resolved = gameReducer(next, { type: 'RESOLVE_MODULATE', cellId: 'r3c1', delta: -1 });
+    expect(resolved.board.r3c1.timer).toBe(2); // opponent's own Prophecy — legal now
   });
 
   it('offers only the searching player\'s own Prophecies as RESOLVE_MODULATE targets', () => {
@@ -5474,11 +5867,27 @@ describe('"When Summoned" mechanics on Beings', () => {
     const seed = { instanceId: 'd1', name: 'Little Seed', typing: 'Seed, Being' };
     const matched = summon(card, {}, { A: { mainDeck: [seed] } });
     expect(matched.players.A.hand).toHaveLength(1);
+    // revealPopup (bug report: "reveal the card large scale... Add a Put
+    // Back on top button... and a Draw button") — a transient, purely
+    // informational field the UI shows in a large popup; the real
+    // outcome above is already fully decided by the time this is set.
+    expect(matched.revealPopup).toEqual({ playerId: 'A', card: seed, outcome: 'drawn', cardName: 'Farm hand', label: 'When Summoned' });
 
     const nonSeed = { instanceId: 'd2', name: 'Not A Seed', typing: 'Human, Being' };
     const unmatched = summon(card, {}, { A: { mainDeck: [nonSeed] } });
     expect(unmatched.players.A.hand).toHaveLength(0);
     expect(unmatched.players.A.mainDeck).toEqual([nonSeed]);
+    expect(unmatched.revealPopup).toEqual({ playerId: 'A', card: nonSeed, outcome: 'kept', cardName: 'Farm hand', label: 'When Summoned' });
+  });
+
+  it('DISMISS_REVEAL_POPUP clears the transient revealPopup field, and is a no-op with none pending', () => {
+    const card = whenSummonedCard({ name: 'Farm hand', keywords: { whenSummoned: 'reveal the top of your deck, if it is a Seed Being add it to hand.' } });
+    const seed = { instanceId: 'd1', name: 'Little Seed', typing: 'Seed, Being' };
+    const state = summon(card, {}, { A: { mainDeck: [seed] } });
+    expect(state.revealPopup).toBeDefined();
+    const dismissed = gameReducer(state, { type: 'DISMISS_REVEAL_POPUP' });
+    expect(dismissed.revealPopup).toBeUndefined();
+    expect(gameReducer(dismissed, { type: 'DISMISS_REVEAL_POPUP' })).toBe(dismissed); // no-op, same reference
   });
 
   it('"look at the top (N) cards ... return them in the same order" leaves the deck unchanged (Seeress)', () => {
@@ -5908,6 +6317,33 @@ describe('"When Summoned" mechanics on Beings', () => {
       expect(next.board.r2c2.armaments).toEqual([equip(rapier())]); // gathered, then carried along
       expect(next.board.r2c1.armaments).toBeUndefined(); // stripped from the ally
     });
+
+    it('does not crash resolving "moves without engaging" text when selfCellId names an Animated Armament instead of a real Being', () => {
+      // Regression: self-play found this exact crash 6 times across a
+      // 5-hour, 2.5M-game run (occupant.card.name off undefined) — the
+      // real trigger chain wasn't pinned down (astronomically rare: some
+      // interaction of a granted/borrowed "moves without engaging" ability
+      // landing on an Animated Armament rather than Mahka-Rahva herself),
+      // but the underlying shape is the same "a real Being carries its own
+      // top-level `card`; an Animated Armament acting as one doesn't" gap
+      // fixed everywhere else in this file (moveBeingFreely and friends) —
+      // proven directly here via resolveOrLogEffect rather than relying on
+      // reproducing the exact natural trigger.
+      const animatedPile = {
+        type: 'armament-stack', ownerId: 'A',
+        armaments: [{ card: { id: 'ds', instanceId: 'ds#0', name: 'Dancing Swords', kind: 'relic-armament', keywords: { animated: true } }, engaged: false, currentLifespan: 3 }],
+      };
+      const state = baseState({ board: { r2c1: animatedPile } });
+      let next;
+      expect(() => {
+        next = resolveOrLogEffect(state, 'A', 'Mahka-Rahva', 'this Diety immediately moves without engaging.', 'When Summoned', { selfCellId: 'r2c1' });
+      }).not.toThrow();
+      // More than one legal destination from r2c1 on an otherwise-empty
+      // board — opens the free-move choice (the branch that reads the
+      // acting card's own name for its log line) rather than auto-resolving.
+      expect(next.pendingChoice).toEqual(expect.objectContaining({ kind: 'free-move', fromCellId: 'r2c1' }));
+      expect(next.log.some(e => e.message.includes('Dancing Swords moves'))).toBe(true);
+    });
   });
 
   describe('"sacrifice an Armament, then draw (1) card" (Tiny Forge Master)', () => {
@@ -6218,6 +6654,15 @@ describe('"Beings may move across this" ground Relics + Al khali the Empty\'s ar
     expect(resolved.players.A.purgatory.some(c => c.name === 'Al khali the Empty')).toBe(true);
   });
 
+  it('a Shifting Sands landing on the opponent\'s side is controlled by the opponent, not Al khali\'s own caster', () => {
+    const state = baseState({ players: { A: player({ hand: [prophecyCard()] }), B: player() } });
+    const played = gameReducer(state, { type: 'PLAY_PROPHECY', instanceId: 'proph#0', cellId: 'r3c3' });
+    const resolved = beginTurn({ ...played, turnNumber: played.turnNumber + 1 });
+    expect(resolved.groundRelics.r4c3?.ownerId).toBe('B'); // opponent's front row — opponent controls it
+    expect(resolved.groundRelics.r2c3?.ownerId).toBe('A'); // controller's own side — controller controls it
+    expect(resolved.groundRelics.r2c2?.ownerId).toBe('A');
+  });
+
   it('still summons a Shifting Sands onto a tile a Being already occupies — co-located, not skipped', () => {
     const occupied = { type: 'being', ownerId: 'B', card: beingCard({ instanceId: 'occ#0' }), currentLifespan: 5, engaged: false };
     const state = baseState({ board: { r4c3: occupied }, players: { A: player({ hand: [prophecyCard()] }), B: player() } });
@@ -6479,6 +6924,64 @@ describe('Orbital Acceleration: "All players draw a card. Craft (1) Effigy. You 
   });
 });
 
+describe('"You may Modulate (-1)." (Orbital Acceleration\'s own third clause) — optional, and can target either player\'s Time Counter', () => {
+  // Regression: this used to fall through to the generic (mandatory,
+  // own-permanents-only) Modulate handling — MODULATE_RE matches "Modulate
+  // (-1)" as a bare substring inside "You may Modulate (-1)." — silently
+  // dropping both the "may" (no way to decline) and the card's own lack of
+  // a "you control" restriction. Reported from real play as effectively
+  // forcing an unwanted Modulate with no way out.
+  const ownProphecy = { type: 'prophecy', ownerId: 'A', card: { name: 'Own Prophecy' }, timer: 2, faceDown: false };
+  const opponentProphecy = { type: 'prophecy', ownerId: 'B', card: { name: 'Opponent Prophecy' }, timer: 2, faceDown: false };
+
+  it('offers RESOLVE_DECLINE alongside the real Modulate options — never forced', () => {
+    const state = baseState({ board: { r2c1: ownProphecy } });
+    const next = resolveOrLogEffect(state, 'A', 'Orbital Acceleration', 'You may Modulate (-1).', 'Prophecy', {});
+    expect(next.pendingChoice).toEqual(expect.objectContaining({ kind: 'modulate', optional: true, anyOwner: true }));
+    const legal = getLegalActions(next, 'A');
+    expect(legal).toContainEqual({ type: 'RESOLVE_DECLINE' });
+    const declined = gameReducer(next, { type: 'RESOLVE_DECLINE' });
+    expect(declined.pendingChoice).toBeNull();
+    expect(declined.board.r2c1.timer).toBe(2); // untouched
+  });
+
+  it('can target the OPPONENT\'s Time Counter, not just the activating player\'s own', () => {
+    const state = baseState({ board: { r4c1: opponentProphecy } });
+    const next = resolveOrLogEffect(state, 'A', 'Orbital Acceleration', 'You may Modulate (-1).', 'Prophecy', {});
+    const legal = getLegalActions(next, 'A');
+    expect(legal).toContainEqual({ type: 'RESOLVE_MODULATE', cellId: 'r4c1', delta: -1 });
+    const resolved = gameReducer(next, { type: 'RESOLVE_MODULATE', cellId: 'r4c1', delta: -1 });
+    expect(resolved.board.r4c1.timer).toBe(1);
+    expect(resolved.pendingChoice).toBeNull();
+  });
+
+  it('can also target the opponent\'s own Altar (exercises the cross-owner altar list lookup, not just the activator\'s own)', () => {
+    const opponentAltar = { card: { name: 'Eònion Altar', instanceId: 'ealtar#0' }, counters: { time: 3 } };
+    const state = baseState({ altars: { A: [], B: [opponentAltar] } });
+    const next = resolveOrLogEffect(state, 'A', 'Orbital Acceleration', 'You may Modulate (-1).', 'Prophecy', {});
+    const legal = getLegalActions(next, 'A');
+    expect(legal).toContainEqual({ type: 'RESOLVE_MODULATE', altarInstanceId: 'ealtar#0', delta: -1 });
+    const resolved = gameReducer(next, { type: 'RESOLVE_MODULATE', altarInstanceId: 'ealtar#0', delta: -1 });
+    expect(resolved.altars.B[0].counters.time).toBe(2); // written back to B's own list, not A's
+    expect(resolved.altars.A).toEqual([]);
+    expect(resolved.pendingChoice).toBeNull();
+  });
+
+  it('gracefully logs instead of opening a pendingChoice when neither player has a real target', () => {
+    const state = baseState();
+    const next = resolveOrLogEffect(state, 'A', 'Orbital Acceleration', 'You may Modulate (-1).', 'Prophecy', {});
+    expect(next.pendingChoice).toBeNull();
+    expect(next.log.some(e => e.message.includes('no Time Counter on the board to Modulate'))).toBe(true);
+  });
+
+  it('still lets the activating player Modulate their own Time Counter too (own permanents were never excluded, just no longer required)', () => {
+    const state = baseState({ board: { r2c1: ownProphecy } });
+    const next = resolveOrLogEffect(state, 'A', 'Orbital Acceleration', 'You may Modulate (-1).', 'Prophecy', {});
+    const resolved = gameReducer(next, { type: 'RESOLVE_MODULATE', cellId: 'r2c1', delta: -1 });
+    expect(resolved.board.r2c1.timer).toBe(1);
+  });
+});
+
 describe('MetaToris: "Twice per turn Modulate (±1)."', () => {
   const metaToris = (overrides = {}) => ({
     type: 'being', ownerId: 'A',
@@ -6496,7 +6999,28 @@ describe('MetaToris: "Twice per turn Modulate (±1)."', () => {
     const state = baseState({ board: { r2c1: metaToris(), r3c1: { type: 'prophecy', ownerId: 'A', card: { name: 'P' }, timer: 3, faceDown: true } } });
     const next = gameReducer(state, { type: 'ACTIVATE_TIMES_PER_TURN_ABILITY', cellId: 'r2c1' });
     expect(next.board.r2c1.timesPerTurnUsed).toBe(1);
-    expect(next.pendingChoice).toEqual({ kind: 'modulate', playerId: 'A', cardName: 'MetaToris', delta: 'choose' });
+    // anyOwner: true — unlike Dial of Metatoris ("on a target you
+    // control"), MetaToris's own printed text has no such restriction, so
+    // per the user's ruling it can target either player's Time Counter.
+    expect(next.pendingChoice).toEqual({ kind: 'modulate', playerId: 'A', cardName: 'MetaToris', delta: 'choose', anyOwner: true });
+  });
+
+  // Regression: the user's own ruling — unlike Dial of Metatoris (own-only,
+  // per its printed "on a target you control"), MetaToris's own "Twice per
+  // turn Modulate (±1)." has no ownership restriction in its printed text
+  // at all, so it can target a Time Counter the OPPONENT controls,
+  // including one on a shifted Being (represented as a face-up `type:
+  // 'prophecy'` occupant with `shiftedFromCard` set — already a legal
+  // Modulate target via isModulateTarget's plain `type === 'prophecy'`
+  // check, same as any other Prophecy).
+  it('can target an opponent-controlled Time Counter, including one on a shifted Being', () => {
+    const opponentShifted = { type: 'prophecy', ownerId: 'B', card: { name: 'Something', instanceId: 'sb#0' }, timer: 3, faceDown: false, shiftedFromCard: { name: 'Something', instanceId: 'sb#0', lifespan: 3 } };
+    const state = baseState({ board: { r2c1: metaToris(), r3c1: opponentShifted }, players: { A: player(), B: player() } });
+    const opened = gameReducer(state, { type: 'ACTIVATE_TIMES_PER_TURN_ABILITY', cellId: 'r2c1' });
+    const options = getLegalActions(opened, 'A').filter(a => a.type === 'RESOLVE_MODULATE');
+    expect(options).toContainEqual({ type: 'RESOLVE_MODULATE', cellId: 'r3c1', delta: 1 });
+    const next = gameReducer(opened, { type: 'RESOLVE_MODULATE', cellId: 'r3c1', delta: 1 });
+    expect(next.board.r3c1.timer).toBe(4);
   });
 
   it('is usable a second time in the same turn after the first resolves', () => {
@@ -6834,15 +7358,24 @@ describe('"You may pay (N) Lifespan to Summon (2) Vassal tokens." (Vassal Matria
     });
   });
 
-  it('paying summons 2 Vassal tokens (2/2, no ability) onto empty tiles and spends the Lifespan', () => {
+  it('paying spends the Lifespan and lets the player choose where each of the 2 Vassal tokens (2/2, no ability) lands', () => {
     const state = baseState({
       pendingChoice: { kind: 'pay-lifespan-optional', playerId: 'A', cardName: 'Vassal Matriach', label: 'Depart', cost: 5, effectText: 'Summon (2) Vassal tokens.', optional: true },
       players: { A: player({ lifespan: 50 }), B: player() },
     });
-    const next = gameReducer(state, { type: 'RESOLVE_PAY_LIFESPAN_OPTIONAL' });
-    expect(next.pendingChoice).toBeNull();
-    expect(next.players.A.lifespan).toBe(45);
-    const placed = Object.values(next.board).filter(o => o?.card?.name === 'Vassal');
+    const opened = gameReducer(state, { type: 'RESOLVE_PAY_LIFESPAN_OPTIONAL' });
+    expect(opened.players.A.lifespan).toBe(45);
+    // Nothing auto-placed yet — the Lifespan cost is spent, but the board
+    // is still empty until the player picks each tile.
+    expect(Object.keys(opened.board)).toHaveLength(0);
+    expect(opened.pendingChoice).toMatchObject({ kind: 'token-location', tokenName: 'vassal', remaining: 2 });
+
+    const afterFirst = gameReducer(opened, { type: 'RESOLVE_TOKEN_LOCATION', cellId: 'r1c2' });
+    expect(afterFirst.pendingChoice).toMatchObject({ kind: 'token-location', tokenName: 'vassal', remaining: 1 });
+    const afterSecond = gameReducer(afterFirst, { type: 'RESOLVE_TOKEN_LOCATION', cellId: 'r1c3' });
+    expect(afterSecond.pendingChoice).toBeNull();
+
+    const placed = Object.values(afterSecond.board).filter(o => o?.card?.name === 'Vassal');
     expect(placed).toHaveLength(2);
     expect(placed[0].card.strength).toBe(2);
     expect(placed[0].card.lifespan).toBe(2);
@@ -7172,6 +7705,19 @@ describe('Growth Counters — "Pay (1) Living: Add (1) Growth Counter." / "Remov
     expect(twice.players.A.effigyPool).toHaveLength(0);
   });
 
+  it('tracks payEffigyAbilityUsesThisTurn on every activation regardless of any printed "once" cap — an AI-scoring hook, reset at the start of its controller\'s next turn', () => {
+    const state = baseState({
+      board: { r1c2: bloomingSeed() },
+      players: { A: player({ effigyPool: [effigy('living', 1), effigy('living', 2)] }), B: player() },
+    });
+    const once = gameReducer(state, { type: 'ACTIVATE_PAY_EFFIGY_COST_ABILITY', cellId: 'r1c2' });
+    expect(once.board.r1c2.payEffigyAbilityUsesThisTurn).toBe(1);
+    const twice = gameReducer(once, { type: 'ACTIVATE_PAY_EFFIGY_COST_ABILITY', cellId: 'r1c2' });
+    expect(twice.board.r1c2.payEffigyAbilityUsesThisTurn).toBe(2);
+    const reset = endTurn(endTurn(twice)); // back around to A's own next turn
+    expect(reset.board.r1c2.payEffigyAbilityUsesThisTurn).toBe(0);
+  });
+
   it('is not offered without a Growth Counter on itself', () => {
     const state = baseState({ board: { r1c2: bloomingSeed() }, players: { A: player(), B: player() } });
     expect(getLegalActions(state, 'A').some(a => a.type === 'ACTIVATE_COUNTER_COST_SACRIFICE')).toBe(false);
@@ -7466,7 +8012,7 @@ describe('"Enters with (2) Crossing Counters." / "Remove (1) Crossing Counter, t
     keywords: { armamentCounterGrant: { type: 'crossing', amount: 2 }, engageCounterCost: { type: 'crossing', amount: 1 }, engage: 'You may summon Undead from your Purgatory until the end of your turn.' },
   };
   const mausoleumGates = (counters = { crossing: 1 }) => ({ type: 'relic', ownerId: 'A', card: mausoleumGatesCard, engaged: false, counters });
-  const undead = (n) => ({ instanceId: `u${n}#0`, name: `Undead ${n}`, kind: 'being', typing: 'Undead, Being' });
+  const undead = (n) => ({ instanceId: `u${n}#0`, name: `Undead ${n}`, kind: 'being', typing: 'Undead, Being', castingCost: { faithless: 0, colored: {} } });
 
   it('PLACE_RELIC grants the printed Crossing Counters immediately ("Enters with")', () => {
     const state = baseState({ players: { A: player({ hand: [mausoleumGatesCard] }), B: player() } });
@@ -7565,6 +8111,33 @@ describe('"Target a Being you don\'t control, then copy it\'s Engage ability." (
     const next = gameReducer(state, { type: 'ACTIVATE_ENGAGE', cellId: 'r2c1' });
     expect(next.log.some(e => e.message.includes("has no Being A doesn't control"))).toBe(true);
   });
+
+  it('does not copy another copy-Engage card\'s ability (would recurse) — logs an honest no-op instead, with exactly one opposing Being', () => {
+    // Self-play found this a guaranteed stack overflow: with only one
+    // opposing Being and that Being's own Engage ALSO being "copy an
+    // Engage ability", copying it re-enters this exact same resolution
+    // with the same single candidate every time.
+    const enemyDoll = { type: 'being', ownerId: 'B', card: beingCard({ instanceId: 'ed#0', name: 'Enemy Doll', keywords: { engage: "Target a Being you don't control, then copy it's Engage ability." } }), currentLifespan: 3, engaged: false };
+    const state = baseState({ board: { r2c1: doll, r4c1: enemyDoll }, players: { A: player(), B: player() } });
+    const next = gameReducer(state, { type: 'ACTIVATE_ENGAGE', cellId: 'r2c1' });
+    expect(next.log.some(e => e.message.includes("can't copy Enemy Doll's Engage ability — it's a copy effect too"))).toBe(true);
+    expect(next.board.r2c1.engaged).toBe(true); // still used its own Engage, just no infinite chain
+  });
+
+  it('does not chain into a fresh copy-engage-target choice when the picked target is itself a copy-Engage card, with multiple opposing Beings', () => {
+    // The matching AI-loop half of the same bug: with 2+ candidates, this
+    // used to open ANOTHER 'copy-engage-target' choice every time a
+    // copy-Engage card was picked, chaining forever with no real effect
+    // ever landing.
+    const enemyDoll1 = { type: 'being', ownerId: 'B', card: beingCard({ instanceId: 'ed1#0', name: 'Enemy Doll 1', keywords: { engage: "Target a Being you don't control, then copy it's Engage ability." } }), currentLifespan: 3, engaged: false };
+    const enemyDoll2 = { type: 'being', ownerId: 'B', card: beingCard({ instanceId: 'ed2#0', name: 'Enemy Doll 2', keywords: { engage: "Target a Being you don't control, then copy it's Engage ability." } }), currentLifespan: 3, engaged: false };
+    const state = baseState({ board: { r2c1: doll, r4c1: enemyDoll1, r4c2: enemyDoll2 }, players: { A: player(), B: player() } });
+    const opened = gameReducer(state, { type: 'ACTIVATE_ENGAGE', cellId: 'r2c1' });
+    expect(opened.pendingChoice.kind).toBe('copy-engage-target');
+    const resolved = gameReducer(opened, { type: 'RESOLVE_COPY_ENGAGE_TARGET', cellId: 'r4c1' });
+    expect(resolved.pendingChoice).toBeNull(); // resolved to the graceful no-op, not another choice
+    expect(resolved.log.some(e => e.message.includes("can't copy Enemy Doll 1's Engage ability — it's a copy effect too"))).toBe(true);
+  });
 });
 
 describe('"Engage: Reveal the top card of your deck, then you may sacrifice this and draw a card." (Oracle of Eonia)', () => {
@@ -7662,6 +8235,10 @@ describe('"Each time this moves create a Rat token on the tile it moved from." (
     expect(next.board.r1c2.card.name).toBe('Rat'); // the token, on the tile it moved from
     expect(next.board.r1c2.card.strength).toBe(1);
     expect(next.board.r1c2.card.lifespan).toBe(1);
+    // Its real printed row (public/default-card-set.csv row 463) prints
+    // Arrows "1" — createTokenCard() used to drop arrows entirely for every
+    // token it built, so a real Rat token could never move on its own.
+    expect(next.board.r1c2.card.arrows).toEqual([1]);
     expect(next.log.some(e => e.message.includes("Hoarder's move triggers"))).toBe(true);
   });
 
@@ -7681,6 +8258,26 @@ describe('"Each time this moves create a Rat token on the tile it moved from." (
     // r1c2 already holds the first Rat, so moving back onto it isn't legal — Hoarder stays put.
     expect(afterSecond.board.r2c2.card.name).toBe('Hoarder');
     expect(afterSecond.board.r1c2.card.name).toBe('Rat');
+  });
+});
+
+describe('"Summon (1) 0/2 Vine token on the tile it moved from." (Imneyat Dryad)', () => {
+  const imneyatDryad = { type: 'being', ownerId: 'A', card: beingCard({ name: 'Imneyat Dryad', arrows: [1], keywords: { onMove: 'Summon (1) 0/2 Vine token on the tile it moved from.' } }), currentLifespan: 3, engaged: false };
+
+  it('summons a 0/2 Vine token on the tile it just vacated', () => {
+    const state = baseState({ board: { r1c2: imneyatDryad }, players: { A: player(), B: player() } });
+    const next = gameReducer(state, { type: 'MOVE_OR_ATTACK', fromCellId: 'r1c2', direction: 1 });
+    expect(next.board.r2c2.card.name).toBe('Imneyat Dryad'); // itself landed here
+    expect(next.board.r1c2.card.name).toBe('Vine'); // the token, on the tile it moved from
+    expect(next.board.r1c2.card.strength).toBe(0);
+    expect(next.board.r1c2.card.lifespan).toBe(2);
+  });
+
+  it('does not fire on an attack — attacking never repositions the mover', () => {
+    const enemy = { type: 'being', ownerId: 'B', card: beingCard({ instanceId: 'enemy#0', strength: 0, lifespan: 10 }), currentLifespan: 10, engaged: false };
+    const state = baseState({ board: { r2c1: { ...imneyatDryad, currentLifespan: 5 }, r4c1: enemy }, players: { A: player(), B: player() } });
+    const next = gameReducer(state, { type: 'MOVE_OR_ATTACK', fromCellId: 'r2c1', toCellId: 'r4c1', isAttack: true });
+    expect(next.board.r2c1.card.name).toBe('Imneyat Dryad'); // stayed in its lane, no token created there
   });
 });
 
@@ -7710,6 +8307,44 @@ describe('Invoke keyword ("Add to hand, then summon/conjure")', () => {
     expect(next.players.A.hand).toHaveLength(0);
     expect(next.board.r2c1.type).toBe('relic');
     expect(next.board.r2c1.card.name).toBe('White Whisker');
+  });
+
+  // Regression: same root cause as the Locust Swarm fix above (toGameCard
+  // trimming, cardData.js) — the real CSV row's own "Card Name" is "White
+  // Whisker " with a trailing space (confirmed via
+  // public/default-card-set.csv). Before the trim fix, invokeCandidates'
+  // own exact-name match (searchZoneCandidates: `name === q`) compared the
+  // untrimmed deck card's name ("white whisker ") against Classic
+  // Familiar's own clean query text ("white whisker", captured then
+  // trimmed) — never equal, so the search silently found nothing and
+  // White Whisker could never actually be Invoked at all, despite sitting
+  // right there in the deck. Parses both cards from real, untrimmed CSV
+  // rows (unlike the clean fixture above) to actually exercise this path.
+  it('still finds and Invokes White Whisker when both cards are parsed from real, untrimmed CSV rows', () => {
+    const classicRow = {
+      'Card Name': 'Classic Familiar ', 'Card Typing': 'Cat, Being, Familiar', 'Effigy Costs': '1 Faithless, 1 Living',
+      'Casting Cost': '2', 'Text Box': 'Depart: Invoke (Add to hand, then summon/conjure) White Whisker.',
+      'Strength': '2', 'Lifespan': '2', 'Arrows (Clockwise top center = 1)': '1, 5, 7',
+    };
+    const whiskerRow = {
+      'Card Name': 'White Whisker ', 'Card Typing': 'Relic', 'Effigy Costs': '2 Living', 'Casting Cost': '2',
+      'Text Box': 'Engage: Add a Familiar to hand from deck. \nSacrifice this when you summon a Familiar.',
+    };
+    const classic = toGameCard(classicRow, 0);
+    const whisker = { ...toGameCard(whiskerRow, 1), instanceId: 'ww#0' };
+    const familiar = { type: 'being', ownerId: 'A', card: { ...classic, instanceId: 'cf#0' }, currentLifespan: 2, engaged: false };
+    const attacker = { type: 'being', ownerId: 'B', card: beingCard({ strength: 10, lifespan: 10 }), currentLifespan: 10, engaged: false };
+    const state = baseState({
+      turnPlayer: 'B', board: { r4c1: attacker, r2c1: familiar },
+      players: { A: player({ mainDeck: [whisker] }), B: player({ lifespan: 50 }) },
+    });
+    const afterCombat = gameReducer(state, { type: 'MOVE_OR_ATTACK', fromCellId: 'r4c1', toCellId: 'r2c1', isAttack: true });
+    expect(afterCombat.log.some(e => e.message.includes("isn't automated yet"))).toBe(false);
+    expect(afterCombat.pendingChoice?.kind).toBe('invoke-destination'); // found in deck — a real destination choice opened, not a no-op
+    const options = getLegalActions(afterCombat, 'A').filter(a => a.type === 'RESOLVE_INVOKE_DESTINATION');
+    const next = gameReducer(afterCombat, options[0]);
+    expect(next.players.A.mainDeck).toHaveLength(0); // pulled out of the deck once actually placed
+    expect(next.board[options[0].cellId]?.card?.name).toBe('White Whisker');
   });
 
   it('"Invoke a Faithless Relic Card that costs (2) or less." (Faithless Invocation) filters by typing, cost, and Faithless-only', () => {
@@ -7750,6 +8385,47 @@ describe('Invoke keyword ("Add to hand, then summon/conjure")', () => {
     const next = gameReducer(state, { type: 'ACTIVATE_ENGAGE', cellId: 'r1c2' });
     expect(next.log.some(e => e.message.includes('finds no "Seed"'))).toBe(true);
     expect(next.board.r2c2).toBeUndefined();
+  });
+
+  it('"Invoke a TreeFolk with cost (4) or less on a tile this points to." (Samara Seed\'s own Martyr — "summon it" dropped) still invokes within the cost cap', () => {
+    const samaraSeed = {
+      type: 'being', ownerId: 'A',
+      card: beingCard({ instanceId: 'ss#0', name: 'Samara Seed', arrows: [1], keywords: { martyr: 'Invoke a TreeFolk with cost (4) or less on a tile this points to.' } }),
+      currentLifespan: 1, engaged: false,
+    };
+    const cheapTreefolk = { id: 't1', instanceId: 't1#0', name: 'Sapling', kind: 'being', typing: 'TreeFolk, Being', castingCost: { faithless: 0, colored: { living: 4 } }, strength: 1, lifespan: 2, keywords: {} };
+    const pricyTreefolk = { id: 't2', instanceId: 't2#0', name: 'Ancient Treant', kind: 'being', typing: 'TreeFolk, Being', castingCost: { faithless: 0, colored: { living: 5 } }, strength: 5, lifespan: 5, keywords: {} };
+    const state = baseState({ board: { r1c2: samaraSeed }, players: { A: player({ mainDeck: [cheapTreefolk, pricyTreefolk] }), B: player() } });
+    const next = gameReducer(state, { type: 'ACTIVATE_MARTYR', cellId: 'r1c2' });
+    expect(next.players.A.purgatory.some(c => c.instanceId === 'ss#0')).toBe(true); // Samara Seed sacrificed itself
+    expect(next.board.r1c2).toBeUndefined();
+    expect(next.board.r2c2.card.name).toBe('Sapling'); // only the affordable one qualifies
+    expect(next.players.A.mainDeck.map(c => c.instanceId)).toEqual(['t2#0']);
+  });
+
+  // Regression: per the user's own ruling, Invoke's "on a tile this points
+  // to" destination should ALSO accept a tile occupied by an eligible own
+  // plant (TreeFolk/Vine/Seed) when the invoked card itself has Dryad —
+  // same rule Boknean Druid's own "may be summoned directly onto..." text
+  // already gets at plain SUMMON_BEING time (placeBeingOnBoard's own
+  // dryadAttachTargetOk check). The gap was one level up in
+  // placeInvokedCard's own candidate filter, which required the tile to
+  // be empty outright and never even offered an occupied-but-attachable
+  // one, so placeBeingOnBoard's already-correct attach logic never got a
+  // chance to run.
+  it('"Invoke a TreeFolk...on a tile this points to." (Samara Seed) attaches a Dryad-carrying invoked Being onto an own plant occupying that tile, instead of refusing the tile', () => {
+    const samaraSeed = {
+      type: 'being', ownerId: 'A',
+      card: beingCard({ instanceId: 'ss#0', name: 'Samara Seed', arrows: [1], keywords: { martyr: 'Invoke a TreeFolk with cost (4) or less on a tile this points to.' } }),
+      currentLifespan: 1, engaged: false,
+    };
+    const elderflowerAncient = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'ea#0', name: 'Elderflower Ancient', typing: 'TreeFolk, Being', strength: 2, lifespan: 4 }), currentLifespan: 4, engaged: false };
+    const jirahpera = { id: 'jp', instanceId: 'jp#0', name: 'Jirahperā', kind: 'being', typing: 'TreeFolk, Being', castingCost: { faithless: 0, colored: { living: 2 } }, strength: 1, lifespan: 1, keywords: { dryad: true } };
+    const state = baseState({ board: { r1c2: samaraSeed, r2c2: elderflowerAncient }, players: { A: player({ mainDeck: [jirahpera] }), B: player() } });
+    const next = gameReducer(state, { type: 'ACTIVATE_MARTYR', cellId: 'r1c2' });
+    expect(next.board.r2c2.card.name).toBe('Jirahperā'); // the invoked Dryad Being becomes the tile's own occupant
+    expect(next.board.r2c2.dryadAttached?.card?.name).toBe('Elderflower Ancient'); // riding it, Dryad-style
+    expect(next.players.A.mainDeck).toHaveLength(0); // found and invoked, not left behind
   });
 
   it('"Remove (1) Growth Counter: Sacrifice this, Invoke a Treefolk with cost (2) or less summon it on a tile this points to." (Kernel) sacrifices itself, then invokes within the cost cap', () => {
@@ -8582,6 +9258,28 @@ describe('"Engage target Being you control: Move it, then move it again." (Acrob
     const next = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'ae#0' });
     expect(next.log.some(e => e.message.includes("has no legal Being of A's to Engage"))).toBe(true);
   });
+
+  it('does not crash the "move it again" continuation when the Being\'s own first move already removed it from the board (e.g. "When [it] moves sacrifice it.")', () => {
+    // Regression: continueMoveThen's sameActor path re-enters
+    // moveOrOfferFreeMove at the Being's post-first-move cell assuming it's
+    // still there — but moveBeingFreely (for the first move) already fired
+    // triggerOnMoveReaction before returning, and an onMove reaction that
+    // itself removes the Being (a self-sacrifice, same shape as "Defective
+    // Demon") leaves nothing there for the second move to find. Self-play
+    // found this a real, reachable crash reading occupant.card.name off
+    // undefined.
+    const selfDestructingMover = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'm#0', keywords: { onMove: 'sacrifice it.' } }), currentLifespan: 3, engaged: false };
+    const state = baseState({ board: { r2c2: selfDestructingMover }, players: { A: player({ hand: [acrobaticEscape], lifespan: 30 }), B: player() } });
+    let next = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'ae#0' });
+    expect(next.pendingChoice.kind).toBe('free-move');
+    expect(() => {
+      next = gameReducer(next, { type: 'RESOLVE_FREE_MOVE', toCellId: 'r2c3' });
+    }).not.toThrow();
+    expect(next.board.r2c2).toBeUndefined();
+    expect(next.board.r2c3).toBeUndefined(); // moved there, then immediately sacrificed by its own onMove
+    expect(next.pendingChoice).toBeNull(); // the "then" continuation gracefully found nothing to move again
+    expect(next.players.A.purgatory.some(c => c.instanceId === 'm#0')).toBe(true);
+  });
 });
 
 describe('"Until end of turn target Relic becomes a 1/1 Armament and Being, it can move any direction." (Animate)', () => {
@@ -8652,10 +9350,11 @@ describe('"Deal (1) damage to each Being and your Lifespan, repeat for each Time
       players: { A: player({ hand: [equanimity], lifespan: 30 }), B: player({ lifespan: 30 }) },
     });
     const next = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'eq-1#0' });
-    // 1 + 2 = 3 Time Counters total across A's own Prophecies.
-    expect(next.board.r2c1.currentLifespan).toBe(7); // 10 - 3, hits the caster's own side too
-    expect(next.board.r4c1.currentLifespan).toBe(7); // 10 - 3
-    expect(next.players.A.lifespan).toBe(27); // 30 - 3, one per trigger
+    // 1 + 2 = 3 Time Counters total across A's own Prophecies, plus the
+    // base trigger that always fires once regardless — 4 total.
+    expect(next.board.r2c1.currentLifespan).toBe(6); // 10 - 4, hits the caster's own side too
+    expect(next.board.r4c1.currentLifespan).toBe(6); // 10 - 4
+    expect(next.players.A.lifespan).toBe(26); // 30 - 4, one per trigger
   });
 
   it('does not charge the owner death-damage for a Being that dies from this effect, but still fires Depart and counts as a death', () => {
@@ -8681,25 +9380,50 @@ describe('"Deal (1) damage to each Being and your Lifespan, repeat for each Time
     });
     const next = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'eq-1#0' });
     expect(next.board.r4c1).toBeUndefined();
-    expect(next.players.B.beingsDiedThisTurn).toBe(1); // only died once, not 3 times
-    expect(next.players.A.lifespan).toBe(27); // still repeats 3 times for the caster's own Lifespan
+    expect(next.players.B.beingsDiedThisTurn).toBe(1); // only died once, not 4 times
+    expect(next.players.A.lifespan).toBe(26); // still repeats 4 times (3 Time Counters + 1 base) for the caster's own Lifespan
   });
 
-  it('is a no-op with an honest log when the caster controls no Time Counter on a Prophecy', () => {
+  it('still triggers once (the base trigger) with 0 Time Counters on any Prophecy, not a no-op', () => {
     const own = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'o#0', lifespan: 10 }), currentLifespan: 10, engaged: false };
     const state = baseState({ board: { r2c1: own }, players: { A: player({ hand: [equanimity], lifespan: 30 }), B: player() } });
     const next = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'eq-1#0' });
-    expect(next.board.r2c1.currentLifespan).toBe(10);
-    expect(next.players.A.lifespan).toBe(30);
-    expect(next.log.some(e => e.message.includes('nothing happens'))).toBe(true);
+    expect(next.board.r2c1.currentLifespan).toBe(9); // 10 - 1, the base trigger still fires
+    expect(next.players.A.lifespan).toBe(29); // 30 - 1
+    expect(next.log.some(e => e.message.includes('triggers (1/1)'))).toBe(true);
   });
 
-  it('only counts Time Counters on the CASTER\'s own Prophecies, not the opponent\'s', () => {
+  it('only counts Time Counters on the CASTER\'s own Prophecies, not the opponent\'s — still 1 base trigger either way', () => {
     const own = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'o#0', lifespan: 10 }), currentLifespan: 10, engaged: false };
     const opponentProphecy = { type: 'prophecy', ownerId: 'B', card: { name: 'P1' }, timer: 5, faceDown: true };
     const state = baseState({ board: { r2c1: own, r3c1: opponentProphecy }, players: { A: player({ hand: [equanimity], lifespan: 30 }), B: player() } });
     const next = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'eq-1#0' });
-    expect(next.board.r2c1.currentLifespan).toBe(10); // untouched — no counter from A's own Prophecies
+    expect(next.board.r2c1.currentLifespan).toBe(9); // 10 - 1 — no counter from A's own Prophecies, just the base trigger
+  });
+
+  it('a repeat cast that kills a Being with an Animated Armament attached hits that Armament, now topmost, on a later iteration', () => {
+    const animatedSword = {
+      card: { id: 'as', instanceId: 'as#0', name: 'Animated Sword', kind: 'relic-armament', keywords: { animated: true }, strength: 1, lifespan: 3 },
+      engaged: false, currentLifespan: 3,
+    };
+    const fragile = {
+      type: 'being', ownerId: 'B', card: beingCard({ instanceId: 'f#0', lifespan: 1 }), currentLifespan: 1, engaged: false,
+      armaments: [animatedSword],
+    };
+    const prophecy = { type: 'prophecy', ownerId: 'A', card: { name: 'P1' }, timer: 2, faceDown: true };
+    const state = baseState({
+      board: { r4c1: fragile, r3c1: prophecy },
+      players: { A: player({ hand: [equanimity], lifespan: 30 }), B: player({ lifespan: 30 }) },
+    });
+    // 3 total triggers (2 Time Counters + 1 base): iteration 1 kills the
+    // Being (1 Lifespan), dropping its Animated Armament to the top of a
+    // freestanding pile on the same tile; iterations 2 and 3 then hit that
+    // Armament directly (3 printed Lifespan - 2 damage = 1 left).
+    const next = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'eq-1#0' });
+    expect(next.board.r4c1.type).toBe('armament-stack');
+    expect(next.board.r4c1.armaments).toHaveLength(1);
+    expect(next.board.r4c1.armaments[0].currentLifespan).toBe(1); // 3 - 2 (iterations 2 and 3)
+    expect(next.players.B.beingsDiedThisTurn).toBe(1); // the Armament dying isn't counted as a Being death
   });
 });
 
@@ -9175,6 +9899,13 @@ describe('Re-audit round: gaps closed after the Deja Vu / Immen Gorta pass', () 
     const next = gameReducer(state, { type: 'MOVE_OR_ATTACK', fromCellId: 'r2c2', direction: 3 });
     expect(next.board.r2c2.type).toBe('being'); // the Vine token landed on the vacated origin tile
     expect(next.board.r2c2.card.name).toBe('Vine');
+    // Its real printed row (public/default-card-set.csv row 452) prints
+    // Arrows "1" — TOKEN_REGISTRY's createTokenCard() calls used to have no
+    // way to pass arrows through at all, so every Being token came out
+    // immobile regardless of what its real card prints (the "Rat tokens
+    // can't move" report). Confirms the fix actually reaches a token
+    // created through a real in-game reaction, not just the registry entry.
+    expect(next.board.r2c2.card.arrows).toEqual([1]);
   });
 
   it('Samara Seed — a cost prefix before "Martyr:" on the same line (parser fix) is now offered and spends the Counters', () => {
@@ -9235,6 +9966,51 @@ describe('Re-audit round: gaps closed after the Deja Vu / Immen Gorta pass', () 
     expect(next.players.A.purgatory).toEqual([hunger]);
   });
 
+  describe('Onagīous Hunger — "Discard a Hunger, then draw (1) card." (real CSV text)', () => {
+    const EFFECT_TEXT = 'Discard a Hunger, then draw (1) card.';
+    const nonHunger = beingCard({ instanceId: 'n#0', name: 'Not A Hunger', typing: 'Spirit, Being' });
+
+    it('with no matching Hunger in hand, logs a fizzle and draws nothing', () => {
+      const state = baseState({ players: { A: player({ hand: [nonHunger] }), B: player() } });
+      const next = resolveOrLogEffect(state, 'A', 'Onagīous Hunger', EFFECT_TEXT, 'Engage ability', {});
+      expect(next.players.A.hand).toEqual([nonHunger]);
+      expect(next.players.A.mainDeck).toEqual(state.players.A.mainDeck);
+    });
+
+    it('with exactly one matching Hunger, discards it and draws immediately, in order', () => {
+      const hunger = beingCard({ instanceId: 'h#0', name: 'Some Hunger', typing: 'Hunger, Being' });
+      const topOfDeck = beingCard({ instanceId: 'd#0', name: 'Top Card' });
+      const state = baseState({
+        players: { A: player({ hand: [hunger], mainDeck: [topOfDeck] }), B: player() },
+      });
+      const next = resolveOrLogEffect(state, 'A', 'Onagīous Hunger', EFFECT_TEXT, 'Engage ability', {});
+      expect(next.players.A.hand).toEqual([topOfDeck]);
+      expect(next.players.A.purgatory).toEqual([hunger]);
+      expect(next.players.A.mainDeck).toHaveLength(0);
+    });
+
+    it('with two+ matching Hungers, opens a choice and defers the draw until AFTER it resolves — the actual bug', () => {
+      const hungerOne = beingCard({ instanceId: 'h1#0', name: 'First Hunger', typing: 'Hunger, Being' });
+      const hungerTwo = beingCard({ instanceId: 'h2#0', name: 'Second Hunger', typing: 'Hunger, Being' });
+      const topOfDeck = beingCard({ instanceId: 'd#0', name: 'Top Card' });
+      const state = baseState({
+        players: { A: player({ hand: [hungerOne, hungerTwo], mainDeck: [topOfDeck] }), B: player() },
+      });
+      const opened = resolveOrLogEffect(state, 'A', 'Onagīous Hunger', EFFECT_TEXT, 'Engage ability', {});
+      // The choice is open — nothing has been discarded or drawn yet.
+      expect(opened.pendingChoice).toMatchObject({ kind: 'discard-typed', typing: 'Hunger', drawCount: 1 });
+      expect(opened.players.A.hand).toEqual([hungerOne, hungerTwo]);
+      expect(opened.players.A.mainDeck).toEqual([topOfDeck]);
+
+      const resolved = gameReducer(opened, { type: 'RESOLVE_DISCARD_TYPED', instanceId: hungerOne.instanceId });
+      expect(resolved.pendingChoice).toBeNull();
+      expect(resolved.players.A.purgatory).toEqual([hungerOne]);
+      // The just-drawn card is never itself a discard candidate, and the
+      // un-discarded Hunger stays in hand exactly as the player left it.
+      expect(resolved.players.A.hand).toEqual([hungerTwo, topOfDeck]);
+    });
+  });
+
   it('Pangs of Hunger — "Deal (N) damage to all Beings" hits every Being on the board, either side', () => {
     const mine = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'a#0', lifespan: 5 }), currentLifespan: 5, engaged: false };
     const theirs = { type: 'being', ownerId: 'B', card: beingCard({ instanceId: 'b#0', lifespan: 5 }), currentLifespan: 5, engaged: false };
@@ -9291,6 +10067,35 @@ describe('Re-audit round: gaps closed after the Deja Vu / Immen Gorta pass', () 
     expect(shiftedEntry?.type).toBe('prophecy');
     expect(shiftedEntry?.shiftedFromCard?.name).toBe('Locust swarm');
     expect(shiftedEntry?.timer).toBe(3);
+  });
+
+  // Regression: the real CSV row's own "Card Name" is "Locust swarm " with
+  // a trailing space (confirmed via public/default-card-set.csv) — unlike
+  // the test above, which uses a hand-built, already-clean 'Locust swarm'
+  // fixture and so never exercised this. Before toGameCard trimmed the
+  // name (cardData.js), that trailing space survived into `.name` and got
+  // consumed by selfReferentialWhenSummonedText's own substitution
+  // ("Locust Swarm Shifts (3)." -> "thisShifts (3)." — note the missing
+  // space), which no longer matched SELF_SHIFT_RE — the Depart fired and
+  // logged, but the Shift itself silently never happened at all.
+  it('Locust swarm — still Shifts correctly when parsed from a real, untrimmed CSV row (own name has a trailing space)', () => {
+    const card = toGameCard({
+      'Card Name': 'Locust swarm ', 'Card Typing': 'Insect, Being', 'Effigy Costs': '1 Faithless, 2 Shifting',
+      'Casting Cost': '3', 'Text Box': 'Depart: Locust Swarm Shifts (3).', 'Strength': '2', 'Lifespan': '1',
+      'Arrows (Clockwise top center = 1)': '1',
+    }, 0);
+    const attacker = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'atk#0', strength: 5, lifespan: 5 }), currentLifespan: 5, engaged: false };
+    const defender = { type: 'being', ownerId: 'B', card, currentLifespan: 1, engaged: false };
+    const state = baseState({ board: { r2c1: attacker, r4c1: defender }, players: { A: player({ lifespan: 50 }), B: player({ lifespan: 50 }) } });
+    const afterCombat = gameReducer(state, { type: 'MOVE_OR_ATTACK', fromCellId: 'r2c1', toCellId: 'r4c1', isAttack: true });
+    expect(afterCombat.log.at(-1).message).not.toMatch(/isn't automated yet/);
+    expect(afterCombat.pendingChoice?.kind).toBe('shift-from-purgatory-destination');
+    const destCell = afterCombat.pendingChoice.allowedCells[0];
+    const next = gameReducer(afterCombat, { type: 'RESOLVE_SHIFT_FROM_PURGATORY_DESTINATION', cellId: destCell });
+    const shiftedEntry = next.board[destCell];
+    expect(shiftedEntry?.type).toBe('prophecy');
+    expect(shiftedEntry?.timer).toBe(3);
+    expect(shiftedEntry?.shiftedFromCard?.name).toBe('Locust swarm');
   });
 
   it('Cutlass — "When the attached Being dies sacrifice this and summon a Cursed Cutlass token on this tile" fires from real combat death', () => {
@@ -9472,6 +10277,24 @@ describe('Clarified cards, second wave', () => {
     const next = resolveOrLogEffect(afterMove, 'A', 'Conscription', 'If none move, choose two Beings they Engage in combat.', 'Prophecy', {});
     expect(next.board.r2c1.currentLifespan).toBe(3); // took the opponent's 1 Strength
     expect(next.board.r4c1.currentLifespan).toBe(2); // took the 4 Strength back
+  });
+
+  it('Planchette — its granted Martyr really reanimates an Undead OR a Demon from Purgatory ("Being from your Purgatory on this tile" word order, OR\'d typing)', () => {
+    const planchette = { id: 'pl', instanceId: 'pl#0', name: 'Planchette', kind: 'relic', castingCost: { faithless: 0, colored: {} },
+      keywords: { grantedMartyr: 'Summon an Undead or Demon Being from your Purgatory on this tile.' } };
+    const being = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'w#0', keywords: {} }), currentLifespan: 5, engaged: false };
+    const demon = beingCard({ instanceId: 'd#0', name: 'Imp', typing: 'Demon, Being' });
+    const human = beingCard({ instanceId: 'h#0', name: 'Some Human', typing: 'Human, Being' });
+    const state = baseState({
+      groundRelics: { r2c1: { ownerId: 'A', card: planchette } },
+      board: { r2c1: being },
+      players: { A: player({ purgatory: [demon, human] }), B: player() },
+    });
+    const next = gameReducer(state, { type: 'ACTIVATE_MARTYR', cellId: 'r2c1' });
+    expect(next.board.r2c1.type).toBe('being');
+    expect(next.board.r2c1.card.name).toBe('Imp'); // the Demon, not the Human
+    expect(next.players.A.purgatory.some(c => c.name === 'Some Human')).toBe(true); // untouched
+    expect(next.players.A.purgatory.some(c => c.name === 'Imp')).toBe(false); // reanimated out
   });
 
   it('Planchette — loses Lifespan at end of turn equal to whatever Being currently shares its tile, and grants that Being Martyr', () => {
@@ -9681,6 +10504,22 @@ describe('Third wave: more Still Unwired gaps closed', () => {
     expect(effectiveStrength(next.board.r4c2)).toBe(2); // printed 1 + 1
   });
 
+  it('Blood Moon — a candidate cell that died before the choice resolves is never offered again (self-play found a stale offer looping the AI forever)', () => {
+    const opened = {
+      kind: 'give-different-typed-buff', playerId: 'B', cardName: 'Blood Moon', label: 'reaction',
+      strengthBonus: 1, lifespanBonus: 1, allowedCells: ['r4c1', 'r4c2'],
+    };
+    // r4c1 has since died (nothing there anymore); only r4c2 is still alive.
+    const survivor = { type: 'being', ownerId: 'B', card: beingCard({ instanceId: 'sv#0', strength: 1, lifespan: 5 }), currentLifespan: 5, engaged: false };
+    const state = baseState({ board: { r4c2: survivor }, pendingChoice: opened, players: { A: player(), B: player() } });
+    const legal = getLegalActions(state, 'B');
+    expect(legal).toEqual([{ type: 'RESOLVE_GIVE_DIFFERENT_TYPED_BUFF', cellId: 'r4c2' }]);
+    // Dispatching the stale cell directly still stays a safe no-op (the
+    // reducer's own defensive check), it's just never offered as legal.
+    const stale = gameReducer(state, { type: 'RESOLVE_GIVE_DIFFERENT_TYPED_BUFF', cellId: 'r4c1' });
+    expect(stale).toBe(state);
+  });
+
   it('Canopic Jar — "Engage: Remove (4) Crossing Counters Shuffle a Being from Purgatory into it\'s owners deck, they draw (1) card" (no punctuation) resolves fully', () => {
     const jar = { type: 'relic', ownerId: 'A', card: { id: 'cj', instanceId: 'cj#0', name: 'Canopic Jar', kind: 'relic', castingCost: { faithless: 0, colored: {} }, keywords: {} }, counters: { crossing: 4 } };
     const purgCard = beingCard({ instanceId: 'pc#0', name: 'Purg Card', typing: 'Human, Being' });
@@ -9691,6 +10530,52 @@ describe('Third wave: more Still Unwired gaps closed', () => {
     // The deck started empty, so the one card shuffled in is also the one
     // immediately drawn back out — it lands in hand, not left in the deck.
     expect(next.players.A.hand.some(c => c.instanceId === 'pc#0')).toBe(true);
+  });
+
+  // Regression: unlike Melting Clock/Temple of Dubiety's own "from YOUR
+  // Purgatory" (own-only), Canopic Jar's printed text has no "your" —
+  // "into it's owners deck, they draw" both point at whoever the found
+  // Being actually belongs to. The old code only ever searched
+  // state.players[playerId].purgatory (the activator's own), so an
+  // opponent's Purgatory was invisible to it entirely — confirmed with
+  // the user as the bug.
+  it('Canopic Jar — can find and shuffle a Being from the OPPONENT\'s own Purgatory, and the opponent (not the activator) draws', () => {
+    const jar = { type: 'relic', ownerId: 'A', card: { id: 'cj', instanceId: 'cj#0', name: 'Canopic Jar', kind: 'relic', castingCost: { faithless: 0, colored: {} }, keywords: {} }, counters: { crossing: 4 } };
+    const oppPurgCard = beingCard({ instanceId: 'opc#0', name: 'Opponent Card', typing: 'Human, Being' });
+    const state = baseState({
+      board: { r1c1: jar },
+      players: { A: player({ purgatory: [], mainDeck: [] }), B: player({ purgatory: [oppPurgCard], mainDeck: [] }) },
+    });
+    const next = resolveOrLogEffect(state, 'A', 'Canopic Jar', "Remove (4) Crossing Counters Shuffle a Being from Purgatory into it's owners deck, they draw (1) card.", 'Engage ability', { selfCellId: 'r1c1' });
+    expect(next.players.B.purgatory).toEqual([]);
+    expect(next.players.A.hand).toEqual([]); // the activator gets nothing
+    expect(next.players.B.hand.some(c => c.instanceId === 'opc#0')).toBe(true); // the card's own owner draws it
+  });
+
+  it('Canopic Jar — offers a real choice across BOTH players\' Purgatories, and resolving the opponent\'s own candidate doesn\'t touch the activator\'s pile', () => {
+    const jar = { type: 'relic', ownerId: 'A', card: { id: 'cj', instanceId: 'cj#0', name: 'Canopic Jar', kind: 'relic', castingCost: { faithless: 0, colored: {} }, keywords: {} }, counters: { crossing: 4 } };
+    // Same card, same instanceId scheme, one copy in each player's own
+    // Purgatory — deck-built instanceIds (deck.js: `${card.id}#${i}`) are
+    // only unique WITHIN one player's own deck, so this is a real,
+    // reachable collision (e.g. both players on the same precon), not a
+    // contrived edge case — only the offer's own explicit ownerId tag
+    // (not instanceId alone) can disambiguate which pile a candidate
+    // came from.
+    const ownPurgCard = beingCard({ instanceId: 'dup#0', name: 'Duplicate Card', typing: 'Human, Being' });
+    const oppPurgCard = beingCard({ instanceId: 'dup#0', name: 'Duplicate Card', typing: 'Human, Being' });
+    const state = baseState({
+      board: { r1c1: jar },
+      players: { A: player({ purgatory: [ownPurgCard], mainDeck: [] }), B: player({ purgatory: [oppPurgCard], mainDeck: [] }) },
+    });
+    const opened = resolveOrLogEffect(state, 'A', 'Canopic Jar', "Remove (4) Crossing Counters Shuffle a Being from Purgatory into it's owners deck, they draw (1) card.", 'Engage ability', { selfCellId: 'r1c1' });
+    expect(opened.pendingChoice).toEqual(expect.objectContaining({ kind: 'shuffle-purgatory-into-deck', anyOwner: true }));
+    const options = getLegalActions(opened, 'A').filter(a => a.type === 'RESOLVE_SHUFFLE_PURGATORY_INTO_DECK');
+    expect(options).toContainEqual({ type: 'RESOLVE_SHUFFLE_PURGATORY_INTO_DECK', instanceId: 'dup#0', ownerId: 'A' });
+    expect(options).toContainEqual({ type: 'RESOLVE_SHUFFLE_PURGATORY_INTO_DECK', instanceId: 'dup#0', ownerId: 'B' });
+    const resolved = gameReducer(opened, { type: 'RESOLVE_SHUFFLE_PURGATORY_INTO_DECK', instanceId: 'dup#0', ownerId: 'B' });
+    expect(resolved.players.A.purgatory).toEqual([ownPurgCard]); // A's own copy left untouched
+    expect(resolved.players.B.purgatory).toEqual([]);
+    expect(resolved.players.B.hand.some(c => c.instanceId === 'dup#0')).toBe(true);
   });
 
   it('May Break my Bones — "Choose a Being this points to, destroy it and Summon a Bag o\' Bones token on that tile" destroys then summons on the SAME tile', () => {
@@ -10039,6 +10924,33 @@ describe('Fifth wave: board-wide aura primitive (Growth Spurt / Crathea\'s Bloom
     expect(next.board[placedCell].timer).toBe(3);
   });
 
+  // Regression: with more than one empty Ethereal cell open (the normal
+  // case on turn 1 — the live bug the user actually hit, reported as
+  // "Crathea caused a Frozen Gamestate since I was unable to select a
+  // Prophecy to summon"), RESOLVE_CREATE_TOKEN_CHOICE opens a SECOND
+  // pendingChoice ('ethereal-token-location') to pick which one. Match.jsx
+  // had no UI wired for either this kind or 'create-token-choice' itself —
+  // the engine was already correct, the player just had no button to
+  // click. This test only proves the engine's own half; the UI fix is
+  // Match.jsx's SINGLE_CELL_CHOICE_KINDS['ethereal-token-location'] entry
+  // and the new pendingCreateTokenChoiceCandidates modal.
+  it('Crathea — with more than one empty Ethereal cell, opens a follow-up ethereal-token-location choice instead of placing directly', () => {
+    const state = baseState({ board: {}, players: { A: player({ hand: [] }), B: player() } });
+    const opened = resolveOrLogEffect(
+      state, 'A', 'Crathea',
+      'create a face up Blooming Life token (0 cost - Divine Prophecy - 3T "Beings you control have +1/+1") or a Withering Life token (0 cost - Divine Prophecy - 3T - "Beings you don\'t control have -1/-1").',
+      'When Summoned', {}
+    );
+    const next = gameReducer(opened, { type: 'RESOLVE_CREATE_TOKEN_CHOICE', tokenKey: 'blooming life' });
+    expect(next.pendingChoice).toEqual(expect.objectContaining({ kind: 'ethereal-token-location', tokenName: 'blooming life', playerId: 'A' }));
+    expect(Object.values(next.board).some(o => o?.card?.name === 'Blooming Life')).toBe(false); // not placed yet
+    const chosenCell = next.pendingChoice.allowedCells[0];
+    const placed = gameReducer(next, { type: 'RESOLVE_ETHEREAL_TOKEN_LOCATION', cellId: chosenCell });
+    expect(placed.pendingChoice).toBe(null);
+    expect(placed.board[chosenCell].card.name).toBe('Blooming Life');
+    expect(placed.board[chosenCell].faceDown).toBe(false);
+  });
+
   it('Crathea — with the Ethereal Realm full, gracefully creates nothing rather than crashing', () => {
     const filler = (n) => ({ type: 'prophecy', ownerId: 'B', card: { name: `Filler ${n}`, instanceId: `f${n}#0` }, timer: 1, faceDown: true });
     const state = baseState({
@@ -10281,6 +11193,18 @@ describe('Tenth wave: By Teeth and Bounds — a Prophecy\'s three condition-gate
     const legal = getLegalActions(next, 'A');
     expect(legal).toContainEqual({ type: 'RESOLVE_TEETH_BOUNDS_TIE_CHOICE', choice: 'more' });
     expect(legal).toContainEqual({ type: 'RESOLVE_TEETH_BOUNDS_TIE_CHOICE', choice: 'less' });
+  });
+
+  it('an Animated Armament acting as a Being (topmost of its own pile) counts towards the Being total on either side', () => {
+    // A alone: 1 real Being (hunger). B: no real Beings, but an Animated
+    // Armament stack whose topmost entry counts as one — so it's tied
+    // (1 vs 1), not "A controls more" the way a bare armament-stack count
+    // (ignoring Animated) would incorrectly read.
+    const animatedTop = { card: { id: 'aa', instanceId: 'aa#0', name: 'Animated Armament', kind: 'relic-armament', keywords: { animated: true } }, engaged: false, currentLifespan: 2 };
+    const opponentAnimatedStack = { type: 'armament-stack', ownerId: 'B', armaments: [animatedTop] };
+    const state = baseState({ board: { r2c1: hunger(1), r4c1: opponentAnimatedStack }, players: { A: player(), B: player() } });
+    const next = resolveOrLogEffect(state, 'A', 'By Teeth and Bounds', tieLine, 'Prophecy', {});
+    expect(next.pendingChoice).toEqual(expect.objectContaining({ kind: 'teeth-bounds-tie-choice', playerId: 'A' }));
   });
 
   it('choosing "less" on a tie really draws 2 cards, bypassing the (now-false) "less" condition check', () => {
@@ -10773,5 +11697,410 @@ describe('Seventeenth wave: Kalmahka — "Armaments you control are 3/1 Relic - 
     const state = baseState({ board: { r3c1: kalmahkaProphecy(), r2c1: pile } });
     const next = gameReducer(state, RECOMPUTE_ONLY);
     expect(next.board.r2c1.armaments[0].card.strength).toBe(3);
+  });
+
+  describe('the synthetic override card must never leak into a permanent zone (Purgatory) once the real Armament actually dies', () => {
+    // Regression: dying while overridden used to push the synthetic
+    // "Warped Armament" stand-in (no castingCost, no real identity) into
+    // Purgatory instead of the real card underneath (kalmahkaOriginalCard)
+    // — self-play found this crashing later (canPayCost reading .colored
+    // off the missing castingCost) the moment that fake card got searched
+    // back to hand by an unrelated effect (Crucible).
+    it('combat death of an overridden, Animated (via the override itself) freestanding pile sends the REAL card to Purgatory, not "Warped Armament"', () => {
+      const pile = { type: 'armament-stack', ownerId: 'A', armaments: [{ ...martyrArmament, currentLifespan: 1 }] };
+      const attacker = { type: 'being', ownerId: 'B', card: beingCard({ instanceId: 'atk#0', strength: 5, lifespan: 10 }), currentLifespan: 10, engaged: false };
+      const state = baseState({ turnPlayer: 'B', board: { r3c1: kalmahkaProphecy(), r2c1: pile, r4c1: attacker } });
+      const overridden = gameReducer(state, RECOMPUTE_ONLY);
+      expect(overridden.board.r2c1.armaments[0].card.name).toBe('Warped Armament'); // confirms the override really is active
+      let next;
+      expect(() => {
+        next = gameReducer(overridden, { type: 'MOVE_OR_ATTACK', fromCellId: 'r4c1', toCellId: 'r2c1', isAttack: true });
+      }).not.toThrow();
+      expect(next.board.r2c1).toBeUndefined(); // the 3/1 pile dies to a 5-Strength attacker
+      const purgatoryNames = next.players.A.purgatory.map(c => c.name);
+      expect(purgatoryNames).toContain('Real Armament');
+      expect(purgatoryNames).not.toContain('Warped Armament');
+      expect(next.players.A.purgatory.find(c => c.name === 'Real Armament').castingCost).toBeDefined();
+    });
+  });
+});
+
+describe('Eighteenth wave: Ethereal Conjuring reactive timing (priority window)', () => {
+  const etherealConjuring = (overrides = {}) => ({
+    id: 'ec', instanceId: 'ec#0', name: 'Test Ethereal', kind: 'ethereal-conjuring',
+    castingCost: { faithless: 0, colored: {} }, textBox: 'Gain 3 Lifespan.', ...overrides,
+  });
+  const summonableBeing = (overrides = {}) => ({
+    id: 'sb', instanceId: 'sb#0', name: 'Summonable', kind: 'being',
+    castingCost: { faithless: 0, colored: {} }, strength: 1, lifespan: 1, timerMax: 0, arrows: [1], ...overrides,
+  });
+
+  it('a normal action by A opens a window for B when B holds an affordable Ethereal Conjuring', () => {
+    const state = baseState({
+      turnPlayer: 'A',
+      players: { A: player({ hand: [summonableBeing()] }), B: player({ hand: [etherealConjuring({ instanceId: 'ec-b#0' })] }) },
+    });
+    const next = gameReducer(state, { type: 'SUMMON_BEING', instanceId: 'sb#0', cellId: 'r1c2' });
+    expect(next.board.r1c2.card.name).toBe('Summonable'); // the summon itself still went through normally
+    expect(next.reactiveWindow).toEqual(expect.objectContaining({ openFor: 'B' }));
+    // The window carries a human-readable description of what A just did,
+    // so B's UI can say what they're being asked to respond to (Match.jsx's
+    // own Respond banner, above the Pass Priority button) instead of B
+    // having to guess.
+    expect(next.reactiveWindow.triggerDescription).toContain('Summonable');
+    const legal = getLegalActions(next, 'B');
+    expect(legal).toContainEqual({ type: 'PASS_PRIORITY' });
+    expect(legal).toContainEqual({ type: 'CAST_CONJURING', instanceId: 'ec-b#0' });
+    expect(getLegalActions(next, 'A')).toEqual([]); // A has no actions while B holds the window
+  });
+
+  it('auto-closes within the same dispatch when the opponent has nothing to cast — invisible in practice', () => {
+    const state = baseState({
+      turnPlayer: 'A',
+      players: { A: player({ hand: [summonableBeing()] }), B: player({ hand: [] }) },
+    });
+    const next = gameReducer(state, { type: 'SUMMON_BEING', instanceId: 'sb#0', cellId: 'r1c2' });
+    expect(next.reactiveWindow).toBeNull();
+  });
+
+  it('auto-closes when the opponent holds an Ethereal Conjuring but can\'t afford it', () => {
+    const unaffordable = etherealConjuring({ instanceId: 'ec-b#0', castingCost: { faithless: 5, colored: {} } });
+    const state = baseState({
+      turnPlayer: 'A',
+      players: { A: player({ hand: [summonableBeing()] }), B: player({ hand: [unaffordable], effigyPool: [] }) },
+    });
+    const next = gameReducer(state, { type: 'SUMMON_BEING', instanceId: 'sb#0', cellId: 'r1c2' });
+    expect(next.reactiveWindow).toBeNull();
+  });
+
+  it('a real reactive cast resolves through the exact same CAST_CONJURING/resolveOrLogEffect pipeline as a normal cast', () => {
+    const state = baseState({
+      turnPlayer: 'A',
+      players: { A: player({ hand: [summonableBeing()] }), B: player({ hand: [etherealConjuring({ instanceId: 'ec-b#0' })], lifespan: 50 }) },
+    });
+    const opened = gameReducer(state, { type: 'SUMMON_BEING', instanceId: 'sb#0', cellId: 'r1c2' });
+    const next = gameReducer(opened, { type: 'CAST_CONJURING', instanceId: 'ec-b#0' });
+    expect(next.players.B.lifespan).toBe(53); // the real effect really applied
+    expect(next.players.B.hand).toHaveLength(0);
+    expect(next.players.B.purgatory).toHaveLength(1);
+  });
+
+  it('an explicit PASS_PRIORITY closes the window outright, returning control to the active player', () => {
+    const state = baseState({
+      turnPlayer: 'A',
+      players: { A: player({ hand: [summonableBeing()] }), B: player({ hand: [etherealConjuring({ instanceId: 'ec-b#0' })] }) },
+    });
+    const opened = gameReducer(state, { type: 'SUMMON_BEING', instanceId: 'sb#0', cellId: 'r1c2' });
+    const next = gameReducer(opened, { type: 'PASS_PRIORITY' });
+    expect(next.reactiveWindow).toBeNull();
+  });
+
+  it('chains: B casts, priority flips to A; A casts back, priority flips to B; B declines, window closes', () => {
+    let state = baseState({
+      turnPlayer: 'A',
+      players: {
+        A: player({ hand: [summonableBeing(), etherealConjuring({ instanceId: 'ec-a#0' })], lifespan: 50 }),
+        // B holds a second Ethereal Conjuring too, so the final PASS_PRIORITY
+        // below is a real decline, not just running out of cards.
+        B: player({ hand: [etherealConjuring({ instanceId: 'ec-b#0' }), etherealConjuring({ instanceId: 'ec-b2#0' })], lifespan: 50 }),
+      },
+    });
+    state = gameReducer(state, { type: 'SUMMON_BEING', instanceId: 'sb#0', cellId: 'r1c2' });
+    expect(state.reactiveWindow).toEqual(expect.objectContaining({ openFor: 'B' }));
+    state = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'ec-b#0' });
+    expect(state.players.B.lifespan).toBe(53);
+    expect(state.reactiveWindow).toEqual(expect.objectContaining({ openFor: 'A' })); // flipped back — A may respond to B's cast
+    state = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'ec-a#0' });
+    expect(state.players.A.lifespan).toBe(53);
+    expect(state.reactiveWindow).toEqual(expect.objectContaining({ openFor: 'B' })); // flipped again — B may respond to A's cast
+    state = gameReducer(state, { type: 'PASS_PRIORITY' });
+    expect(state.reactiveWindow).toBeNull(); // B declines — the whole chain closes
+  });
+
+  it('never opens during the mulligan phase', () => {
+    const state = baseState({
+      phase: 'mulligan',
+      players: { A: player({ keptHand: false }), B: player({ keptHand: false, hand: [etherealConjuring({ instanceId: 'ec-b#0' })] }) },
+    });
+    const next = gameReducer(state, { type: 'KEEP_HAND', player: 'A' });
+    expect(next.reactiveWindow).toBeNull();
+  });
+
+  it('never opens once the game is already won', () => {
+    const winner = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'w#0', strength: 100 }), currentLifespan: 5, engaged: false };
+    const state = baseState({
+      turnPlayer: 'A',
+      board: { r4c1: winner },
+      players: { A: player({ hand: [summonableBeing({ instanceId: 'sb2#0' })] }), B: player({ hand: [etherealConjuring({ instanceId: 'ec-b#0' })], lifespan: 3 }) },
+    });
+    const next = gameReducer(state, { type: 'MOVE_OR_ATTACK', fromCellId: 'r4c1', toCellId: 'r2c1', isAttack: true });
+    expect(next.winner).toBe('A');
+    expect(next.reactiveWindow).toBeNull();
+  });
+
+  it('never opens while a pendingChoice is still being resolved — only once the whole chain finishes', () => {
+    const armament0 = { id: 'a0', instanceId: 'a0#0', name: 'Free Armament', kind: 'relic-armament', typing: 'Relic, Armament', castingCost: { faithless: 0, colored: {} } };
+    const searchConjuring = { id: 'sc', instanceId: 'sc#0', name: 'Search Conjuring', kind: 'conjuring', castingCost: { faithless: 0, colored: {} }, textBox: 'Add an Armament to hand from deck.' };
+    const state = baseState({
+      turnPlayer: 'A',
+      players: {
+        A: player({ hand: [searchConjuring], mainDeck: [armament0] }),
+        B: player({ hand: [etherealConjuring({ instanceId: 'ec-b#0' })] }),
+      },
+    });
+    const midChoice = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'sc#0' });
+    expect(midChoice.pendingChoice).toEqual(expect.objectContaining({ kind: 'search' }));
+    expect(midChoice.reactiveWindow).toBeNull(); // not yet — the choice hasn't finished
+    const resolved = gameReducer(midChoice, { type: 'RESOLVE_CHOICE', instanceId: 'a0#0' });
+    expect(resolved.pendingChoice).toBeNull();
+    expect(resolved.reactiveWindow).toEqual(expect.objectContaining({ openFor: 'B' })); // NOW it opens, for A's real opponent
+  });
+
+  it('does not open around PASS_TURN — the begin/endTurn pipeline stays atomic', () => {
+    const state = baseState({
+      turnPlayer: 'A',
+      players: { A: player({ lifespan: 50, mainDeck: [] }), B: player({ hand: [etherealConjuring({ instanceId: 'ec-b#0' })], lifespan: 50 }) },
+    });
+    const next = gameReducer(state, { type: 'PASS_TURN' });
+    expect(next.turnPlayer).toBe('B');
+    expect(next.reactiveWindow).toBeNull();
+  });
+
+  it('a RESOLVE_* dispatched by the NON-turn-player (finishing their own pendingChoice) opens the window for the real opponent, not naively opponentOf(turnPlayer)', () => {
+    // A attacks; the defender's (B's) Being Departs, opening a search
+    // pendingChoice owned by B even though it's A's turn — the classic
+    // "getLegalActions: it can fire on either player's turn" case.
+    const attacker = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'atk#0', strength: 10, lifespan: 10 }), currentLifespan: 10, engaged: false };
+    const departCard = { id: 'dep', instanceId: 'dep#0', name: 'Departing Being', kind: 'being', castingCost: { faithless: 0, colored: {} }, strength: 1, lifespan: 1, timerMax: 0, arrows: [1], keywords: { depart: 'Add an Armament to hand from deck.' } };
+    const defender = { type: 'being', ownerId: 'B', card: departCard, currentLifespan: 1, engaged: false };
+    const armament0 = { id: 'a0', instanceId: 'a0#0', name: 'Free Armament', kind: 'relic-armament', typing: 'Relic, Armament', castingCost: { faithless: 0, colored: {} } };
+    const state = baseState({
+      turnPlayer: 'A',
+      board: { r4c1: attacker, r2c1: defender },
+      players: {
+        A: player({ hand: [etherealConjuring({ instanceId: 'ec-a#0' })] }),
+        B: player({ mainDeck: [armament0] }),
+      },
+    });
+    const afterCombat = gameReducer(state, { type: 'MOVE_OR_ATTACK', fromCellId: 'r4c1', toCellId: 'r2c1', isAttack: true });
+    expect(afterCombat.pendingChoice).toEqual(expect.objectContaining({ kind: 'search', playerId: 'B' }));
+    expect(afterCombat.reactiveWindow).toBeNull();
+    const resolved = gameReducer(afterCombat, { type: 'RESOLVE_CHOICE', instanceId: 'a0#0' });
+    expect(resolved.pendingChoice).toBeNull();
+    // The real actor was B (Depart's own owner), not A (turnPlayer) — so
+    // the window must open for A, B's real opponent.
+    expect(resolved.reactiveWindow).toEqual(expect.objectContaining({ openFor: 'A' }));
+  });
+
+  it('a Being flagged sacrificeAtEndOfTurn is still sacrificed regardless of its owner vs turnPlayer (Desperate Finale reactive-cast fix)', () => {
+    // Simulates what a reactively-cast Desperate-Finale-shaped Ethereal
+    // Conjuring would leave behind: the flagged Being belongs to the
+    // NON-turn-player, since it was THEIR own cast that flagged it.
+    const flagged = { type: 'being', ownerId: 'B', card: beingCard({ instanceId: 'f#0', lifespan: 7 }), currentLifespan: 4, engaged: true, sacrificeAtEndOfTurn: true };
+    const state = baseState({ turnPlayer: 'A', board: { r4c1: flagged }, players: { A: player({ lifespan: 50 }), B: player({ lifespan: 50 }) } });
+    const next = endTurn(state);
+    expect(next.board.r4c1).toBeUndefined();
+    expect(next.players.B.purgatory.some(c => c.instanceId === 'f#0')).toBe(true);
+  });
+
+  describe('Engage abilities are also "ethereal speed" (reactive), but attacking, moving, and Shift stay conjuring/sorcery-speed only', () => {
+    const engageBeing = (overrides = {}) => ({
+      type: 'being', ownerId: 'B',
+      card: beingCard({ instanceId: 'eb#0', name: 'Engage Being', keywords: { engage: 'Gain (1) Lifespan.', shift: { amount: 1, effect: null } } }),
+      currentLifespan: 3, engaged: false, ...overrides,
+    });
+
+    it('offers ACTIVATE_ENGAGE (but not ACTIVATE_SHIFT or MOVE_OR_ATTACK) to whoever holds an open reactive window', () => {
+      const state = baseState({
+        turnPlayer: 'A', reactiveWindow: { openFor: 'B' },
+        board: { r4c1: engageBeing() },
+        players: { A: player(), B: player({ lifespan: 50 }) },
+      });
+      const legal = getLegalActions(state, 'B');
+      expect(legal).toContainEqual({ type: 'ACTIVATE_ENGAGE', cellId: 'r4c1' });
+      expect(legal.some(a => a.type === 'ACTIVATE_SHIFT')).toBe(false);
+      expect(legal.some(a => a.type === 'MOVE_OR_ATTACK')).toBe(false);
+    });
+
+    it('does not offer a counter-gated Engage reactively without enough Counters either (offerReactiveEngageActions\' own copy of the same fix)', () => {
+      const shortOnCounters = {
+        type: 'being', ownerId: 'B',
+        card: beingCard({ instanceId: 'vc#0', name: 'Void Channeler', keywords: { engageCounterCost: { type: 'crossing', amount: 3 }, engage: 'Add a Formless Being to hand from deck.' } }),
+        currentLifespan: 3, engaged: false, counters: { crossing: 1 },
+      };
+      const state = baseState({
+        turnPlayer: 'A', reactiveWindow: { openFor: 'B' },
+        board: { r4c1: shortOnCounters },
+        players: { A: player(), B: player() },
+      });
+      expect(getLegalActions(state, 'B').some(a => a.type === 'ACTIVATE_ENGAGE')).toBe(false);
+    });
+
+    it('really resolves ACTIVATE_ENGAGE while a window is open, even though it isn\'t the activator\'s own turn', () => {
+      const state = baseState({
+        turnPlayer: 'A', reactiveWindow: { openFor: 'B' },
+        board: { r4c1: engageBeing() },
+        players: { A: player(), B: player({ lifespan: 50 }) },
+      });
+      const next = gameReducer(state, { type: 'ACTIVATE_ENGAGE', cellId: 'r4c1' });
+      expect(next.board.r4c1.engaged).toBe(true);
+      expect(next.players.B.lifespan).toBe(51); // its Engage effect really resolved
+    });
+
+    it('flips priority to the opponent after a reactive Engage, same as a reactive cast does', () => {
+      // A needs a real option of its own or the auto-close sweep would
+      // (correctly) collapse the flipped window right back to null.
+      const opponentEngageBeing = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'oeb#0', name: 'Opponent Engage Being', keywords: { engage: 'Gain (1) Lifespan.' } }), currentLifespan: 3, engaged: false };
+      const state = baseState({
+        turnPlayer: 'A', reactiveWindow: { openFor: 'B' },
+        board: { r4c1: engageBeing(), r2c1: opponentEngageBeing },
+        players: { A: player({ lifespan: 50 }), B: player({ lifespan: 50 }) },
+      });
+      const next = gameReducer(state, { type: 'ACTIVATE_ENGAGE', cellId: 'r4c1' });
+      expect(next.reactiveWindow).toEqual(expect.objectContaining({ openFor: 'A' }));
+    });
+
+    it('a mid-turn Engage by the active player itself still opens a reactive window for the opponent, offering Engage back (not just casting)', () => {
+      const opponentEngageBeing = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'oeb#0', name: 'Opponent Engage Being', keywords: { engage: 'Gain (1) Lifespan.' } }), currentLifespan: 3, engaged: false };
+      const state = baseState({
+        turnPlayer: 'B',
+        board: { r4c1: engageBeing(), r2c1: opponentEngageBeing },
+        players: { A: player({ lifespan: 50 }), B: player({ lifespan: 50 }) },
+      });
+      const next = gameReducer(state, { type: 'ACTIVATE_ENGAGE', cellId: 'r4c1' });
+      expect(next.reactiveWindow).toEqual(expect.objectContaining({ openFor: 'A' }));
+      expect(getLegalActions(next, 'A')).toContainEqual({ type: 'ACTIVATE_ENGAGE', cellId: 'r2c1' });
+    });
+  });
+
+  describe('a Conjuring\'s own additional-cost/target-availability gates apply reactively too, not just at main-phase (self-play found an infinite CAST_CONJURING ping-pong otherwise)', () => {
+    const strikeDown = (instanceId) => ({
+      id: 'sd', instanceId, name: 'Strike Down', kind: 'ethereal-conjuring',
+      castingCost: { faithless: 0, colored: {} },
+      textBox: 'Destroy target blocking Being, its controller is not dealt damage when it dies; the attacking Being deals no damage.',
+    });
+
+    it('never offers a reactive Strike Down when the holder has no unengaged front-row Being to attack with', () => {
+      const defender = { type: 'being', ownerId: 'B', card: beingCard({ instanceId: 'defender' }), currentLifespan: 5, engaged: false };
+      const state = baseState({
+        turnPlayer: 'B', reactiveWindow: { openFor: 'A' },
+        board: { r4c1: defender },
+        players: { A: player({ hand: [strikeDown('sd#0')] }), B: player() },
+      });
+      expect(getLegalActions(state, 'A')).not.toContainEqual({ type: 'CAST_CONJURING', instanceId: 'sd#0' });
+    });
+
+    it('never flips the reactive window on a no-op response, even if one somehow got dispatched (defense in depth in manageReactiveWindow itself)', () => {
+      // Hand-forces a CAST_CONJURING through even though getLegalActions
+      // (correctly, per the test above) would never offer it — this is
+      // exactly the shape self-play found: the offer/reducer mismatch used
+      // to let the AI "cast" Strike Down every turn, reactiveWindow flipped
+      // A -> B -> A -> B forever, and the card never actually left hand.
+      const defender = { type: 'being', ownerId: 'B', card: beingCard({ instanceId: 'defender' }), currentLifespan: 5, engaged: false };
+      const state = baseState({
+        turnPlayer: 'B', reactiveWindow: { openFor: 'A' },
+        board: { r4c1: defender },
+        players: { A: player({ hand: [strikeDown('sd#0')] }), B: player() },
+      });
+      const next = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'sd#0' });
+      expect(next.players.A.hand).toHaveLength(1); // never left hand — the reducer's own gate still refused it
+      expect(next.reactiveWindow).toEqual(expect.objectContaining({ openFor: 'A' })); // did NOT flip to B
+    });
+  });
+});
+
+describe('Nineteenth wave: user-reported bug sweep', () => {
+  describe('Cycle of Hunger: "Shuffle (2) Hungers into your deck from your Purgatory, then draw (1) card." — never offered without 2 real Hungers in Purgatory', () => {
+    const cycleOfHunger = {
+      id: 'coh', instanceId: 'coh#0', name: 'Cycle of Hunger', kind: 'conjuring',
+      castingCost: { faithless: 1, colored: {} }, textBox: 'Shuffle (2) Hungers into your deck from your Purgatory, then draw (1) card.',
+    };
+    const hunger = (n) => ({ instanceId: `hunger${n}#0`, name: `Some Hunger ${n}`, kind: 'being', typing: 'Hunger, Being' });
+
+    it('is not offered with 0 Hungers in Purgatory', () => {
+      const state = baseState({ players: { A: player({ hand: [cycleOfHunger] }), B: player() } });
+      expect(getLegalActions(state, 'A').some(a => a.type === 'CAST_CONJURING' && a.instanceId === 'coh#0')).toBe(false);
+    });
+
+    it('is not offered with only 1 Hunger in Purgatory', () => {
+      const state = baseState({ players: { A: player({ hand: [cycleOfHunger], purgatory: [hunger(1)] }), B: player() } });
+      expect(getLegalActions(state, 'A').some(a => a.type === 'CAST_CONJURING' && a.instanceId === 'coh#0')).toBe(false);
+    });
+
+    it('is offered once 2 Hungers are in Purgatory and the cost is payable', () => {
+      const state = baseState({ players: { A: player({ hand: [cycleOfHunger], purgatory: [hunger(1), hunger(2)], effigyPool: [effigy('faithless', 1)] }), B: player() } });
+      expect(getLegalActions(state, 'A').some(a => a.type === 'CAST_CONJURING' && a.instanceId === 'coh#0')).toBe(true);
+    });
+  });
+
+  describe('Mausoleum Gates: "...Engage: You may summon Undead from your Purgatory until the end of your turn." still costs the Being\'s own casting cost', () => {
+    const undeadCard = (cost) => ({
+      instanceId: 'u1#0', name: 'Some Undead', kind: 'being', typing: 'Undead, Being',
+      castingCost: { faithless: cost, colored: {} },
+    });
+
+    it('is not offered when the summon window is open but the pool can\'t afford the Being', () => {
+      const state = baseState({
+        board: {},
+        players: { A: player({ purgatory: [undeadCard(2)], effigyPool: [], summonTypedFromPurgatoryWindows: ['Undead'] }), B: player() },
+      });
+      expect(getLegalActions(state, 'A').some(a => a.type === 'ACTIVATE_SUMMON_TYPED_FROM_PURGATORY_WINDOW')).toBe(false);
+    });
+
+    it('really spends Effigy from the pool when summoned through the window', () => {
+      // Fills every one of A's 8 Mortal Realm cells but one (r2c5), so the
+      // summon places immediately instead of opening a 'token-location'
+      // tile-choice pendingChoice — same single-empty-tile precedent
+      // summonFromPurgatoryToOpenCell's own comment documents.
+      const filler = (n) => ({ type: 'being', ownerId: 'A', card: beingCard({ instanceId: `filler${n}#0` }), currentLifespan: 5, engaged: false });
+      const board = {};
+      ['r1c2', 'r1c3', 'r1c4', 'r2c1', 'r2c2', 'r2c3', 'r2c4'].forEach((cell, i) => { board[cell] = filler(i); });
+      const state = baseState({
+        board,
+        players: {
+          A: player({ purgatory: [undeadCard(2)], effigyPool: [effigy('faithless', 1), effigy('faithless', 2)], summonTypedFromPurgatoryWindows: ['Undead'] }),
+          B: player(),
+        },
+      });
+      expect(getLegalActions(state, 'A').some(a => a.type === 'ACTIVATE_SUMMON_TYPED_FROM_PURGATORY_WINDOW' && a.instanceId === 'u1#0')).toBe(true);
+      const next = gameReducer(state, { type: 'ACTIVATE_SUMMON_TYPED_FROM_PURGATORY_WINDOW', instanceId: 'u1#0' });
+      expect(next.players.A.effigyPool).toHaveLength(0);
+      expect(next.players.A.purgatory).toHaveLength(0);
+      expect(next.board.r2c5?.card?.instanceId).toBe('u1#0');
+    });
+  });
+
+  describe('Modulate: a card already at 0 Time Counters is not a legal target (Dial of Metatoris on an Eònion Altar at 0)', () => {
+    const dialOfMetatoris = {
+      type: 'relic', ownerId: 'A',
+      card: { id: 'dial', instanceId: 'dial#0', name: 'Dial of Metatoris', kind: 'relic', keywords: { engage: 'Modulate (±1) on a target you control' } },
+      engaged: false,
+    };
+
+    it('excludes an Eònion Altar sitting at 0 Time Counters — with no other target, Engage fizzles instead of opening an empty Modulate choice', () => {
+      const eonionAltar = { card: { instanceId: 'eonion#0', name: 'Eònion Altar' }, counters: { time: 0 } };
+      let state = baseState({ board: { r2c1: dialOfMetatoris }, altars: { A: [eonionAltar], B: [] } });
+      state = gameReducer(state, { type: 'ACTIVATE_ENGAGE', cellId: 'r2c1' });
+      expect(state.pendingChoice).toBeNull();
+      expect(state.board.r2c1.engaged).toBe(true);
+    });
+
+    it('still offers a second, real target alongside an excluded 0-counter Altar', () => {
+      const zeroAltar = { card: { instanceId: 'zero#0', name: 'Eònion Altar' }, counters: { time: 0 } };
+      const prophecy = { type: 'prophecy', ownerId: 'A', card: { name: 'P' }, timer: 3, faceDown: true };
+      let state = baseState({ board: { r2c1: dialOfMetatoris, r3c1: prophecy }, altars: { A: [zeroAltar], B: [] } });
+      state = gameReducer(state, { type: 'ACTIVATE_ENGAGE', cellId: 'r2c1' });
+      const legal = getLegalActions(state, 'A').filter(a => a.type === 'RESOLVE_MODULATE');
+      expect(legal.some(a => a.altarInstanceId === 'zero#0')).toBe(false);
+      expect(legal.some(a => a.cellId === 'r3c1')).toBe(true);
+    });
+
+    it('still allows a Hourglass-style relic (collectsRemovedProphecyTimeCounters) to be Modulated UP from 0', () => {
+      const hourglassAtZero = { card: { instanceId: 'hg#0', name: 'Hourglass', kind: 'relic', keywords: { collectsRemovedProphecyTimeCounters: true } }, counters: { time: 0 } };
+      let state = baseState({ board: { r2c1: dialOfMetatoris, r2c2: { ...hourglassAtZero, type: 'relic', ownerId: 'A', engaged: false } }, altars: { A: [], B: [] } });
+      state = gameReducer(state, { type: 'ACTIVATE_ENGAGE', cellId: 'r2c1' });
+      const legal = getLegalActions(state, 'A').filter(a => a.type === 'RESOLVE_MODULATE');
+      expect(legal.some(a => a.cellId === 'r2c2')).toBe(true);
+    });
   });
 });

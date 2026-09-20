@@ -280,6 +280,36 @@ export const stripFlavorText = (text) => {
 // "when an opponent's Being moves" or similar text about something else.
 const escapeForRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+// Blanks out (same length, so any surrounding \n/position-based matching
+// stays intact) any top-level-balanced parenthetical span that itself
+// contains "Engage:" — see the plain engageMatch comment below for why
+// this exists. Paren-nesting-aware (tracks depth) so a token description's
+// own inner "(1)"-style cost doesn't throw off where the span actually
+// closes. Falls back to returning the original text unmasked if the
+// parens turn out unbalanced, rather than risking mangling real text.
+const blankParensContainingEngage = (s) => {
+  let out = '';
+  let depth = 0;
+  let spanStart = -1;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === '(') {
+      if (depth === 0) spanStart = i;
+      depth++;
+    } else if (ch === ')' && depth > 0) {
+      depth--;
+      if (depth === 0) {
+        const span = s.slice(spanStart, i + 1);
+        out += /Engage:/i.test(span) ? ' '.repeat(span.length) : span;
+        spanStart = -1;
+        continue;
+      }
+    }
+    if (depth === 0) out += ch;
+  }
+  return spanStart === -1 ? out : s;
+};
+
 export const parseKeywords = (textBox, cardName = null) => {
   const text = stripFlavorText(textBox) || '';
   const ownNameRe = cardName ? escapeForRegExp(cardName) : null;
@@ -509,8 +539,28 @@ export const parseKeywords = (textBox, cardName = null) => {
   // very start of the line (a bare Engage's usual position) because real
   // Zealot text sometimes has other prose sharing the line and there's no
   // clean way to anchor around that without missing it.
+  //
+  // A summoned token's own reminder text sometimes embeds ITS "Engage: ..."
+  // ability inside a parenthetical describing that token (Blooming Seed:
+  // "...summon a Blooming Vine Token (0/3 Being - vine token with Engage:
+  // Add (1) Living) on any tile..."; Elderflower Ancient has the same
+  // shape) — the real CSV wraps that inner phrase in doubled quotes
+  // (`""Engage: ...""`) as its own reminder-text convention, but CSV
+  // unescaping strips those away entirely before this function ever sees
+  // the text, leaving no quote character to key off. That's the TOKEN's
+  // ability, not this card's own — neither of those two cards prints a
+  // real top-level Engage line at all (their own abilities are "Pay (1)
+  // Living:" / "Remove (1) Growth Counter:" / Depart). blankParensContainingEngage
+  // (paren-nesting-aware, so the token description's own inner "(1)" cost
+  // doesn't throw off the balance) blanks out any parenthetical span that
+  // itself contains "Engage:" before this bare match runs, so it can never
+  // mistake a token's granted ability for this card's own. The other, more
+  // specific Engage patterns above all require a distinctive phrase
+  // ("Pay (N) Lifespan, Engage:", "Being has Engage:", ...) immediately
+  // before "Engage:" that a token-descriptor parenthetical never happens
+  // to contain, so only this last catch-all needs the guard.
   const engageMatch = !grantedEngageMatch && !payLifespanEngageMatch && !payEffigyEngageMatch && !removeCountersEngageRestoreMatch && !conditionalEngageMatch && !engageExtraCostMatch && !counterCostEngageMatch
-    && text.match(/(?:^|\n).*?\bEngage:\s*(.+?)(?:\n|$)/i);
+    && blankParensContainingEngage(text).match(/(?:^|\n).*?\bEngage:\s*(.+?)(?:\n|$)/i);
   const engageLifespanCost = payLifespanEngageMatch ? parseInt(payLifespanEngageMatch[1], 10) : null;
   const engageEffigyCost = payEffigyEngageMatch
     ? { color: payEffigyEngageMatch[2].toLowerCase(), amount: parseInt(payEffigyEngageMatch[1], 10) }
@@ -783,8 +833,18 @@ export const parseKeywords = (textBox, cardName = null) => {
   // — a passive reaction to RULES.md > Keywords > Shift, fired from
   // performShift itself (actions.js) regardless of which card's own
   // ability actually caused the Shift.
-  const onOwnBeingShiftWheneverFirst = text.match(/^Whenever a Being you control Shifts,?\s*(except during the end step,?\s*)?(.+?)\.?$/i);
-  const onOwnBeingShiftEffectFirst = !onOwnBeingShiftWheneverFirst && text.match(/^(.+?)\s+whenever a Being you control Shifts\.?$/i);
+  // Not anchored to the whole textBox (bare ^...$, no multiline flag) —
+  // Sanative Siphon's own real printed text is two lines ("Gain (1)
+  // Crossing Counter whenever a Being you control Shifts.\nRemove (X)
+  // Crossing Counters, Engage: Restore (X) Lifespan to target."), so a
+  // bare trailing `$` would require the WHOLE card's text to end right
+  // after "Shifts." — it never does, so this silently never matched the
+  // real card at all (only ever verified against hand-authored single-line
+  // test fixtures that happened to end there). `(?:\n|$)` tolerates a
+  // second line following, same convention every other multi-line-aware
+  // pattern in this file already uses.
+  const onOwnBeingShiftWheneverFirst = text.match(/(?:^|\n)\s*Whenever a Being you control Shifts,?\s*(except during the end step,?\s*)?(.+?)\.?(?:\n|$)/i);
+  const onOwnBeingShiftEffectFirst = !onOwnBeingShiftWheneverFirst && text.match(/(?:^|\n)\s*(.+?)\s+whenever a Being you control Shifts\.?(?:\n|$)/i);
   // "Restless Dead has +2/+0 until end of turn for each Being that died
   // under your control this turn." — a LIVE, continuously-recomputed bonus
   // (grows the instant beingsDiedThisTurn does, same "recomputed after
@@ -968,9 +1028,19 @@ export const parseKeywords = (textBox, cardName = null) => {
   // a soft-once-per-turn *reaction condition* on an automatic trigger, not
   // an activated ability the player chooses to use, and would otherwise
   // false-positive here (bare "Once per turn X" matches both shapes),
-  // wrongly offering an "Activate" button for a purely passive card.
+  // wrongly offering an "Activate" button for a purely passive card. Also
+  // excludes reanimateFromPurgatoryMatch above (Roots of Eternity: "Once
+  // per turn you may sacrifice a Vine token, summon this from Purgatory
+  // on the tile that the sacrificed vine token was on") — that card's own
+  // dedicated keyword/reducer path (ACTIVATE_REANIMATE_FROM_PURGATORY)
+  // already handles it fully; without this exclusion the SAME text also
+  // populated the generic timesPerTurnAbility field, which — unlike the
+  // dedicated path — is only ever readable while the card is still ON THE
+  // BOARD (not yet in Purgatory), offering a second, broken
+  // ACTIVATE_TIMES_PER_TURN_ABILITY button that always fell through to
+  // resolveOrLogEffect's "isn't automated yet" fallback.
   const TIMES_WORDS = { once: 1, twice: 2, thrice: 3 };
-  const timesPerTurnMatch = !prophecyCounterMatch
+  const timesPerTurnMatch = !prophecyCounterMatch && !reanimateFromPurgatoryMatch
     && text.match(/(?:^|\n)\s*(Once|Twice|Thrice)\s+per\s+turn\s+(.+?)(?:\n|$)/i);
   // "You do not draw during the start of your turn" (Daylight Savings) —
   // an ongoing effect that applies for as long as a face-up Prophecy with
@@ -1327,7 +1397,20 @@ export const parseKeywords = (textBox, cardName = null) => {
 // Maps a raw CSV row into a structured, game-ready card definition. Doesn't
 // mutate the row — safe to call repeatedly for the same card.
 export const toGameCard = (card, idx) => {
-  const name = getColumnData(card, ['Card Name', 'A', 'Column A']) || `Card ${idx + 1}`;
+  // Trimmed once here, at the parse boundary, rather than in every
+  // downstream consumer — a stray leading/trailing space in the CSV's own
+  // "Card Name" column (real example: "Locust swarm " — confirmed via the
+  // real CSV row) otherwise survives into `.name` untouched and silently
+  // breaks anything doing exact-string name matching against it:
+  // selfReferentialWhenSummonedText's own "this"-substitution (actions.js)
+  // swallows that trailing space along with the matched name, turning
+  // "Locust Swarm Shifts (3)." into "thisShifts (3)." — no space — which
+  // no longer matches SELF_SHIFT_RE, so Locust Swarm's own printed Depart
+  // silently no-ops instead of Shifting. Purgatory name lookups
+  // (`player.purgatory.find(c => c.name === cardName)`), the legend-rule
+  // dedup, and deck-list name matching would all have the exact same
+  // failure mode for any other card sharing this CSV quirk.
+  const name = (getColumnData(card, ['Card Name', 'A', 'Column A']) || `Card ${idx + 1}`).trim();
   const kind = getCardKind(card);
   const typing = (getColumnData(card, ['Card Typing', 'Card typing']) || '');
   const isToken = typing.toLowerCase().includes('token');
@@ -1394,7 +1477,7 @@ export const toGameCard = (card, idx) => {
 // `isToken: true` explicitly regardless) but keeps the synthetic row
 // consistent with what a real token row looks like.
 let tokenInstanceCounter = 0;
-export const createTokenCard = ({ name, typing, strength = 0, lifespan = 0, effigyCost = '', textBox = '', timer = 0 }) => {
+export const createTokenCard = ({ name, typing, strength = 0, lifespan = 0, effigyCost = '', textBox = '', timer = 0, arrows = '' }) => {
   const raw = {
     'Card Name': name,
     'Card Typing': typing,
@@ -1403,7 +1486,7 @@ export const createTokenCard = ({ name, typing, strength = 0, lifespan = 0, effi
     'Strength': String(strength),
     'Lifespan': String(lifespan),
     'Timer': String(timer),
-    'Arrows (Clockwise top center = 1)': '',
+    'Arrows (Clockwise top center = 1)': arrows,
     'Set': '',
     'Effigy type': '',
     'Rarity': 'Token',
@@ -1450,7 +1533,21 @@ export const parseCSV = (text) => {
       const char = line[i];
 
       if (char === '"') {
-        inQ = !inQ;
+        // RFC4180 escaping: a doubled quote INSIDE an already-open quoted
+        // field is a literal `"` in the value (e.g. Scā-vuhk Hunger's own
+        // Shift text prints `Shift (1): ""At the end...""` in the raw CSV
+        // for a literal `Shift (1): "At the end..."`) — collapse the pair
+        // into one literal quote and consume both characters, rather than
+        // just toggling inQ twice and silently dropping both (which used
+        // to strip every embedded quote mark from the field, breaking any
+        // regex downstream that requires them, e.g. cardData.js's own
+        // shiftMatch).
+        if (inQ && line[i + 1] === '"') {
+          current += '"';
+          i++;
+        } else {
+          inQ = !inQ;
+        }
       } else if (char === ',' && !inQ) {
         let value = current.trim();
         if (value.startsWith('"') && value.endsWith('"')) {

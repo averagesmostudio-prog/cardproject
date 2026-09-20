@@ -102,10 +102,13 @@ below) before they can actually run. Current implementation status:
   picks one of their own Prophecies as the target (`RESOLVE_MODULATE`) — a
   "±" sign offers both +1 and -1 as separate choices. A Prophecy Modulated
   to 0 resolves into Purgatory exactly like the automatic per-turn step.
-  Simplification: the target pool is always "Prophecies the acting player
-  controls", since every real example so far is self-targeted or says
-  "you control" — a card that genuinely needs a broader target wouldn't be
-  covered yet.
+  Own-only by default, UNLESS the card's own printed text contains no "you
+  control" wording at all anywhere (Charge Forward, Roll Back, the
+  Conjuring literally named "Modulate", MetaToris) — those can target
+  either player's Time Counter instead, per the real CSV's own internal
+  contrast (Hurry Up and Wait spells out "This may only target Time
+  Counters that you control" as an explicit second clause exactly when
+  that restriction is meant to apply, and leaves it off otherwise).
 - **Add (N) &lt;Color&gt; Essence** — the Zealot pattern (all six printed
   Zealots use some form of this as their Engage payload) — is a real,
   executable effect: it grants N effigies of the named color straight into
@@ -1952,20 +1955,34 @@ real playable loop working first, then layer in the rest.
 - **Conjurings** — implemented: cast at main-phase speed (`CAST_CONJURING`),
   pays cost and resolves straight to Purgatory. Effect text is executed
   where recognized (see Keywords > "Add X to hand from deck" / Modulate).
-- **Ethereal Conjurings** — mechanically implemented and castable
-  (`CAST_CONJURING` doesn't distinguish the two kinds, and most of the
-  real set's ~30 Ethereal Conjurings are wired the same way any other
-  Conjuring's effect text is — Deja Vu, Willing Sacrifice, Engrave,
-  Dendrify, Pause, Regress, Freeze Frame, Read the Bones, Drown out the
-  Screams, Afterimage, and more). **The one genuinely missing piece is
-  their own defining feature**: nothing distinguishes an Ethereal
-  Conjuring's own reactive/instant-speed timing — right now every one can
-  only be cast at main-phase speed on the caster's own turn, same as a
-  plain Conjuring, never reactively during the opponent's turn. That needs
-  a real priority/reactive-window concept in the turn structure (this
-  engine currently has none at all — one active player, one set of legal
-  actions, no passing), the most complex piece of the whole engine still
-  outstanding.
+- **Ethereal Conjurings** — fully implemented, including their own defining
+  feature: real reactive/instant-speed timing. `CAST_CONJURING`'s own effect
+  text is wired the same way any other Conjuring's is (Deja Vu, Willing
+  Sacrifice, Engrave, Dendrify, Pause, Regress, Freeze Frame, Read the
+  Bones, Drown out the Screams, Afterimage, and more), and on top of that,
+  `state.reactiveWindow` (`manageReactiveWindow`, actions.js) now gives a
+  real priority/reactive-window concept: after ANY action either player
+  takes, the other player gets one optional chance to respond by casting an
+  affordable `kind: 'ethereal-conjuring'` card from hand — and if they do,
+  the original actor gets the same chance to respond to THAT, alternating
+  indefinitely (real, unlimited-depth chaining) until whoever currently
+  holds it either has nothing to cast or explicitly passes
+  (`PASS_PRIORITY`). This is not a literal LIFO stack of unresolved
+  effects — every reactive cast resolves immediately through the exact same
+  `CAST_CONJURING` reducer case a normal cast uses; chaining is achieved by
+  "does anyone want to respond to what just happened," asked once per
+  event, a documented simplification since no real card in this set needs
+  deferred/queued resolution. The window auto-closes within the same
+  dispatch whenever its current holder has nothing real to cast (mirrors
+  `clearStuckPendingChoice`'s own "auto-resolve what nobody can act on"
+  philosophy), so in the overwhelming majority of actions it's completely
+  invisible — it only surfaces when there's a real decision to make. Two
+  deliberate scope boundaries: a window never opens mid-`pendingChoice` (a
+  multi-step choice chain stays one atomic unit, same as today, until it
+  fully resolves), and `PASS_TURN`'s own `beginTurn`/`endTurn` pipeline
+  stays atomic too (no window opens around the draw/Modulate/craft/
+  disengage steps bundled into ending a turn) — a natural, separate future
+  task if windows around turn-transition steps themselves are ever wanted.
 - **Altars** — implemented: placed into the player's own Effigy Zone cell
   only (`PLACE_ALTAR`), a single reserved slot per player. Its "Craft (N)
   additional Effigy on your turn" bonus (`card.keywords.craftBonus`) applies
