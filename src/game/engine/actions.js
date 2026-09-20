@@ -1739,6 +1739,17 @@ const DISCARD_ONE_CARD_RE = /^Discard\s*\(?1\)?\s+Cards?\.?$/i;
 // from Purgatory", functionally identical (same searchZoneCandidates
 // query, same 'search' pendingChoice).
 const RETURN_TYPED_FROM_PURGATORY_RE = /^return an?\s+(.+?)\s+from (?:your )?Purgatory to hand\.?$/i;
+// "Discard (1) Card, then return a Null Being From Purgatory to hand."
+// (Skeptical Scrawling) — matched as one whole unit, same
+// "the discard is a real cost gating the second clause" precedent as
+// DISCARD_TYPED_SEARCH_PURGATORY_RE (Book of Mahatzu) above, just with an
+// untyped discard (any one card, not filtered by typing — same candidate
+// set as plain DISCARD_ONE_CARD_RE) instead of a typed one. Without this,
+// the generic then-split resolves DISCARD_ONE_CARD_RE and
+// RETURN_TYPED_FROM_PURGATORY_RE as two independent clauses — the return
+// firing unconditionally even when the hand was empty and nothing was
+// actually discarded.
+const DISCARD_ONE_CARD_THEN_RETURN_PURGATORY_RE = /^Discard\s*\(?1\)?\s+Cards?,?\s*then return an?\s+(.+?)\s+from (?:your )?Purgatory to hand\.?$/i;
 // "Discard your hand then draw cards equal to the number of cards that
 // you discarded." (Seasons of Regrowth) — no choice needed (the whole
 // hand goes), so this is one self-contained pattern rather than a
@@ -2172,7 +2183,13 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
     // LEGION_ONSET_RE (Legion's Onset) joins the same list — its own "then"
     // separates a Lifespan payment from a token count that depends on how
     // much of it was actually paid, not two independent clauses.
-    && !LEGION_ONSET_RE.test(text)) {
+    && !LEGION_ONSET_RE.test(text)
+    // DISCARD_ONE_CARD_THEN_RETURN_PURGATORY_RE (Skeptical Scrawling) joins
+    // the same list — see its own comment above: the discard can defer to
+    // a real pendingChoice (2+ cards in hand), and the Purgatory return
+    // must wait for that choice to actually resolve, not fire immediately
+    // regardless of whether anything was discarded.
+    && !DISCARD_ONE_CARD_THEN_RETURN_PURGATORY_RE.test(text)) {
     const clauses = text.split(/\s*,?\s+then\s+/i);
     if (clauses.length > 1) {
       return clauses.reduce((acc, clause) => resolveOrLogEffect(acc, playerId, cardName, clause, label, context), state);
@@ -2691,6 +2708,41 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
     if (candidates.length === 1) return afterDiscard(state, candidates[0]);
     let next = addLog(state, `${cardName}'s ${label} lets ${playerId} choose a ${discardTyping} to discard.`);
     return { ...next, pendingChoice: { kind: 'discard-then-search-purgatory', playerId, cardName, label, discardTyping, searchQuery } };
+  }
+
+  // "Discard (1) Card, then return a Null Being From Purgatory to hand."
+  // (Skeptical Scrawling) — same "discard gates the second clause" shape
+  // as discardThenSearchPurgatoryMatch just above, adapted for an untyped
+  // discard (any card in hand). Reuses the plain 'discard-one-card'
+  // pendingChoice/RESOLVE_DISCARD_ONE_CARD plumbing (same picker UI a bare
+  // DISCARD_ONE_CARD_RE already uses) rather than a dedicated kind, via
+  // the optional thenReturnPurgatoryQuery field RESOLVE_DISCARD_ONE_CARD
+  // checks once the discard itself resolves.
+  const discardOneThenReturnPurgatoryMatch = text.match(DISCARD_ONE_CARD_THEN_RETURN_PURGATORY_RE);
+  if (discardOneThenReturnPurgatoryMatch) {
+    const query = discardOneThenReturnPurgatoryMatch[1].trim().replace(/\s+Being$/i, '');
+    const hand = state.players[playerId].hand;
+    if (hand.length === 0) return state;
+    const afterDiscard = (st, card) => {
+      const player = st.players[playerId];
+      let next = {
+        ...st,
+        players: {
+          ...st.players,
+          [playerId]: { ...player, hand: player.hand.filter(c => c.instanceId !== card.instanceId), purgatory: purgatoryAfterAdding(player.purgatory, card) },
+        },
+      };
+      next = addLog(next, `${playerId} discards ${card.name} for ${cardName}'s ${label}.`);
+      const searchCandidates = searchZoneCandidates(next.players[playerId].purgatory, query);
+      if (searchCandidates.length === 0) {
+        return addLog(next, `${cardName}'s ${label} finds no "${query}" in ${playerId}'s Purgatory.`);
+      }
+      next = addLog(next, `${cardName}'s ${label} searches ${playerId}'s Purgatory for "${query}" to return to hand.`);
+      return { ...next, pendingChoice: { kind: 'search', playerId, source: 'purgatory', query, cardName } };
+    };
+    if (hand.length === 1) return afterDiscard(state, hand[0]);
+    let next = addLog(state, `${cardName}'s ${label} lets ${playerId} choose a card from hand to discard.`);
+    return { ...next, pendingChoice: { kind: 'discard-one-card', playerId, cardName, label, thenReturnPurgatoryQuery: query } };
   }
 
   // "Add X to hand from your Purgatory, if you control <Name> you may add
@@ -11933,11 +11985,11 @@ const gameReducerCore = (state, action) => {
 
     case 'RESOLVE_DISCARD_ONE_CARD': {
       if (!state.pendingChoice || state.pendingChoice.kind !== 'discard-one-card') return state;
-      const { playerId, cardName, label } = state.pendingChoice;
+      const { playerId, cardName, label, thenReturnPurgatoryQuery } = state.pendingChoice;
       const player = state.players[playerId];
       const card = player.hand.find(c => c.instanceId === action.instanceId);
       if (!card) return state;
-      const next = {
+      let next = {
         ...state,
         pendingChoice: null,
         players: {
@@ -11945,7 +11997,18 @@ const gameReducerCore = (state, action) => {
           [playerId]: { ...player, hand: player.hand.filter(c => c.instanceId !== action.instanceId), purgatory: purgatoryAfterAdding(player.purgatory, card) },
         },
       };
-      return addLog(next, `${playerId} discards ${card.name} for ${cardName}'s ${label}.`);
+      next = addLog(next, `${playerId} discards ${card.name} for ${cardName}'s ${label}.`);
+      // Skeptical Scrawling's own "then return a Null Being From
+      // Purgatory to hand" half — see DISCARD_ONE_CARD_THEN_RETURN_
+      // PURGATORY_RE's own comment for why this rides along on the plain
+      // discard-one-card pendingChoice instead of a dedicated kind.
+      if (!thenReturnPurgatoryQuery) return next;
+      const searchCandidates = searchZoneCandidates(next.players[playerId].purgatory, thenReturnPurgatoryQuery);
+      if (searchCandidates.length === 0) {
+        return addLog(next, `${cardName}'s ${label} finds no "${thenReturnPurgatoryQuery}" in ${playerId}'s Purgatory.`);
+      }
+      next = addLog(next, `${cardName}'s ${label} searches ${playerId}'s Purgatory for "${thenReturnPurgatoryQuery}" to return to hand.`);
+      return { ...next, pendingChoice: { kind: 'search', playerId, source: 'purgatory', query: thenReturnPurgatoryQuery, cardName } };
     }
 
     case 'RESOLVE_CHOOSE_X_VALUE': {

@@ -1262,6 +1262,22 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       .filter(Boolean);
   }, [legalActions, state.pendingChoice, state.players]);
 
+  // Candidate hand cards for a pending "Discard (1) Card" cost (Skeptical
+  // Scrawling's own "Discard (1) Card, then return a Null Being From
+  // Purgatory to hand.") — same shape as pendingDiscardKindDrawCandidates
+  // above. This pendingChoice kind (RESOLVE_DISCARD_ONE_CARD, actions.js)
+  // previously had no UI at all either (same latent gap the
+  // pendingDiscardTypedCandidates comment above already documents for a
+  // different kind) — 1 card in hand auto-resolves with no choice needed,
+  // so it was never caught until a 2+-card hand actually needed to pick.
+  const pendingDiscardOneCardCandidates = useMemo(() => {
+    if (!state.pendingChoice || state.pendingChoice.kind !== 'discard-one-card' || state.pendingChoice.playerId !== HUMAN) return [];
+    return legalActions
+      .filter(a => a.type === 'RESOLVE_DISCARD_ONE_CARD')
+      .map(a => state.players[HUMAN].hand.find(c => c.instanceId === a.instanceId))
+      .filter(Boolean);
+  }, [legalActions, state.pendingChoice, state.players]);
+
   // Candidate hand cards for a pending "Discard a card: the next card you
   // play this turn costs (-1) Faithless" cost (Lighten the Load) — same
   // shape as pendingDiscardKindDrawCandidates above.
@@ -1971,6 +1987,27 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
                 <button
                   key={card.instanceId}
                   onClick={() => dispatch({ type: 'RESOLVE_DISCARD_TYPED', instanceId: card.instanceId })}
+                  className="w-full text-left text-sm px-2 py-1.5 rounded hover:bg-stone-100 text-stone-700 border border-stone-200"
+                >
+                  {card.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingDiscardOneCardCandidates.length > 0 && (
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
+          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
+            <div className="font-semibold text-stone-800 mb-1">
+              {state.pendingChoice.cardName}: choose a card to discard
+            </div>
+            <div className="overflow-y-auto space-y-1">
+              {pendingDiscardOneCardCandidates.map((card) => (
+                <button
+                  key={card.instanceId}
+                  onClick={() => dispatch({ type: 'RESOLVE_DISCARD_ONE_CARD', instanceId: card.instanceId })}
                   className="w-full text-left text-sm px-2 py-1.5 rounded hover:bg-stone-100 text-stone-700 border border-stone-200"
                 >
                   {card.name}

@@ -10435,6 +10435,27 @@ describe('Re-audit round: gaps closed after the Deja Vu / Immen Gorta pass', () 
     expect(next.pendingChoice.kind).toBe('search'); // then the Purgatory return opens
   });
 
+  it('Skeptical Scrawling — enforces the discard as a real cost, an empty hand blocks the Purgatory return entirely', () => {
+    const nullBeing = beingCard({ instanceId: 'nb#0', name: 'A Null Being', typing: 'Null, Being' });
+    const noHand = baseState({ players: { A: player({ hand: [], purgatory: [nullBeing] }), B: player() } });
+    const blocked = resolveOrLogEffect(noHand, 'A', 'Skeptical Scrawling', 'Discard (1) Card, then return a Null Being From Purgatory to hand.', 'Prophecy', {});
+    expect(blocked.pendingChoice).toBeNull();
+    expect(blocked.players.A.purgatory.some(c => c.instanceId === 'nb#0')).toBe(true); // still in Purgatory, never returned
+  });
+
+  it('Skeptical Scrawling — 2+ hand cards opens a discard picker, and the Purgatory return only fires once that choice resolves', () => {
+    const nullBeing = beingCard({ instanceId: 'nb#0', name: 'A Null Being', typing: 'Null, Being' });
+    const cardA = beingCard({ instanceId: 'ca#0', name: 'Card A' });
+    const cardB = beingCard({ instanceId: 'cb#0', name: 'Card B' });
+    const state = baseState({ players: { A: player({ hand: [cardA, cardB], purgatory: [nullBeing] }), B: player() } });
+    const opened = resolveOrLogEffect(state, 'A', 'Skeptical Scrawling', 'Discard (1) Card, then return a Null Being From Purgatory to hand.', 'Prophecy', {});
+    expect(opened.pendingChoice).toEqual(expect.objectContaining({ kind: 'discard-one-card', thenReturnPurgatoryQuery: 'Null' }));
+    expect(opened.players.A.hand).toHaveLength(2); // nothing discarded yet
+    const resolved = gameReducer(opened, { type: 'RESOLVE_DISCARD_ONE_CARD', instanceId: 'ca#0' });
+    expect(resolved.players.A.hand).toEqual([cardB]); // only Card A discarded
+    expect(resolved.pendingChoice.kind).toBe('search'); // then the Purgatory return opens
+  });
+
   it('Seasons of Regrowth — discards the whole hand, then draws that many back', () => {
     const state = baseState({
       players: {
