@@ -1540,7 +1540,10 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
               {mulliganSecondsLeft}s
             </div>
           )}
-          <h2 className="text-lg font-bold text-stone-800 mb-2">Your opening hand</h2>
+          <h2 className="text-lg font-bold text-stone-800 mb-1">Your opening hand</h2>
+          <p className="text-sm text-stone-500 mb-2">
+            {state.turnPlayer === HUMAN ? 'You go first.' : 'Opponent goes first.'}
+          </p>
           <div className="relative mx-auto" style={{ width: 'min(100%, 540px)', aspectRatio: '700 / 760' }}>
             {human.hand.map((card, i) => {
               const pos = STAR_POSITIONS[i] || STAR_POSITIONS[STAR_POSITIONS.length - 1];
