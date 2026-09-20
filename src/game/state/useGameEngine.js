@@ -23,6 +23,41 @@ export const useGameEngine = (initialState, aiPlayer = 'B') => {
   // there to diff against).
   const martyrSeqRef = useRef(0);
   const [lastMartyr, setLastMartyr] = useState(null);
+  // Board.jsx's Engage-ability activation glow, colored by the activating
+  // card's own Effigy type. Trickier than lastAttack/lastMartyr above: an
+  // ACTIVATE_ENGAGE dispatch can resolve the ability right away (a response
+  // to an already-open reactive window, or a fresh declaration the opponent
+  // has no real reply to — actions.js's own auto-close loop resolves it
+  // within that SAME dispatch), or defer it behind `state.pendingResolution`
+  // for however many further dispatches it takes the window to close (a
+  // real PASS_PRIORITY exchange). Worse, the auto-close case never exposes
+  // the pendingResolution to React at all — it's created and cleared again
+  // inside the one reducer call, so there's nothing to diff from the
+  // outside. What's common to all three shapes is the log line
+  // resolveOrLogEffect's own call site adds on a real resolution —
+  // "<player> engages <card>'s ability." — never written for a merely
+  // *declared* attempt ("<player> attempts to engage...") or a fizzled one
+  // ("...fails to resolve..."). So: capture the activating cellId/card at
+  // declare time (below), then watch the log for that exact card's own
+  // "engages ... ability" line to appear — however many dispatches later
+  // that turns out to be — and fire the glow then. Named by card, not just
+  // "the most recent declare," since a reactive response can itself engage
+  // a *different* card while ours is still pending.
+  const engageGlowSeqRef = useRef(0);
+  const [lastEngageGlow, setLastEngageGlow] = useState(null);
+  const pendingEngageGlowRef = useRef(null);
+  // Lets dispatchTracked read the CURRENT state without becoming a new
+  // function identity every render (staying `[]`-deps stable) — Match.jsx
+  // hands `dispatch` to a few effects keyed on it, including a competitive-
+  // mode countdown timer that tears down and restarts its setTimeout on
+  // every re-run; recreating dispatchTracked on every dispatch would reset
+  // that timer's countdown on every unrelated action instead of just when
+  // the window it's timing actually opens/closes. Updated in an effect
+  // rather than inline during render (React refs shouldn't be written
+  // mid-render) — this still lands well before the next user-triggered
+  // dispatch, which is all this needs.
+  const stateRef = useRef(state);
+  useEffect(() => { stateRef.current = state; });
   const dispatchTracked = useCallback((action) => {
     if (action?.type === 'MOVE_OR_ATTACK' && action.isAttack) {
       attackSeqRef.current += 1;
@@ -32,8 +67,43 @@ export const useGameEngine = (initialState, aiPlayer = 'B') => {
       martyrSeqRef.current += 1;
       setLastMartyr({ cellId: action.cellId, seq: martyrSeqRef.current });
     }
+    if (action?.type === 'ACTIVATE_ENGAGE') {
+      const card = stateRef.current.board[action.cellId]?.card;
+      if (card) {
+        pendingEngageGlowRef.current = {
+          cellId: action.cellId, cardName: card.name, effigyType: card.effigyType,
+          // Only log lines from here on can possibly be THIS activation's
+          // own resolution — without this floor, an already-consumed
+          // "engages <name>'s ability" line from an earlier activation of
+          // the same-named card earlier in the match would false-match.
+          logFloor: stateRef.current.log.length,
+        };
+      }
+    }
     dispatch(action);
   }, []);
+
+  // Fires the candidate captured above once its own card's real resolution
+  // line appears in the log — see the long comment above for why this has
+  // to be log-text matching rather than a state diff. `engages <card>'s
+  // ability.` only ever appears on an actual resolution (never the
+  // declare-only `attempts to engage...` line); a fizzle
+  // (`...fails to resolve...`) instead just drops the candidate, un-fired.
+  useEffect(() => {
+    const candidate = pendingEngageGlowRef.current;
+    if (!candidate) return;
+    const escapedName = candidate.cardName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const resolvedRe = new RegExp(`^\\S+ engages ${escapedName}'s ability\\.$`);
+    const fizzledNeedle = `${candidate.cardName}'s Engage ability fails to resolve`;
+    const newMessages = state.log.slice(candidate.logFloor).map(entry => entry.message);
+    if (newMessages.some(m => resolvedRe.test(m))) {
+      pendingEngageGlowRef.current = null;
+      engageGlowSeqRef.current += 1;
+      setLastEngageGlow({ cellId: candidate.cellId, effigyType: candidate.effigyType, seq: engageGlowSeqRef.current });
+    } else if (newMessages.some(m => m.includes(fizzledNeedle))) {
+      pendingEngageGlowRef.current = null;
+    }
+  }, [state.log]);
 
   useEffect(() => {
     if (state.phase === 'gameover') return;
@@ -58,5 +128,5 @@ export const useGameEngine = (initialState, aiPlayer = 'B') => {
     return () => clearTimeout(timer);
   }, [state, aiPlayer, dispatchTracked]);
 
-  return [state, dispatchTracked, lastAttack, lastMartyr];
+  return [state, dispatchTracked, lastAttack, lastMartyr, lastEngageGlow];
 };

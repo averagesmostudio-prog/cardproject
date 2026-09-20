@@ -147,6 +147,25 @@ function FavoredBubble({ active }) {
   );
 }
 
+// An Engage ability's activation/resolution flash (useGameEngine.js >
+// lastEngageGlow) — colored by the activating card's own Effigy type
+// (EFFIGY_TYPE_COLORS) rather than one fixed color, so two different
+// Engage abilities read as visually distinct from each other (a purple
+// Simple Summoner discount doesn't look like a green Zealot's own). Plays
+// once (keyed on `seq`), same one-shot shape as MartyrGlow below — z-16,
+// just above FavoredBubble's persistent shield so a momentary activation
+// still reads on top of it on the rare tile that happens to carry both.
+function EngageAbilityGlow({ active, effigyType }) {
+  if (!active) return null;
+  const color = EFFIGY_TYPE_COLORS[effigyType] || '#e5e7eb';
+  return (
+    <div
+      className="absolute -inset-2 z-[16] rounded-2xl pointer-events-none engage-ability-glow"
+      style={{ '--engage-glow-color': color }}
+    />
+  );
+}
+
 function EffigyZoneBreakdown({ pool }) {
   const counts = {};
   pool.forEach(e => { counts[e.effigyType] = (counts[e.effigyType] || 0) + 1; });
@@ -176,7 +195,7 @@ function EffigyZoneBreakdown({ pool }) {
   );
 }
 
-export default function Board({ state, displayBoard, flashes, lastAttack, lastMartyr, viewerId, highlightCells, selectedCell, toggledCells, respondingCellId, onCellClick, onCellDoubleClick, borderImages, borderImagesLoaded, artImages, artBorderImages, artImagesLoaded, fontLoaded }) {
+export default function Board({ state, displayBoard, flashes, lastAttack, lastMartyr, lastEngageGlow, viewerId, highlightCells, selectedCell, toggledCells, respondingCellId, onCellClick, onCellDoubleClick, borderImages, borderImagesLoaded, artImages, artBorderImages, artImagesLoaded, fontLoaded }) {
   const rows = [];
   // `displayBoard` (useStagedBoard.js) is a momentarily-lagged view of
   // state.board for a Being that just took damage or died — falls back to
@@ -228,6 +247,11 @@ export default function Board({ state, displayBoard, flashes, lastAttack, lastMa
       // keyed by `seq` so a second Martyr on the same cell later in the
       // match still replays the glow from scratch.
       const isMartyred = lastMartyr?.cellId === id;
+      // `lastEngageGlow` (useGameEngine.js) — unlike Martyr, the activating
+      // Being/Relic is normally still right there, so this renders on the
+      // occupant's own card wrapper (both branches below) rather than the
+      // bare tile.
+      const isEngageGlowing = lastEngageGlow?.cellId === id;
 
       cells.push(
         <div
@@ -273,6 +297,7 @@ export default function Board({ state, displayBoard, flashes, lastAttack, lastMa
               )}
               <CounterBadges counters={occupant.counters} />
               <FavoredBubble active={!!occupant.favorCounter} />
+              <EngageAbilityGlow active={isEngageGlowing} effigyType={lastEngageGlow?.effigyType} />
               <DamageFlash flash={flashes?.[id]} />
             </div>
           )}
@@ -326,6 +351,7 @@ export default function Board({ state, displayBoard, flashes, lastAttack, lastMa
                 fontLoaded={fontLoaded}
               />
               <CounterBadges counters={occupant.counters} />
+              <EngageAbilityGlow active={isEngageGlowing} effigyType={lastEngageGlow?.effigyType} />
             </div>
           )}
           {occupant?.type === 'armament-stack' && (() => {

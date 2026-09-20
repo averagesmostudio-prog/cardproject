@@ -105,6 +105,24 @@
   animation: favored-bubble-shimmer 2200ms ease-in-out infinite;
 }
 
+/* Board.jsx > EngageAbilityGlow (useGameEngine.js > lastEngageGlow) — an
+   Engage ability's own activating card is normally still right there
+   (unlike Martyr), so this washes the card itself rather than the bare
+   tile, colored per-activation via the --engage-glow-color custom property
+   (set inline from EFFIGY_TYPE_COLORS) rather than a fixed color, so two
+   different cards' Engage abilities read as visually distinct from each
+   other. One shot, keyed on `seq`, same shape as martyr-glow above. */
+@keyframes engage-ability-glow {
+  0% { opacity: 0; transform: scale(0.92); }
+  30% { opacity: 1; transform: scale(1.04); }
+  70% { opacity: 0.85; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1); }
+}
+.engage-ability-glow {
+  background: radial-gradient(circle, color-mix(in srgb, var(--engage-glow-color) 70%, transparent) 0%, color-mix(in srgb, var(--engage-glow-color) 35%, transparent) 55%, transparent 78%);
+  animation: engage-ability-glow 700ms ease-out both;
+}
+
 /* Match.jsx > useTurnBanner — a "Your Turn"/"Opponent's Turn" announcement
    at the start of each turn: a soft radial glow behind a pill banner,
    both popping in with a slight overshoot then holding before fading, in
