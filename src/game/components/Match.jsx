@@ -1030,7 +1030,10 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
   // action buttons.
   const onCellDoubleClick = (id) => {
     const occupant = state.board[id];
-    if (!occupant || !(occupant.armaments?.length > 0)) return;
+    // A Dryad-attached mount (occupant.dryadAttached) is the same "more
+    // than one real card on this tile" situation an Armament pile already
+    // is — same expanded-stack popup, just a different second card.
+    if (!occupant || !(occupant.armaments?.length > 0 || occupant.dryadAttached)) return;
     setSelectedCell(null);
     setSelectedHand(null);
     setExpandedCell(id);
@@ -2626,7 +2629,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
         </div>
       )}
 
-      {expandedOccupant?.armaments?.length > 0 && (
+      {(expandedOccupant?.armaments?.length > 0 || expandedOccupant?.dryadAttached) && (
         <div
           className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
           onClick={() => setExpandedCell(null)}
@@ -2666,7 +2669,25 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
                     <span className="text-[10px] text-stone-400 uppercase tracking-wide">Click to select</span>
                   </div>
                 )}
-                {expandedOccupant.armaments.map(({ card, engaged, counters }) => {
+                {expandedOccupant.dryadAttached && (
+                  <div className="flex flex-col items-center gap-2 shrink-0">
+                    <CardTile
+                      card={expandedOccupant.dryadAttached.card}
+                      currentLifespan={expandedOccupant.dryadAttached.currentLifespan}
+                      strength={expandedOccupant.dryadAttached.card.strength}
+                      engaged={expandedOccupant.dryadAttached.engaged}
+                      size="lg"
+                      borderImages={borderImages}
+                      borderImagesLoaded={borderImagesLoaded}
+                      artImages={artImages}
+                      artBorderImages={artBorderImages}
+                      artImagesLoaded={artImagesLoaded}
+                      fontLoaded={fontLoaded}
+                    />
+                    <span className="text-[10px] text-stone-400 uppercase tracking-wide">Dryad mount</span>
+                  </div>
+                )}
+                {expandedOccupant.armaments?.map(({ card, engaged, counters }) => {
                   const engageAction = expandedArmamentEngageActions.get(card.instanceId);
                   const sacrificeAction = expandedArmamentSacrificeActions.get(card.instanceId);
                   const armamentMartyrAction = expandedArmamentMartyrActions.get(card.instanceId);
