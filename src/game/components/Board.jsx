@@ -71,11 +71,10 @@ function EffigyDeckStack({ count }) {
 // the initial letter is shown (per the card's convention), not the full
 // name, to stay legible at this size; the full name is still in the
 // tooltip. Positioned opposite the existing armament-count/Effigy-pool
-// badges (top-left) so the two never collide. COUNTER_LABELS overrides the
-// default single-initial for a type whose initial would otherwise collide
-// with another counter type's own — "favor" would render "F" same as
-// Forge, so it gets the two-letter "Fa" instead.
-const COUNTER_LABELS = { favor: 'Fa' };
+// badges (top-left) so the two never collide. Favored isn't a real Counter
+// (no `counters.favor` — it's the separate `favorCounter` boolean) so it
+// never reaches this component at all; it gets its own FavoredBubble below.
+const COUNTER_LABELS = {};
 function CounterBadges({ counters }) {
   const entries = Object.entries(counters || {}).filter(([, n]) => n > 0);
   if (entries.length === 0) return null;
@@ -124,6 +123,27 @@ function DamageFlash({ flash }) {
         </div>
       </div>
     </>
+  );
+}
+
+// Favored (RULES.md > Keywords): "The next time this Being would take
+// damage, prevent it and remove Favored" — a persistent board fact, not a
+// one-off trigger, so this renders continuously for as long as
+// `occupant.favorCounter` is true instead of playing once and fading. A
+// soft shimmering forcefield hugging the card, Hearthstone Divine-Shield
+// in spirit — z-15, between the armament/counter badges (z-10) and
+// DamageFlash (z-20) so a damage burst still reads on top of it (in
+// practice the two rarely overlap: dealDamageToBeing strips favorCounter
+// the instant it actually blocks a hit, so the shield is usually already
+// gone by the time a flash would show — this ordering just covers the
+// edge case defensively).
+function FavoredBubble({ active }) {
+  if (!active) return null;
+  return (
+    <div className="absolute -inset-2 z-[15] rounded-2xl pointer-events-none">
+      <div className="absolute inset-0 rounded-2xl favored-bubble-glow" />
+      <div className="absolute inset-0 rounded-2xl favored-bubble-ring" />
+    </div>
   );
 }
 
@@ -241,7 +261,8 @@ export default function Board({ state, displayBoard, flashes, lastAttack, viewer
                   ⚔ {occupant.armaments.length}
                 </span>
               )}
-              <CounterBadges counters={{ ...occupant.counters, ...(occupant.favorCounter ? { favor: 1 } : {}) }} />
+              <CounterBadges counters={occupant.counters} />
+              <FavoredBubble active={!!occupant.favorCounter} />
               <DamageFlash flash={flashes?.[id]} />
             </div>
           )}
