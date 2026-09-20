@@ -23,6 +23,19 @@ export const useGameEngine = (initialState, aiPlayer = 'B') => {
   // there to diff against).
   const martyrSeqRef = useRef(0);
   const [lastMartyr, setLastMartyr] = useState(null);
+  // Board.jsx's Modulate hourglass-flip — unlike Engage above, RESOLVE_MODULATE
+  // is never deferred behind a reactive window: it's a direct pendingChoice ->
+  // dispatch -> reducer round trip (same shape as ACTIVATE_MARTYR), and its own
+  // action payload already carries the exact target (`cellId`, board occupants
+  // only — an Altar's own `altarInstanceId` variant has no board tile to
+  // animate, so it's deliberately not tracked here), so this can key off the
+  // dispatched action directly rather than diffing board/log like
+  // useShiftVortex/useDepartFlash have to. Keyed by cellId -> seq (not a
+  // boolean) since a repeat Modulate (Time Capsule, Hurry Up and Wait) can
+  // legally retarget the very same cellId across separate RESOLVE_MODULATE
+  // dispatches — each its own round trip, never batched within one dispatch.
+  const modulateSeqRef = useRef(0);
+  const [lastModulate, setLastModulate] = useState(null);
   // Board.jsx's Engage-ability activation glow, colored by the activating
   // card's own Effigy type. Trickier than lastAttack/lastMartyr above: an
   // ACTIVATE_ENGAGE dispatch can resolve the ability right away (a response
@@ -66,6 +79,10 @@ export const useGameEngine = (initialState, aiPlayer = 'B') => {
     if (action?.type === 'ACTIVATE_MARTYR') {
       martyrSeqRef.current += 1;
       setLastMartyr({ cellId: action.cellId, seq: martyrSeqRef.current });
+    }
+    if (action?.type === 'RESOLVE_MODULATE' && action.cellId) {
+      modulateSeqRef.current += 1;
+      setLastModulate({ cellId: action.cellId, seq: modulateSeqRef.current });
     }
     if (action?.type === 'ACTIVATE_ENGAGE') {
       const card = stateRef.current.board[action.cellId]?.card;
@@ -128,5 +145,5 @@ export const useGameEngine = (initialState, aiPlayer = 'B') => {
     return () => clearTimeout(timer);
   }, [state, aiPlayer, dispatchTracked]);
 
-  return [state, dispatchTracked, lastAttack, lastMartyr, lastEngageGlow];
+  return [state, dispatchTracked, lastAttack, lastMartyr, lastEngageGlow, lastModulate];
 };

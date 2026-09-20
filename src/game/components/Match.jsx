@@ -371,7 +371,7 @@ function RevealPopup({ revealPopup, dispatch, cardArtProps }) {
 }
 
 export default function Match({ initialState, onExit, onRematch, deckEntries, competitiveMode }) {
-  const [state, dispatch, lastAttack, lastMartyr, lastEngageGlow] = useGameEngine(initialState, AI);
+  const [state, dispatch, lastAttack, lastMartyr, lastEngageGlow, lastModulate] = useGameEngine(initialState, AI);
   // Purely a rendering concern — game logic/AI/legality below all keep
   // reading the real state.board; only what gets painted onto <Board> is
   // staged (see useStagedBoard.js).
@@ -2712,6 +2712,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
             lastAttack={lastAttack}
             lastMartyr={lastMartyr}
             lastEngageGlow={lastEngageGlow}
+            lastModulate={lastModulate}
             vortexCells={vortexCells}
             departCells={departCells}
             viewerId={HUMAN}

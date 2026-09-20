@@ -203,6 +203,32 @@ function DepartBones({ seq }) {
   );
 }
 
+// Modulate's own resolution flash (useGameEngine.js > lastModulate) — a
+// Time Counter went up or down on this tile (an Altar's own variant has no
+// board tile to animate, so it's out of scope here — see useGameEngine.js's
+// own comment). Rendered at the bare-tile level like MartyrGlow/DepartBones
+// above rather than wrapped around the occupant, since Modulate on a
+// Prophecy can legitimately empty the tile as a direct consequence of the
+// very same resolution (hitting 0 Time Counters sends it to Purgatory) —
+// by the time this renders, there may be nothing left to wrap. One shot,
+// keyed on `seq`, same shape as the others above; a small hourglass
+// silhouette (two CSS clip-path triangles, no image asset, matching this
+// project's own flat CSS-driven effects) flips end over end once, in the
+// Timeless Effigy color since that's the color this game's own card pool
+// already associates with Time Counter mechanics (Hourglass, Tick Tock).
+function ModulateHourglass({ seq }) {
+  if (!seq) return null;
+  return (
+    <div key={`modulate-${seq}`} className="absolute inset-0 z-[25] flex items-center justify-center pointer-events-none overflow-hidden rounded">
+      <div className="modulate-hourglass-glow absolute inset-0 rounded" />
+      <div className="modulate-hourglass-flip relative">
+        <div className="modulate-hourglass-sand modulate-hourglass-sand-top" />
+        <div className="modulate-hourglass-sand modulate-hourglass-sand-bottom" />
+      </div>
+    </div>
+  );
+}
+
 function EffigyZoneBreakdown({ pool }) {
   const counts = {};
   pool.forEach(e => { counts[e.effigyType] = (counts[e.effigyType] || 0) + 1; });
@@ -232,7 +258,7 @@ function EffigyZoneBreakdown({ pool }) {
   );
 }
 
-export default function Board({ state, displayBoard, flashes, lastAttack, lastMartyr, lastEngageGlow, vortexCells, departCells, viewerId, highlightCells, selectedCell, toggledCells, respondingCellId, onCellClick, onCellDoubleClick, borderImages, borderImagesLoaded, artImages, artBorderImages, artImagesLoaded, fontLoaded }) {
+export default function Board({ state, displayBoard, flashes, lastAttack, lastMartyr, lastEngageGlow, vortexCells, departCells, lastModulate, viewerId, highlightCells, selectedCell, toggledCells, respondingCellId, onCellClick, onCellDoubleClick, borderImages, borderImagesLoaded, artImages, artBorderImages, artImagesLoaded, fontLoaded }) {
   const rows = [];
   // `displayBoard` (useStagedBoard.js) is a momentarily-lagged view of
   // state.board for a Being that just took damage or died — falls back to
@@ -295,6 +321,9 @@ export default function Board({ state, displayBoard, flashes, lastAttack, lastMa
       // `departCells` (useStagedBoard.js > useDepartFlash) — a Depart-
       // keyword Being just died on this specific tile.
       const departSeq = departCells?.[id];
+      // `lastModulate` (useGameEngine.js) — a Time Counter on this specific
+      // tile's occupant was just Modulated.
+      const modulateSeq = lastModulate?.cellId === id ? lastModulate.seq : null;
 
       cells.push(
         <div
@@ -310,6 +339,7 @@ export default function Board({ state, displayBoard, flashes, lastAttack, lastMa
             <div key={`martyr-${lastMartyr.seq}`} className="absolute inset-0 z-[25] rounded pointer-events-none martyr-glow" />
           )}
           <DepartBones seq={departSeq} />
+          <ModulateHourglass seq={modulateSeq} />
           {occupant?.type === 'being' && (
             <div
               key={isAttacking ? `atk-${lastAttack.seq}` : undefined}
