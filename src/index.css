@@ -123,6 +123,30 @@
   animation: engage-ability-glow 700ms ease-out both;
 }
 
+/* Board.jsx > ShiftVortex (useStagedBoard.js > useShiftVortex) — a Being
+   Shifting becomes a Prophecy in the Ethereal Realm (RULES.md > Keywords),
+   so this reads as a small portal swirling open on the tile it lands on: a
+   rotating conic-gradient disc (the "swirl") spinning up from nothing,
+   holding, then dissolving — deep purple to match the Ethereal Realm's own
+   indigo-tinted tile background (Board.jsx's isEthereal styling) rather
+   than a color pulled from card data, since Shift itself isn't
+   Effigy-colored the way an Engage ability's cost is. */
+@keyframes shift-vortex-spin {
+  0% { transform: rotate(0deg) scale(0.25); opacity: 0; }
+  25% { opacity: 1; }
+  75% { opacity: 0.9; }
+  100% { transform: rotate(300deg) scale(1.05); opacity: 0; }
+}
+.shift-vortex-spin {
+  background: conic-gradient(from 0deg,
+    rgba(76,29,149,0.95), rgba(168,85,247,0.75), rgba(233,213,255,0.55),
+    rgba(126,34,206,0.85), rgba(49,10,101,0.95), rgba(168,85,247,0.75),
+    rgba(76,29,149,0.95));
+  box-shadow: 0 0 16px 4px rgba(147,51,234,0.65);
+  filter: blur(0.5px);
+  animation: shift-vortex-spin 900ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 /* Match.jsx > useTurnBanner — a "Your Turn"/"Opponent's Turn" announcement
    at the start of each turn: a soft radial glow behind a pill banner,
    both popping in with a slight overshoot then holding before fading, in

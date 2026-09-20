@@ -222,3 +222,67 @@ export const useJustDrawn = (hand) => {
 
   return justDrawn;
 };
+
+const SHIFT_VORTEX_MS = 900;
+
+// Board.jsx's Shift vortex — Shift can be triggered by many different
+// dispatched action types (ACTIVATE_SHIFT directly, or as a side effect of
+// a forced-Shift Conjuring/Prophecy/reaction like Chains of the Unbound or
+// Mouth of Madness), so there's no single action type to key off the way
+// useGameEngine.js's lastAttack/lastMartyr do. Every real Shift funnels
+// through performShift (actions.js) though, and always leaves the same
+// unmistakable footprint: a brand-new Prophecy occupant carrying
+// `shiftedFromCard` — so this diffs the board for a cell whose
+// shiftedFromCard instanceId wasn't there on the immediately PREVIOUS
+// board (prevBoardRef, same precedent as diffBoardDamage above), not an
+// ever-growing "seen instanceId" set — a card's instanceId is stable
+// across repeated Shifts of the same physical card (confirmed live: the
+// same Being returning to the Mortal Realm and Shifting again reuses its
+// original instanceId), so a permanent seenRef would only ever fire once
+// per card's whole lifetime instead of once per Shift. Keyed by cellId ->
+// an incrementing seq (not just a boolean), so Board.jsx's remount-to-
+// replay trick still fires if the same Ethereal tile hosts two different
+// Shifts back to back.
+export const useShiftVortex = (board) => {
+  const prevBoardRef = useRef(board);
+  const [vortexCells, setVortexCells] = useState({});
+  const timersRef = useRef({});
+
+  useEffect(() => {
+    const prevBoard = prevBoardRef.current;
+    prevBoardRef.current = board;
+    if (prevBoard === board) return undefined;
+
+    const freshCellIds = [];
+    Object.entries(board || {}).forEach(([cellId, occupant]) => {
+      const instanceId = occupant?.type === 'prophecy' && occupant.shiftedFromCard?.instanceId;
+      if (!instanceId) return;
+      const prevOccupant = prevBoard?.[cellId];
+      const prevInstanceId = prevOccupant?.type === 'prophecy' && prevOccupant.shiftedFromCard?.instanceId;
+      if (prevInstanceId === instanceId) return;
+      freshCellIds.push(cellId);
+    });
+    if (freshCellIds.length === 0) return undefined;
+
+    setVortexCells(prev => {
+      const next = { ...prev };
+      freshCellIds.forEach(cellId => { next[cellId] = (next[cellId] || 0) + 1; });
+      return next;
+    });
+    freshCellIds.forEach(cellId => {
+      if (timersRef.current[cellId]) clearTimeout(timersRef.current[cellId]);
+      timersRef.current[cellId] = setTimeout(() => {
+        setVortexCells(prev => {
+          const { [cellId]: _dropped, ...rest } = prev;
+          return rest;
+        });
+        delete timersRef.current[cellId];
+      }, SHIFT_VORTEX_MS);
+    });
+    return undefined;
+  }, [board]);
+
+  useEffect(() => () => { Object.values(timersRef.current).forEach(clearTimeout); }, []);
+
+  return vortexCells;
+};

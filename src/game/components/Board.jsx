@@ -166,6 +166,24 @@ function EngageAbilityGlow({ active, effigyType }) {
   );
 }
 
+// Shift's own landing animation (useStagedBoard.js > useShiftVortex) — a
+// swirling purple portal over the Ethereal Realm tile a Being just Shifted
+// onto, playing once (keyed on `seq`, same one-shot replay-on-remount
+// trick as MartyrGlow/EngageAbilityGlow) rather than looping. Rendered on
+// the destination tile only (not a from-cell trail — see the plan's own
+// "single glow vs. trail" note), since that's Shift's one unambiguous
+// landing spot regardless of which of Shift's many different trigger paths
+// (a Being shifting itself, or a forced Shift off some other card
+// entirely) caused it.
+function ShiftVortex({ seq }) {
+  if (!seq) return null;
+  return (
+    <div key={`vortex-${seq}`} className="absolute inset-0 z-[16] flex items-center justify-center pointer-events-none overflow-hidden rounded">
+      <div className="w-[85%] aspect-square rounded-full shift-vortex-spin" />
+    </div>
+  );
+}
+
 function EffigyZoneBreakdown({ pool }) {
   const counts = {};
   pool.forEach(e => { counts[e.effigyType] = (counts[e.effigyType] || 0) + 1; });
@@ -195,7 +213,7 @@ function EffigyZoneBreakdown({ pool }) {
   );
 }
 
-export default function Board({ state, displayBoard, flashes, lastAttack, lastMartyr, lastEngageGlow, viewerId, highlightCells, selectedCell, toggledCells, respondingCellId, onCellClick, onCellDoubleClick, borderImages, borderImagesLoaded, artImages, artBorderImages, artImagesLoaded, fontLoaded }) {
+export default function Board({ state, displayBoard, flashes, lastAttack, lastMartyr, lastEngageGlow, vortexCells, viewerId, highlightCells, selectedCell, toggledCells, respondingCellId, onCellClick, onCellDoubleClick, borderImages, borderImagesLoaded, artImages, artBorderImages, artImagesLoaded, fontLoaded }) {
   const rows = [];
   // `displayBoard` (useStagedBoard.js) is a momentarily-lagged view of
   // state.board for a Being that just took damage or died — falls back to
@@ -252,6 +270,9 @@ export default function Board({ state, displayBoard, flashes, lastAttack, lastMa
       // occupant's own card wrapper (both branches below) rather than the
       // bare tile.
       const isEngageGlowing = lastEngageGlow?.cellId === id;
+      // `vortexCells` (useStagedBoard.js > useShiftVortex) — a fresh Shift
+      // just landed on this specific Ethereal Realm tile.
+      const shiftVortexSeq = vortexCells?.[id];
 
       cells.push(
         <div
@@ -333,6 +354,7 @@ export default function Board({ state, displayBoard, flashes, lastAttack, lastMa
                 />
               )}
               <CounterBadges counters={{ time: occupant.timer }} />
+              <ShiftVortex seq={shiftVortexSeq} />
             </div>
           )}
           {occupant?.type === 'relic' && (
