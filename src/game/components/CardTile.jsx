@@ -140,6 +140,23 @@ export default function CardTile({
   // Lifespan, since the underlying card art always prints the base stat.
   const boosted = isBeing && strength != null && strength !== card.strength;
 
+  // An onboard tile belonging to the OTHER player (isOwn === false,
+  // explicitly — never just falsy/undefined, so any onboard call site that
+  // doesn't pass isOwn safely defaults to unrotated rather than guessing)
+  // renders rotated 180° — Player B's side of the board is already the
+  // logical mirror of Player A's (board.js's own directionDelta), but the
+  // CARD ART ITSELF (cardRender.js's printed arrow glyphs) has always had
+  // a fixed visual orientation regardless of owner. Without this, an
+  // opponent Being's own "forward" arrow visually points toward the
+  // opponent's OWN back row instead of toward the human, the opposite of
+  // which direction it actually moves — confirmed with the user: composed
+  // with the existing Engaged 90° rotation below, not replacing it, since
+  // a card can be both an opponent's AND Engaged at once. The hover
+  // preview is a separate, independent render (see showPreview/the render
+  // below) and always stays upright regardless — a zoomed-in card should
+  // always be legible, never upside down.
+  const rotationDeg = (onboard && isOwn === false ? 180 : 0) + (engaged ? 90 : 0);
+
   return (
     <div
       ref={wrapRef}
@@ -155,7 +172,7 @@ export default function CardTile({
           sibling so it always renders fully solid and upright. */}
       <div
         className={`transition-transform duration-200 ${dimmed ? 'opacity-40' : ''}`}
-        style={{ transform: engaged ? 'rotate(90deg)' : undefined }}
+        style={{ transform: rotationDeg ? `rotate(${rotationDeg}deg)` : undefined }}
       >
         <CardThumbnail card={card} onboard={onboard} borderImages={borderImages} borderImagesLoaded={borderImagesLoaded} artImages={artImages} artBorderImages={artBorderImages} artImagesLoaded={artImagesLoaded} fontLoaded={fontLoaded} />
       </div>

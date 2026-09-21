@@ -402,6 +402,7 @@ export default function Board({ state, displayBoard, flashes, lastAttack, lastMa
                 currentLifespan={occupant.currentLifespan}
                 strength={effectiveStrength(occupant)}
                 engaged={occupant.engaged}
+                isOwn={occupant.ownerId === viewerId}
                 selected={isSelected}
                 onboard
                 size="lg"
@@ -449,6 +450,7 @@ export default function Board({ state, displayBoard, flashes, lastAttack, lastMa
                   card={occupant.card}
                   size="md"
                   onboard
+                  isOwn={occupant.ownerId === viewerId}
                   borderImages={borderImages}
                   borderImagesLoaded={borderImagesLoaded}
                   artImages={artImages}
@@ -466,6 +468,7 @@ export default function Board({ state, displayBoard, flashes, lastAttack, lastMa
               <CardTile
                 card={occupant.card}
                 engaged={occupant.engaged}
+                isOwn={occupant.ownerId === viewerId}
                 selected={isSelected}
                 onboard
                 size="lg"
@@ -505,6 +508,7 @@ export default function Board({ state, displayBoard, flashes, lastAttack, lastMa
                 // plain Armament with its own "Engage: X" shows tapped
                 // after that fires too.
                 engaged={occupant.armaments[occupant.armaments.length - 1].engaged}
+                isOwn={occupant.ownerId === viewerId}
                 selected={isSelected}
                 onboard
                 size="lg"
@@ -538,6 +542,7 @@ export default function Board({ state, displayBoard, flashes, lastAttack, lastMa
               <CardTile
                 card={groundRelic.card}
                 engaged={groundRelic.engaged}
+                isOwn={groundRelic.ownerId === viewerId}
                 selected={isSelected}
                 onboard
                 size="lg"
