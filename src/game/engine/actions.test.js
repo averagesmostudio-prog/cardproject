@@ -3126,6 +3126,43 @@ describe('"Move target Being (1) tile in any direction" (Divine Winds)', () => {
     expect(next.log.some(e => e.message.includes('no legal Being to move'))).toBe(true);
     expect(next.pendingChoice).toBe(null);
   });
+
+  // Regression: declaring an attack (declareAttackFrom) Engages the
+  // attacker immediately and opens a pendingResolution + reactiveWindow
+  // before combat actually resolves — if the defender responds by casting
+  // Divine Winds on that same attacker, resolveAttackFrom later finds
+  // nothing at the declared fromCellId and the attack just fizzles
+  // (moveBeingFreely used to leave `engaged` untouched, so the attacker
+  // sat there stuck Engaged for an attack that never even happened).
+  it('restores Disengaged when it relocates the attacker of a still-open pendingResolution attack, so it can act again', () => {
+    const attacker = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'atk' }), currentLifespan: 5, engaged: true };
+    const state = baseState({
+      board: { r2c1: attacker },
+      pendingResolution: { kind: 'attack', declaringPlayer: 'A', fromCellId: 'r2c1', cardName: 'Test Being' },
+      reactiveWindow: { openFor: 'B', triggerDescription: 'A attacks with Test Being.' },
+      players: { A: player(), B: player({ hand: [divineWinds] }) },
+    });
+    const next = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'dw-1#0' });
+    const resolved = driveToCompletion(next, 'B');
+    expect(resolved.pendingChoice).toBe(null);
+    expect(resolved.board.r2c1).toBeUndefined(); // confirms it actually moved off its declared cell
+    const moved = Object.values(resolved.board).find(o => o?.card?.instanceId === 'atk');
+    expect(moved).toBeTruthy();
+    expect(moved.engaged).toBe(false);
+  });
+
+  it('leaves Engaged untouched for an ordinary cast with no matching pendingResolution attack', () => {
+    const alreadyEngaged = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'b1' }), currentLifespan: 5, engaged: true };
+    const state = baseState({
+      turnPlayer: 'B',
+      board: { r2c1: alreadyEngaged },
+      players: { A: player(), B: player({ hand: [divineWinds] }) },
+    });
+    const next = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'dw-1#0' });
+    const resolved = driveToCompletion(next, 'B');
+    const moved = Object.values(resolved.board).find(o => o?.card?.instanceId === 'b1');
+    expect(moved.engaged).toBe(true); // no attack was interrupted — nothing to restore
+  });
 });
 
 describe('"Target Being you control moves to a tile with an Armament on it" (Prepare for Battle)', () => {

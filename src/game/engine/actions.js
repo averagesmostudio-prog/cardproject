@@ -8641,13 +8641,31 @@ const triggerOnMoveReaction = (state, playerId, toCellId, fromCellId, card) => {
 // start/end-of-turn moves (applyForcedDirectionalMoves) — the same
 // "reposition, no Engage/tap change, still fires onMove reactions" shape
 // every other free-move effect already gets.
+// The one exception: a move that relocates the attacker of a still-open
+// `pendingResolution` attack declaration (Divine Winds — "Move target
+// Being (1) tile in any direction" — cast reactively during the window a
+// declared attack opens, before it resolves). That attack fizzles once the
+// attacker isn't at its own declared `fromCellId` anymore (resolveAttackFrom's
+// own occupant check), so the Being never actually gets to attack this turn
+// — it shouldn't be left stuck Engaged for an attack that never happened
+// either; being moved away restores it to Disengaged instead of carrying
+// the stale flag through, so its controller can still choose to move or
+// attack with it. Every OTHER use of this shared mover (Minute-taur's
+// forced moves, Acrobatic Escape, Echo chamber, ...) has no matching
+// pendingResolution, so its own "no Engage/tap change" behavior is
+// untouched.
 export const moveBeingFreely = (state, fromCellId, toCellId) => {
   const occupant = state.board[fromCellId];
   const waiting = state.board[toCellId];
   const board = { ...state.board };
   delete board[fromCellId];
   const carriedArmaments = [...(occupant.armaments || []), ...(waiting?.armaments || [])];
-  board[toCellId] = { ...occupant, ...(carriedArmaments.length > 0 ? { armaments: carriedArmaments } : {}) };
+  const interruptsOwnPendingAttack = state.pendingResolution?.kind === 'attack' && state.pendingResolution.fromCellId === fromCellId;
+  board[toCellId] = {
+    ...occupant,
+    ...(carriedArmaments.length > 0 ? { armaments: carriedArmaments } : {}),
+    ...(interruptsOwnPendingAttack ? { engaged: false } : {}),
+  };
   // A real Being carries its own top-level `card`; an Animated Armament
   // acting as one (occupant.type === 'armament-stack') doesn't — its name
   // is on its topmost entry instead.
