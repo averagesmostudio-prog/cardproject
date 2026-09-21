@@ -6368,13 +6368,17 @@ const emptyOrOwnArmamentStack = (occupant, playerId) =>
 // "moving onto an opponent's tile is an attack" rule (RULES.md > Combat) —
 // documented simplification, scoped to the mover's own Beings only, same
 // as every other own-tile-only stacking rule (Armaments included). Only
-// one Being may be attached at a time (the card's own "that Being" is
-// singular), on either side: the mover can't already be carrying one, and
-// the target can't already be carrying one either.
+// one Being may be attached at a time on the MOVER's side (the card's own
+// "that Being" is singular) — the mover can't already be carrying one.
+// The destination side, though, may already be carrying a mount of its
+// own: a treefolk/vine/seed pile can stack arbitrarily deep (e.g. a
+// Being onto a Being already riding a Samara Seed), each level nested in
+// the next occupant's own dryadAttached — see dropDryadAttached and the
+// two dryadAttached construction sites below, which all propagate a
+// prior nested attachment forward instead of dropping it.
 const DRYAD_ATTACH_TYPINGS = ['treefolk', 'vine', 'seed'];
 const dryadAttachTargetOk = (occupant, playerId, moverCard) =>
   !!moverCard.keywords?.dryad && !!occupant && occupant.type === 'being' && occupant.ownerId === playerId
-  && !occupant.dryadAttached
   && DRYAD_ATTACH_TYPINGS.some(t => (occupant.card.typing || '').toLowerCase().includes(t));
 
 // Lesser Summoning Circle: "you may Summon a Demon, Imp or Null Being
@@ -6704,6 +6708,9 @@ const dropDryadAttached = (board, cellId, occupant) => {
   board[cellId] = {
     type: 'being', ownerId: occupant.ownerId, card: mount.card, currentLifespan: mount.currentLifespan, engaged: mount.engaged,
     ...(combinedArmaments.length > 0 ? { armaments: combinedArmaments } : {}),
+    // The mount may itself have been riding something (a 3rd-deep chain)
+    // — propagate that nested attachment forward instead of losing it.
+    ...(mount.dryadAttached ? { dryadAttached: mount.dryadAttached } : {}),
   };
 };
 
@@ -8329,7 +8336,7 @@ const placeBeingOnBoard = (state, playerId, cellId, card) => {
         ...(xValue != null ? { strengthOverride: xValue } : {}),
         ...(pickingUpArmaments ? { armaments: waiting.armaments } : {}),
         ...(attachingDryad
-          ? { dryadAttached: { card: waiting.card, currentLifespan: waiting.currentLifespan, engaged: waiting.engaged, ...(waiting.armaments ? { armaments: waiting.armaments } : {}) } }
+          ? { dryadAttached: { card: waiting.card, currentLifespan: waiting.currentLifespan, engaged: waiting.engaged, ...(waiting.armaments ? { armaments: waiting.armaments } : {}), ...(waiting.dryadAttached ? { dryadAttached: waiting.dryadAttached } : {}) } }
           : {}),
       },
     },
@@ -11122,7 +11129,7 @@ const gameReducerCore = (state, action) => {
               ...occupantWithoutMount,
               ...(carriedArmaments.length > 0 ? { armaments: carriedArmaments } : {}),
               ...(attaching
-                ? { dryadAttached: { card: waiting.card, currentLifespan: waiting.currentLifespan, engaged: waiting.engaged, ...(waiting.armaments ? { armaments: waiting.armaments } : {}) } }
+                ? { dryadAttached: { card: waiting.card, currentLifespan: waiting.currentLifespan, engaged: waiting.engaged, ...(waiting.armaments ? { armaments: waiting.armaments } : {}), ...(waiting.dryadAttached ? { dryadAttached: waiting.dryadAttached } : {}) } }
                 : {}),
             }
           : { ...occupant, armaments: carriedArmaments };

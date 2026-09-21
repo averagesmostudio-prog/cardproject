@@ -1591,6 +1591,67 @@ describe('Dryad — "This Being may move onto another Being with the TreeFolk, V
     // because that choice is still open — it schedules alongside it.
     expect(next.pendingResolution).toMatchObject({ kind: 'summon-being', cardName: 'Jirahperā' });
   });
+
+  // Reported bug: a Dryad Being couldn't move onto another Being that was
+  // ALREADY carrying a mount (e.g. Jirahperā onto a Boknea Druid already
+  // riding a Samara Seed) — dryadAttachTargetOk wrongly required the
+  // DESTINATION to be un-mounted too, when only the mover's own single-rider
+  // restriction is real (RULES.md: "that Being" is singular per attacher).
+  describe('3-deep stacking (a Dryad Being attaching onto another Being that is itself already riding a mount)', () => {
+    const samaraSeed = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'samara#0', name: 'Samara Seed', typing: 'Seed, Being', strength: 0, lifespan: 1 }), currentLifespan: 1, engaged: false };
+    const bokneaOnSeed = {
+      type: 'being', ownerId: 'A',
+      card: beingCard({ instanceId: 'boknea#0', name: 'Boknea Druid', typing: 'TreeFolk, Being', strength: 1, lifespan: 2, arrows: [3], keywords: { dryad: true } }),
+      currentLifespan: 2, engaged: false,
+      dryadAttached: { card: samaraSeed.card, currentLifespan: 1, engaged: false },
+    };
+    const jirahpera = {
+      type: 'being', ownerId: 'A',
+      card: beingCard({ instanceId: 'jp#0', name: 'Jirahperā', typing: 'TreeFolk, Being', strength: 2, lifespan: 2, arrows: [3], keywords: { dryad: true } }),
+      currentLifespan: 2, engaged: false,
+    };
+
+    it('allows a Dryad Being to move onto another Being that is already riding a mount, nesting the attachment 3 deep', () => {
+      const state = baseState({ board: { r2c1: jirahpera, r2c2: bokneaOnSeed }, players: { A: player(), B: player() } });
+      const next = gameReducer(state, { type: 'MOVE_OR_ATTACK', fromCellId: 'r2c1', direction: 3, isAttack: false });
+      expect(next.board.r2c1).toBeUndefined();
+      expect(next.board.r2c2.card.name).toBe('Jirahperā');
+      expect(next.board.r2c2.dryadAttached.card.name).toBe('Boknea Druid');
+      expect(next.board.r2c2.dryadAttached.dryadAttached.card.name).toBe('Samara Seed');
+    });
+
+    it('getLegalActions offers the 3-deep attach', () => {
+      const state = baseState({ board: { r2c1: jirahpera, r2c2: bokneaOnSeed }, players: { A: player(), B: player() } });
+      const legal = getLegalActions(state, 'A');
+      expect(legal).toContainEqual({ type: 'MOVE_OR_ATTACK', fromCellId: 'r2c1', toCellId: 'r2c2', direction: 3, isAttack: false });
+    });
+
+    it('sums Strength through all 3 levels in combat', () => {
+      const stacked = {
+        ...jirahpera,
+        dryadAttached: { card: bokneaOnSeed.card, currentLifespan: 2, engaged: false, dryadAttached: { card: samaraSeed.card, currentLifespan: 1, engaged: false } },
+      };
+      const defender = { type: 'being', ownerId: 'B', card: beingCard({ instanceId: 'def#0', strength: 0, lifespan: 10 }), currentLifespan: 10, engaged: false };
+      const state = baseState({ board: { r2c1: stacked, r4c1: defender }, players: { A: player(), B: player({ lifespan: 50 }) } });
+      const next = gameReducer(state, { type: 'MOVE_OR_ATTACK', fromCellId: 'r2c1', toCellId: 'r4c1', isAttack: true });
+      // Jirahperā's own 2 Strength + Boknea Druid's 1 + Samara Seed's 0 = 3 damage.
+      expect(next.board.r4c1.currentLifespan).toBe(7);
+    });
+
+    it('detaching the TOP rider leaves the lower 2-deep chain (Boknea Druid still riding Samara Seed) intact, not lost', () => {
+      const stacked = {
+        ...jirahpera,
+        card: { ...jirahpera.card, arrows: [3] },
+        dryadAttached: { card: bokneaOnSeed.card, currentLifespan: 2, engaged: false, dryadAttached: { card: samaraSeed.card, currentLifespan: 1, engaged: false } },
+      };
+      const state = baseState({ board: { r2c1: stacked }, players: { A: player(), B: player() } });
+      const next = gameReducer(state, { type: 'MOVE_OR_ATTACK', fromCellId: 'r2c1', direction: 3, isAttack: false });
+      expect(next.board.r2c1.card.name).toBe('Boknea Druid');
+      expect(next.board.r2c1.dryadAttached.card.name).toBe('Samara Seed');
+      expect(next.board.r2c2.card.name).toBe('Jirahperā');
+      expect(next.board.r2c2.dryadAttached).toBeUndefined();
+    });
+  });
 });
 
 describe('Shift — "Engage: Move this onto a tile in the Ethereal Realm, it becomes a Prophecy..." (RULES.md > Keywords > Shift)', () => {
