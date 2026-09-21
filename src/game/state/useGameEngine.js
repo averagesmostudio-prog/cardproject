@@ -5,7 +5,12 @@ import { pickAiAction, pickAiReaction } from '../engine/ai.js';
 // Wraps the pure gameReducer in React state and drives the AI player's
 // turns automatically. `dispatch` is only meant to be called for the human
 // player's own actions — the AI dispatches itself via the effect below.
-export const useGameEngine = (initialState, aiPlayer = 'B') => {
+// `aiDifficulty` ('easy' | 'standard' | 'hard') is only ever read by
+// pickAiAction below — pickAiReaction stays flat/greedy regardless of
+// difficulty, since a reactive-window response is a single isolated choice
+// (often under a real countdown in competitive mode), not a sequence worth
+// a 2-ply search.
+export const useGameEngine = (initialState, aiPlayer = 'B', aiDifficulty = 'standard') => {
   const [state, dispatch] = useReducer(gameReducer, initialState);
 
   // Purely a rendering hint for Board.jsx's attack-lunge animation — the
@@ -138,12 +143,12 @@ export const useGameEngine = (initialState, aiPlayer = 'B') => {
     if (!aiOwesChoice && !isAiTurn && !aiOwesReaction) return;
     if (state.pendingChoice && !aiOwesChoice) return; // someone else's choice — wait
 
-    const action = aiOwesReaction ? pickAiReaction(state, aiPlayer) : pickAiAction(state, aiPlayer);
+    const action = aiOwesReaction ? pickAiReaction(state, aiPlayer) : pickAiAction(state, aiPlayer, aiDifficulty);
     if (!action) return;
     // Small delay so the AI's moves are readable rather than instant.
     const timer = setTimeout(() => dispatchTracked(action), 500);
     return () => clearTimeout(timer);
-  }, [state, aiPlayer, dispatchTracked]);
+  }, [state, aiPlayer, aiDifficulty, dispatchTracked]);
 
   return [state, dispatchTracked, lastAttack, lastMartyr, lastEngageGlow, lastModulate];
 };

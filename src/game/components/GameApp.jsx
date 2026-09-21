@@ -130,6 +130,7 @@ export default function GameApp({ onExitToMenu }) {
       onRematch={handleRematch}
       deckEntries={lastConfig?.entries}
       competitiveMode={competitiveMode}
+      aiDifficulty={aiDifficulty}
     />
   );
 }
