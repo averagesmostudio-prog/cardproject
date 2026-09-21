@@ -244,7 +244,17 @@ const singleCellChoiceLabel = (pendingChoice) => {
     case 'restore-lifespan-target':
       return `${cardName}: choose a highlighted target (or a player below) to restore ${pendingChoice.amount} Lifespan to.`;
     case 'damage-target':
-      return `${cardName}: choose a highlighted ${pendingChoice.typing || 'Being'} to take ${pendingChoice.damage} damage.`;
+      // Immen Gorta's own Boundless Hunger bounce loop (placeReturnedFromShift/
+      // continueBoundlessHungerBounce, actions.js) pauses on a real target
+      // choice for each of its first 3 illustrated returns before the loop is
+      // declared — bounceCount is 0/1/2, so step (bounceCount + 1) of 3.
+      // Without this, all 3 identical-looking prompts in a row (then a sudden
+      // game-over) gave no indication anything beyond an ordinary damage
+      // choice was happening.
+      return pendingChoice.boundlessHunger
+        ? `Boundless Hunger loop — step ${pendingChoice.boundlessHunger.bounceCount + 1} of 3: choose a highlighted target for ${cardName}'s ${pendingChoice.damage} damage.`
+          + (pendingChoice.boundlessHunger.bounceCount === 2 ? ' Resolving this completes the loop and wins the game.' : '')
+        : `${cardName}: choose a highlighted ${pendingChoice.typing || 'Being'} to take ${pendingChoice.damage} damage.`;
     case 'destroy-permanent':
       return `${cardName}: choose a highlighted permanent to destroy.`;
     case 'strength-set-eot':
