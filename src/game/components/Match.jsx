@@ -179,6 +179,9 @@ const SINGLE_CELL_CHOICE_KINDS = {
   // (shift-return, shift-from-purgatory-destination).
   'shift-destination': { actionType: 'RESOLVE_SHIFT_DESTINATION', cellField: 'cellId' },
   'shift-return': { actionType: 'RESOLVE_SHIFT_RETURN', cellField: 'cellId' },
+  // Delay/Prophesize's own return-as-summon choice — same board-native
+  // click-a-highlighted-tile resolution as shift-return just above.
+  'delay-return-summon': { actionType: 'RESOLVE_DELAY_RETURN_SUMMON', cellField: 'cellId' },
   'shift-from-purgatory-destination': { actionType: 'RESOLVE_SHIFT_FROM_PURGATORY_DESTINATION', cellField: 'cellId' },
   'give-different-typed-buff': { actionType: 'RESOLVE_GIVE_DIFFERENT_TYPED_BUFF', cellField: 'cellId' },
   'force-shift-target': { actionType: 'RESOLVE_FORCE_SHIFT_TARGET', cellField: 'cellId' },
@@ -331,6 +334,8 @@ const singleCellChoiceLabel = (pendingChoice) => {
       return `${cardName}: choose a highlighted Ethereal Realm tile to Shift onto.`;
     case 'shift-return':
       return `${cardName}: choose a highlighted Mortal Realm tile to return to.`;
+    case 'delay-return-summon':
+      return `${cardName}: choose a highlighted Mortal Realm tile to be summoned onto.`;
     case 'shift-from-purgatory-destination':
       return `${cardName}: choose a highlighted Mortal Realm tile to return to.`;
     case 'give-different-typed-buff':

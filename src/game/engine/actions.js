@@ -1010,6 +1010,39 @@ const attackPendingBlockingCell = (state) => {
   return computeAttackCell(pr.declaringPlayer, pr.fromCellId);
 };
 
+// "Negate the Summoning of target Being, it conjures as a face up Prophecy
+// instead and gains: (N) Time Counters..." (Delay) — same "respond during
+// the window a declared action opens, before its own effect lands" shape
+// Strike Down already established for attacks, applied here to a Being's
+// own summon instead. Requires placeBeingOnBoard's own `pendingResolution`
+// (kind: 'summon-being') to be populated for EVERY summon, not just ones
+// with a When Summoned trigger — see its own comment — since Delay needs a
+// target regardless of whether the summoned Being has one.
+const DELAY_NEGATE_SUMMON_RE = /^Negate the Summoning of target Being,?\s*it conjures as a face up Prophecy instead and gains:?\s*\(?(\d+)\)?\s+Time Counters?/i;
+
+// The Being a real, currently-open summon-declaration window is resolving
+// — null whenever no such window is open, or the Being it names is
+// somehow already gone (re-validated fresh, same "never trust stale data
+// across a window" discipline attackPendingBlockingCell above follows).
+// Shared by Delay's own castability gate and its resolution branch.
+const pendingSummonTarget = (state) => {
+  const pr = state.pendingResolution;
+  if (pr?.kind !== 'summon-being') return null;
+  const occupant = state.board[pr.cellId];
+  if (!occupant || occupant.card?.instanceId !== pr.instanceId) return null;
+  return { cellId: pr.cellId, occupant };
+};
+
+// "The next Being you summon is conjured as a face up Prophecy with (N)
+// Time Counters..." (Prophesize) — same end state as Delay, just set up in
+// advance rather than cast as a response: a one-shot flag on state itself,
+// same "next X you do" shape NEXT_BEING_COST_REDUCTION_RE above uses, but
+// — confirmed with the user — deliberately NOT cleared at end of turn (see
+// turn.js's own end-of-turn block), so it lingers across turns exactly
+// like skipNextModulate (Pause) does, until the caster's own next real
+// SUMMON_BEING consumes it.
+const PROPHESIZE_NEXT_SUMMON_RE = /^The next Being you summon is conjured as a face up Prophecy with\s*\(?(\d+)\)?\s+Time Counters?/i;
+
 // Desperate Finale: "As an additonal cost to conjure: Pay Lifespan equal
 // to the Lifespan of target engaged Being you control." — the SAME target
 // then "fights without engaging" and is sacrificed at end of turn (the
@@ -3757,6 +3790,35 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
     return { ...next, pendingResolution: { ...next.pendingResolution, noDamage: true } };
   }
 
+  const delayMatch = text.match(DELAY_NEGATE_SUMMON_RE);
+  if (delayMatch) {
+    // conjuringCastGateOk already refused to offer this cast at all
+    // without a real target, but this is re-checked fresh in case the
+    // board changed between offer and resolution — same discipline Strike
+    // Down's own resolution above follows.
+    const target = pendingSummonTarget(state);
+    if (!target) {
+      return addLog(state, `${cardName}'s ${label} has no Being being summoned to negate.`);
+    }
+    const { cellId, occupant } = target;
+    const targetCard = occupant.card;
+    const board = { ...state.board };
+    delete board[cellId];
+    // The Being is now gone from `cellId` — resolvePendingResolution's own
+    // "still there?" re-check (its 'summon-being' kind) already fizzles
+    // the still-pending When Summoned trigger for free once this window
+    // closes, exactly matching Delay's own "its effects are negated"
+    // printed clause, with no extra bookkeeping needed here.
+    let next = addLog({ ...state, board }, `${cardName}'s ${label} negates the Summoning of ${targetCard.name} — it conjures as a face up Prophecy instead.`);
+    return offerOrShiftFromPurgatory(next, occupant.ownerId, targetCard, parseInt(delayMatch[1], 10), true);
+  }
+
+  const prophesizeMatch = text.match(PROPHESIZE_NEXT_SUMMON_RE);
+  if (prophesizeMatch) {
+    let next = addLog(state, `${cardName}'s ${label} lets ${playerId} conjure their next summoned Being as a face up Prophecy instead.`);
+    return { ...next, nextBeingSummonedAsProphecy: { ownerId: playerId, timeCounters: parseInt(prophesizeMatch[1], 10) } };
+  }
+
   if (DROWN_OUT_THE_SCREAMS_RE.test(text)) {
     const candidates = Object.entries(state.board).filter(([, o]) => o?.type === 'being' && !o.card.isDeity);
     if (candidates.length === 0) {
@@ -5955,29 +6017,35 @@ const offerOrPerformShift = (state, playerId, fromCellId, shiftOverride = null, 
 // as a fresh shifted Prophecy, same shape performShift builds but with no
 // origin cell to vacate/drop Armaments from and no quoted Shift text of
 // its own (a generic forced Shift, same "loses all other text" treatment
-// as any other Shift while active).
-const shiftFromPurgatory = (state, playerId, card, toCellId, amount) => {
+// as any other Shift while active). `returnsAsSummon` (Delay/Prophesize —
+// see their own regexes above) flags the eventual return trip to be a
+// genuine re-summon (returnAsSummon, below) instead of the ordinary
+// Shift-return's own "no cost, no When Summoned" treatment — see
+// resolveProphecyModulateHitZero's own fork.
+const shiftFromPurgatory = (state, playerId, card, toCellId, amount, returnsAsSummon = false) => {
   const board = { ...state.board };
   board[toCellId] = {
     type: 'prophecy', ownerId: playerId,
     card: { ...card, textBox: '', typing: '', keywords: {} },
     timer: amount, faceDown: false,
     shiftedFromCard: card,
+    ...(returnsAsSummon ? { returnsAsSummon: true } : {}),
   };
   let next = addLog({ ...state, board }, `${card.name} Shifts (${amount}) from Purgatory and becomes a Prophecy in the Ethereal Realm at ${toCellId}.`);
   return triggerOnOwnBeingShiftReactions(next, playerId);
 };
 
 // Same "offer a destination, or just place it" shape as offerOrPerformShift
-// above, for a card with no board `fromCellId` (Echoes of the Boundless).
-const offerOrShiftFromPurgatory = (state, playerId, card, amount) => {
+// above, for a card with no board `fromCellId` (Echoes of the Boundless,
+// Delay, Prophesize).
+const offerOrShiftFromPurgatory = (state, playerId, card, amount, returnsAsSummon = false) => {
   const emptyEthereal = ETHEREAL_CELLS.filter(c => !state.board[c]);
   if (emptyEthereal.length === 0) {
     return addLog(state, `${card.name} has no empty tile in the Ethereal Realm to Shift onto.`);
   }
-  if (emptyEthereal.length === 1) return shiftFromPurgatory(state, playerId, card, emptyEthereal[0], amount);
+  if (emptyEthereal.length === 1) return shiftFromPurgatory(state, playerId, card, emptyEthereal[0], amount, returnsAsSummon);
   let next = addLog(state, `${playerId} Shifts ${card.name} from Purgatory and chooses an Ethereal Realm tile.`);
-  return { ...next, pendingChoice: { kind: 'shift-from-purgatory-destination', playerId, card, amount, allowedCells: emptyEthereal } };
+  return { ...next, pendingChoice: { kind: 'shift-from-purgatory-destination', playerId, card, amount, allowedCells: emptyEthereal, ...(returnsAsSummon ? { returnsAsSummon: true } : {}) } };
 };
 
 // The Roots Remember: "conjure a (Living) Prophecy from your Purgatory." —
@@ -6234,6 +6302,42 @@ const returnFromShift = (state, cellId, duringEndStep = false, bounceCount = 0, 
   return { ...next, pendingChoice: { kind: 'shift-return', playerId: occupant.ownerId, cellId, disengageOnReturn, allowedCells: emptyCells } };
 };
 
+// Delay/Prophesize's own return trip — same free-choice-among-empty-tiles
+// shape as returnFromShift just above, but genuinely RE-SUMMONS the Being
+// (via placeBeingOnBoard, so When Summoned retriggers and a fresh
+// pendingResolution/reactive window opens exactly like any normal summon)
+// rather than the ordinary Shift-return's own "no cost, no When Summoned"
+// treatment (placeReturnedFromShift's own comment) — confirmed with the
+// user: "when the being moves back into the Mortal Realm it is treated as
+// being summoned into the Mortal Realm." No cost is paid here (this isn't
+// a real SUMMON_BEING dispatch, just the deferred half of an already-
+// resolved Delay/Prophesize), matching Martyr/reanimation's own "goes
+// through placeBeingOnBoard, but for free" precedent. Legend rule /
+// armament pickup / Dryad-attach etc. all still apply for free, since
+// they live inside placeBeingOnBoard itself.
+const returnAsSummon = (state, cellId, duringEndStep = false) => {
+  const occupant = state.board[cellId];
+  const card = occupant.shiftedFromCard;
+  const ownerId = occupant.ownerId;
+  const emptyCells = emptyMortalCellsFor(state.board, ownerId);
+  if (emptyCells.length === 0) {
+    return addLog(state, `${card.name} has no empty tile in the Mortal Realm to be summoned onto.`);
+  }
+  const placeAt = (s, toCellId) => {
+    const board = { ...s.board };
+    delete board[cellId];
+    return placeBeingOnBoard({ ...s, board }, ownerId, toCellId, card);
+  };
+  if (emptyCells.length === 1 || duringEndStep) {
+    return placeAt(state, emptyCells[0]);
+  }
+  if (state.pendingChoice) {
+    return addLog(state, `${card.name}'s return from the Ethereal Realm doesn't resolve yet — still waiting on an earlier choice.`);
+  }
+  let next = addLog(state, `${ownerId} chooses where ${card.name} is summoned in the Mortal Realm.`);
+  return { ...next, pendingChoice: { kind: 'delay-return-summon', playerId: ownerId, cardName: card.name, cellId, allowedCells: emptyCells } };
+};
+
 // Scans for any OTHER shifted Being still sitting at 0-or-fewer Time
 // Counters (stuck behind an earlier multi-tile shift-return choice, per
 // returnFromShift's own one-choice-at-a-time comment) and retries it
@@ -6300,7 +6404,17 @@ export const resolveProphecyModulateHitZero = (state, cellId, duringEndStep = fa
     // A shifted Being (occupant.shiftedFromCard — see performShift above)
     // returns to the Mortal Realm instead of going to Purgatory; a real
     // printed Prophecy has no such field and takes the normal ending.
-    if (occupant.shiftedFromCard) return returnFromShift(state, cellId, duringEndStep, bounceCount, disengageOnReturn, landDisengaged);
+    // `returnsAsSummon` (Delay/Prophesize — see shiftFromPurgatory's own
+    // comment) routes through returnAsSummon instead of the ordinary
+    // returnFromShift, so it's a genuine re-summon rather than an ordinary
+    // Shift-return. Every other shiftedFromCard mechanic (Mouth of
+    // Madness's bounce loop, Údarik Hunger, ordinary printed Shift) is
+    // completely unaffected — the flag is never set for any of them.
+    if (occupant.shiftedFromCard) {
+      return occupant.returnsAsSummon
+        ? returnAsSummon(state, cellId, duringEndStep)
+        : returnFromShift(state, cellId, duringEndStep, bounceCount, disengageOnReturn, landDisengaged);
+    }
     return sendToPurgatory(state);
   }
 
@@ -8415,14 +8529,40 @@ const placeBeingOnBoard = (state, playerId, cellId, card) => {
   // Jirahperā's own "you may summon (2) Vine tokens" was silently dropped
   // every time it landed on Sporangium specifically, since Sporangium's
   // own reaction always opens its own pendingChoice first.
-  if (card.keywords?.whenSummoned) {
-    const whenSummonedText = selfReferentialWhenSummonedText(card.keywords.whenSummoned, card.name);
-    next = {
-      ...next,
-      pendingResolution: { kind: 'summon-being', declaringPlayer: playerId, cellId, cardName: card.name, whenSummonedText, instanceId: card.instanceId },
-    };
-  }
+  //
+  // Set for EVERY summon now, not just ones with a When Summoned trigger
+  // (whenSummonedText is simply null otherwise, a no-op for
+  // resolvePendingResolution) — Delay needs a target regardless of
+  // whether the summoned Being happens to have one; see its own regex/
+  // pendingSummonTarget above.
+  const whenSummonedText = card.keywords?.whenSummoned
+    ? selfReferentialWhenSummonedText(card.keywords.whenSummoned, card.name)
+    : null;
+  next = {
+    ...next,
+    pendingResolution: { kind: 'summon-being', declaringPlayer: playerId, cellId, cardName: card.name, whenSummonedText, instanceId: card.instanceId },
+  };
   return next;
+};
+
+// Prophesize: "The next Being you summon is conjured as a face up
+// Prophecy with (N) Time Counters..." — checked at every placeBeingOnBoard
+// call site reachable from a real SUMMON_BEING dispatch (the main
+// case's own 3 placements, plus RESOLVE_SUMMON_SACRIFICE_COST's deferred
+// one for Immen Gorta) — never Martyr-reanimation, Invoke, or token
+// placement, which are not "summoning" in this engine's own established
+// terminology (see NEXT_BEING_COST_REDUCTION_RE's own identical scoping).
+// The flag is consumed (cleared) the moment a real summon reaches this
+// point, whether or not the summon's own destination even matters
+// afterward — same "used regardless" rule nextBeingCostReduction follows.
+const placeSummonedBeing = (state, playerId, cellId, card) => {
+  const prophesize = state.nextBeingSummonedAsProphecy;
+  if (prophesize?.ownerId === playerId) {
+    const cleared = { ...state, nextBeingSummonedAsProphecy: null };
+    let next = addLog(cleared, `${card.name} conjures as a face up Prophecy instead of being summoned (Prophesize).`);
+    return offerOrShiftFromPurgatory(next, playerId, card, prophesize.timeCounters, true);
+  }
+  return placeBeingOnBoard(state, playerId, cellId, card);
 };
 
 // -- Invoke keyword ------------------------------------------------------
@@ -9115,6 +9255,11 @@ const conjuringCastGateOk = (state, playerId, card) => {
     const blockingCell = attackPendingBlockingCell(state);
     if (!blockingCell || state.board[blockingCell]?.type !== 'being') return false;
   }
+  // Delay: legal specifically during a real, currently-open summon-
+  // declaration window with the named Being still there to negate — same
+  // "the real window it was always waiting for" precedent Strike Down
+  // establishes above, one level up (a summon instead of an attack).
+  if (DELAY_NEGATE_SUMMON_RE.test(stripFlavorText(card.textBox) || '') && !pendingSummonTarget(state)) return false;
   if (card.keywords?.conjureCost && LIFESPAN_EQUAL_TARGET_ENGAGED_RE.test(card.keywords.conjureCost)
     && !hasAffordableEngagedTarget(state.board, state.players, playerId)) return false;
   if (card.keywords?.dejaVu && dejaVuCandidates(state, playerId, card).length === 0) return false;
@@ -9773,6 +9918,8 @@ export const getLegalActions = (state, playerId) => {
       state.pendingChoice.allowedCells.forEach(cell => actions.push({ type: 'RESOLVE_SHIFT_DESTINATION', cellId: cell }));
     } else if (state.pendingChoice.kind === 'shift-return') {
       state.pendingChoice.allowedCells.forEach(cell => actions.push({ type: 'RESOLVE_SHIFT_RETURN', cellId: cell }));
+    } else if (state.pendingChoice.kind === 'delay-return-summon') {
+      state.pendingChoice.allowedCells.forEach(cell => actions.push({ type: 'RESOLVE_DELAY_RETURN_SUMMON', cellId: cell }));
     } else if (state.pendingChoice.kind === 'give-different-typed-buff') {
       // allowedCells is a snapshot taken when this reaction fired — one of
       // those Beings can die before the choice actually resolves (e.g. a
@@ -10868,7 +11015,7 @@ const gameReducerCore = (state, action) => {
     'RESOLVE_SUMMON_VINE_TOKENS_TOGGLE', 'RESOLVE_SUMMON_VINE_TOKENS_CONFIRM',
     'RESOLVE_MOVE_ARMAMENT_ANY_SOURCE', 'RESOLVE_DEBUFF_PER_OWN_DEATH_TARGET', 'RESOLVE_SUMMON_DIFFERENT_TYPED_FROM_PURGATORY',
     'RESOLVE_COPY_TEXTBOX_UNTIL_END_OF_TURN', 'RESOLVE_ENGAGE_EFFIGY_ADD_ESSENCE',
-    'RESOLVE_SHIFT_DESTINATION', 'RESOLVE_SHIFT_RETURN',
+    'RESOLVE_SHIFT_DESTINATION', 'RESOLVE_SHIFT_RETURN', 'RESOLVE_DELAY_RETURN_SUMMON',
     'RESOLVE_GIVE_DIFFERENT_TYPED_BUFF', 'RESOLVE_FORCE_SHIFT_TARGET', 'RESOLVE_COPY_OPPONENT_EFFECT',
     'RESOLVE_ECHOES_BOUNDLESS_SHIFT_INSTEAD', 'RESOLVE_SHIFT_FROM_PURGATORY_DESTINATION', 'RESOLVE_UDARIK_SHIFT_TARGET',
     'RESOLVE_DEJA_VU_TARGET', 'RESOLVE_SUMMON_SACRIFICE_COST', 'RESOLVE_DISCARD_BEING_DRAW_BONUS',
@@ -11014,16 +11161,16 @@ const gameReducerCore = (state, action) => {
       if (viaVittles) {
         let next = addLog({ ...paidState, nextHungerFreeSummonOnTile: null }, `${playerId} sacrifices Vicious Vittles as an additional cost to summon ${card.name}.`);
         next = destroyBeing(next, action.cellId);
-        return placeBeingOnBoard(next, playerId, action.cellId, card);
+        return placeSummonedBeing(next, playerId, action.cellId, card);
       }
       if (viaSummoningCircle) {
         const circle = state.groundRelics[action.cellId];
         const groundRelics = { ...paidState.groundRelics };
         delete groundRelics[action.cellId];
         let next = addLog({ ...paidState, groundRelics }, `${playerId} sacrifices ${circle.card.name} to summon ${card.name}.`);
-        return placeBeingOnBoard(next, playerId, action.cellId, card);
+        return placeSummonedBeing(next, playerId, action.cellId, card);
       }
-      return placeBeingOnBoard(paidState, playerId, action.cellId, card);
+      return placeSummonedBeing(paidState, playerId, action.cellId, card);
     }
 
     case 'SUMMON_AS_PROPHECY': {
@@ -12522,6 +12669,21 @@ const gameReducerCore = (state, action) => {
       return placeReturnedFromShift(next, cellId, action.cellId, false, 0, disengageOnReturn || false);
     }
 
+    // Delay/Prophesize's own multi-tile return choice — see returnAsSummon's
+    // own comment for why this re-summons (placeBeingOnBoard) rather than
+    // reusing placeReturnedFromShift.
+    case 'RESOLVE_DELAY_RETURN_SUMMON': {
+      if (!state.pendingChoice || state.pendingChoice.kind !== 'delay-return-summon') return state;
+      const { cellId, allowedCells } = state.pendingChoice;
+      if (!allowedCells.includes(action.cellId)) return state;
+      const occupant = state.board[cellId];
+      if (!occupant?.shiftedFromCard) return { ...state, pendingChoice: null };
+      const board = { ...state.board };
+      delete board[cellId];
+      const next = { ...state, board, pendingChoice: null };
+      return placeBeingOnBoard(next, occupant.ownerId, action.cellId, occupant.shiftedFromCard);
+    }
+
     case 'RESOLVE_GIVE_DIFFERENT_TYPED_BUFF': {
       if (!state.pendingChoice || state.pendingChoice.kind !== 'give-different-typed-buff') return state;
       const { cardName, label, strengthBonus, lifespanBonus, allowedCells } = state.pendingChoice;
@@ -12589,10 +12751,10 @@ const gameReducerCore = (state, action) => {
 
     case 'RESOLVE_SHIFT_FROM_PURGATORY_DESTINATION': {
       if (!state.pendingChoice || state.pendingChoice.kind !== 'shift-from-purgatory-destination') return state;
-      const { playerId, card, amount, allowedCells } = state.pendingChoice;
+      const { playerId, card, amount, allowedCells, returnsAsSummon } = state.pendingChoice;
       if (!allowedCells.includes(action.cellId)) return state;
       const next = { ...state, pendingChoice: null };
-      return shiftFromPurgatory(next, playerId, card, action.cellId, amount);
+      return shiftFromPurgatory(next, playerId, card, action.cellId, amount, !!returnsAsSummon);
     }
 
     case 'RESOLVE_UDARIK_SHIFT_TARGET': {
@@ -12654,7 +12816,7 @@ const gameReducerCore = (state, action) => {
       const names = nextSelected.map(cell => state.board[cell].card.name);
       let next = nextSelected.reduce((s, cell) => destroyBeing(s, cell), { ...state, pendingChoice: null });
       next = addLog(next, `${playerId} sacrifices ${names.join(', ')} as an additional cost to summon ${cardName}.`);
-      return placeBeingOnBoard(next, playerId, cellId, card);
+      return placeSummonedBeing(next, playerId, cellId, card);
     }
 
     case 'RESOLVE_SACRIFICE_DESTROY': {
@@ -14268,11 +14430,19 @@ const resolvePendingResolution = (state) => {
   const cleared = { ...state, pendingResolution: null };
   if (pendingResolution.kind === 'summon-being') {
     const { declaringPlayer, cellId, cardName, whenSummonedText, instanceId } = pendingResolution;
+    // Every summon carries this now (see placeBeingOnBoard's own comment),
+    // not just ones with a real When Summoned trigger — nothing to do,
+    // and nothing to log, for the ones that don't.
+    if (!whenSummonedText) return cleared;
     // The summoned Being might not be there anymore by the time priority
     // actually settles (a response destroyed it, or — more prosaically —
     // something else removed it) — re-checked fresh here rather than
     // assumed, same "never trust stale data across a window" discipline
-    // the whole point of this mechanism exists for.
+    // the whole point of this mechanism exists for. This is also how Delay
+    // ("Negate the Summoning...") silently prevents its own target's When
+    // Summoned from ever firing: Delay's own resolution already removed it
+    // from `cellId` (converted into a face-up Prophecy instead), so this
+    // check fails and the trigger fizzles here for free.
     if (cleared.board[cellId]?.card?.instanceId !== instanceId) {
       return addLog(cleared, `${cardName}'s When Summoned trigger fizzles — it's no longer on the battlefield.`);
     }

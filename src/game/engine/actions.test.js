@@ -4091,6 +4091,160 @@ describe('"Destroy target blocking Being, its controller is not dealt damage whe
   });
 });
 
+describe('"Negate the Summoning of target Being, it conjures as a face up Prophecy instead..." (Delay) / "The next Being you summon is conjured as a face up Prophecy..." (Prophesize)', () => {
+  // r3c1-r3c4 filled so exactly one Ethereal Realm tile (r3c5) is empty —
+  // same single-candidate auto-place convention Shift's own tests use.
+  const fillFourEthereal = {
+    r3c1: { type: 'prophecy', ownerId: 'A', card: { name: 'Filler 1' }, timer: 1, faceDown: true },
+    r3c2: { type: 'prophecy', ownerId: 'A', card: { name: 'Filler 2' }, timer: 1, faceDown: true },
+    r3c3: { type: 'prophecy', ownerId: 'A', card: { name: 'Filler 3' }, timer: 1, faceDown: true },
+    r3c4: { type: 'prophecy', ownerId: 'A', card: { name: 'Filler 4' }, timer: 1, faceDown: true },
+  };
+  const delay = (overrides = {}) => ({
+    id: 'delay', instanceId: 'delay#0', name: 'Delay', kind: 'ethereal-conjuring',
+    castingCost: { faithless: 0, colored: {} },
+    textBox: 'Negate the Summoning of target Being, it conjures as a face up Prophecy instead and gains: (2) Time Counters, "If this has at least (1) Time Counter its effects are negated. When it has (0) TIme Counters Summon it in the Mortal Realm',
+    ...overrides,
+  });
+  const prophesize = (overrides = {}) => ({
+    id: 'prophesize', instanceId: 'prophesize#0', name: 'Prophesize', kind: 'ethereal-conjuring',
+    castingCost: { faithless: 0, colored: {} },
+    textBox: 'The next Being you summon is conjured as a face up Prophecy with (2) Time Counters and "if this has (0) Time Counters move it to the Mortal Realm" It has all other effects negated while a Prophecy.',
+    ...overrides,
+  });
+  // Free (0-cost) so SUMMON_BEING doesn't need an effigyPool set up.
+  const whenSummonedBeing = (overrides = {}) => beingCard({
+    instanceId: 'wb#0', name: 'Test Whensummoned Being', arrows: [1], castingCost: { faithless: 0, colored: {} },
+    keywords: { whenSummoned: 'draw (1) card.' },
+    ...overrides,
+  });
+
+  describe('Delay', () => {
+    it('is not offered without a real summon-declaration window open', () => {
+      const state = baseState({ players: { A: player(), B: player({ hand: [delay()] }) } });
+      expect(getLegalActions(state, 'B').some(a => a.type === 'CAST_CONJURING')).toBe(false);
+    });
+
+    it('negates the summon reactively: the Being never lands as a real Being, its When Summoned never fires, and it conjures as a face up Prophecy instead', () => {
+      const state = baseState({
+        turnPlayer: 'A',
+        board: fillFourEthereal,
+        players: { A: player({ hand: [whenSummonedBeing()], mainDeck: [{ instanceId: 'd1' }] }), B: player({ hand: [delay()] }) },
+      });
+      const declared = gameReducer(state, { type: 'SUMMON_BEING', instanceId: 'wb#0', cellId: 'r1c2' });
+      expect(declared.board.r1c2.card.name).toBe('Test Whensummoned Being'); // placed for a moment, per placeBeingOnBoard
+      expect(declared.reactiveWindow).toEqual(expect.objectContaining({ openFor: 'B' }));
+      // Neither side has anything left to add after this — B's own Delay
+      // is consumed by the cast, A's hand is already empty from summoning
+      // — so the window this opens for A auto-closes within this SAME
+      // dispatch, and the fizzled When Summoned resolves immediately too.
+      const resolved = gameReducer(declared, { type: 'CAST_CONJURING', instanceId: 'delay#0' });
+      expect(resolved.board.r1c2).toBeUndefined(); // negated — no longer a real Being on the board
+      expect(resolved.pendingChoice).toBeNull(); // only one empty Ethereal tile — auto-placed
+      const prophecy = resolved.board.r3c5;
+      expect(prophecy).toMatchObject({ type: 'prophecy', ownerId: 'A', timer: 2, faceDown: false, returnsAsSummon: true });
+      expect(prophecy.card.name).toBe('Test Whensummoned Being');
+      expect(resolved.pendingResolution).toBeNull();
+      expect(resolved.players.A.hand).toHaveLength(0); // When Summoned never fired — no draw
+      expect(resolved.log.some(e => e.message.includes("fizzles — it's no longer on the battlefield"))).toBe(true);
+    });
+
+    it('still works on a Being with no When Summoned text at all', () => {
+      const plainBeing = beingCard({ instanceId: 'pb#0', name: 'Plain Being', castingCost: { faithless: 0, colored: {} } });
+      const state = baseState({
+        turnPlayer: 'A',
+        board: fillFourEthereal,
+        players: { A: player({ hand: [plainBeing] }), B: player({ hand: [delay()] }) },
+      });
+      const declared = gameReducer(state, { type: 'SUMMON_BEING', instanceId: 'pb#0', cellId: 'r1c2' });
+      expect(declared.pendingResolution).toEqual(expect.objectContaining({ kind: 'summon-being', whenSummonedText: null }));
+      const resolved = gameReducer(declared, { type: 'CAST_CONJURING', instanceId: 'delay#0' });
+      expect(resolved.board.r1c2).toBeUndefined();
+      expect(resolved.board.r3c5).toMatchObject({ type: 'prophecy', ownerId: 'A', timer: 2, returnsAsSummon: true });
+    });
+
+    it('the return trip is a genuine re-summon — When Summoned fires for real once its Time Counters run out', () => {
+      const shiftedProphecy = {
+        type: 'prophecy', ownerId: 'A',
+        card: { ...whenSummonedBeing(), textBox: '', typing: '', keywords: {} },
+        timer: 0, faceDown: false, shiftedFromCard: whenSummonedBeing(), returnsAsSummon: true,
+      };
+      const state = baseState({ board: { r3c1: shiftedProphecy }, players: { A: player({ mainDeck: [{ instanceId: 'd1' }] }), B: player() } });
+      const opened = resolveProphecyModulateHitZero(state, 'r3c1');
+      // Every Mortal Realm cell of A's is still empty — a real, multi-tile
+      // choice, same shape shift-return's own equivalent choice uses.
+      expect(opened.pendingChoice.kind).toBe('delay-return-summon');
+      // Neither player has anything to respond with, so the When Summoned
+      // window this placement opens auto-closes within this SAME dispatch
+      // — the draw already happened by the time this returns.
+      const placed = gameReducer(opened, { type: 'RESOLVE_DELAY_RETURN_SUMMON', cellId: 'r1c2' });
+      expect(placed.board.r3c1).toBeUndefined();
+      expect(placed.board.r1c2.type).toBe('being');
+      expect(placed.board.r1c2.card.name).toBe('Test Whensummoned Being');
+      expect(placed.pendingResolution).toBeNull();
+      expect(placed.players.A.hand).toHaveLength(1); // drew the 1 card in mainDeck
+      expect(placed.log.some(e => e.message.includes("Test Whensummoned Being's When Summoned triggers"))).toBe(true);
+      expect(placed.log.some(e => e.message.includes('draws 1 card(s) for A'))).toBe(true);
+    });
+  });
+
+  describe('Prophesize', () => {
+    it('sets a lingering flag without touching the caster\'s hand/board otherwise, and is castable in the main phase (no window needed)', () => {
+      const state = baseState({ turnPlayer: 'A', players: { A: player({ hand: [prophesize()] }), B: player() } });
+      const next = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'prophesize#0' });
+      expect(next.nextBeingSummonedAsProphecy).toEqual({ ownerId: 'A', timeCounters: 2 });
+      expect(next.players.A.hand).toHaveLength(0); // cast and gone from hand
+    });
+
+    it('lingers across a full turn cycle until actually consumed', () => {
+      const state = baseState({ turnPlayer: 'A', players: { A: player({ hand: [prophesize()] }), B: player({ mainDeck: [{ instanceId: 'd1' }] }) } });
+      const cast = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'prophesize#0' });
+      const aTurnEnds = endTurn(cast);
+      const bTurnEnds = endTurn(aTurnEnds);
+      expect(bTurnEnds.turnPlayer).toBe('A'); // back around
+      expect(bTurnEnds.nextBeingSummonedAsProphecy).toEqual({ ownerId: 'A', timeCounters: 2 }); // still there
+    });
+
+    it('redirects the very next SUMMON_BEING into a face up Prophecy and clears itself', () => {
+      const state = baseState({
+        turnPlayer: 'A',
+        nextBeingSummonedAsProphecy: { ownerId: 'A', timeCounters: 2 },
+        board: fillFourEthereal,
+        players: { A: player({ hand: [whenSummonedBeing()] }), B: player() },
+      });
+      const next = gameReducer(state, { type: 'SUMMON_BEING', instanceId: 'wb#0', cellId: 'r1c2' });
+      expect(next.board.r1c2).toBeUndefined(); // never became a real Being
+      expect(next.nextBeingSummonedAsProphecy).toBeNull(); // consumed
+      const prophecy = next.board.r3c5;
+      expect(prophecy).toMatchObject({ type: 'prophecy', ownerId: 'A', timer: 2, faceDown: false, returnsAsSummon: true });
+      expect(prophecy.card.name).toBe('Test Whensummoned Being');
+      // Its own When Summoned never opened a window/pendingResolution at all
+      // (Delay's own equivalent path never even placed the real Being).
+      expect(next.pendingResolution).toBeNull();
+    });
+
+    it('does not affect a Martyr-reanimated or Invoked Being — only a real SUMMON_BEING consumes it', () => {
+      const reanimator = {
+        type: 'being', ownerId: 'A',
+        card: beingCard({ instanceId: 'rean#0', keywords: { martyr: 'Add Test Whensummoned Being from deck to hand.' } }),
+        currentLifespan: 2, engaged: false,
+      };
+      const state = baseState({
+        turnPlayer: 'A',
+        nextBeingSummonedAsProphecy: { ownerId: 'A', timeCounters: 2 },
+        board: { r2c1: reanimator },
+        players: { A: player({ mainDeck: [whenSummonedBeing()] }), B: player() },
+      });
+      const next = gameReducer(state, { type: 'ACTIVATE_MARTYR', cellId: 'r2c1' });
+      // The searched card lands in hand (Martyr's own printed effect, an
+      // ordinary "add from deck to hand", not a summon at all) — the flag
+      // must still be untouched either way, since nothing here is a real
+      // SUMMON_BEING dispatch.
+      expect(next.nextBeingSummonedAsProphecy).toEqual({ ownerId: 'A', timeCounters: 2 });
+    });
+  });
+});
+
 describe('"As an additonal cost to conjure: Pay Lifespan equal to the Lifespan of target engaged Being you control. That Being fights without engaging. Sacrifice it at the end of the turn." (Desperate Finale)', () => {
   const desperateFinale = {
     id: 'df-1', instanceId: 'df-1#0', name: 'Desperate Finale', kind: 'conjuring',
