@@ -4085,7 +4085,7 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
     }
     const sacrificeAndDraw = (st, { cellId, armamentInstanceId, armamentName }) => {
       let n = addLog(st, `${playerId} sacrifices ${armamentName} to ${cardName}'s ${label}.`);
-      n = removeArmamentEntry(n, cellId, armamentInstanceId);
+      n = removeArmamentEntry(n, cellId, armamentInstanceId, { toPurgatory: true });
       return resolveOrLogEffect(n, playerId, cardName, `draw (${drawCount}) card(s).`, label, context);
     };
     if (candidates.length === 1) return sacrificeAndDraw(state, candidates[0]);
@@ -4105,7 +4105,7 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
     }
     const sacrificeAndDamage = (st, { cellId, armamentInstanceId, armamentName, cost }) => {
       let n = addLog(st, `${playerId} sacrifices ${armamentName} (cost ${cost}) to ${cardName}'s ${label}.`);
-      n = removeArmamentEntry(n, cellId, armamentInstanceId);
+      n = removeArmamentEntry(n, cellId, armamentInstanceId, { toPurgatory: true });
       return resolveOrLogEffect(n, playerId, cardName, `Deal (${cost}) damage to any target.`, label, context);
     };
     if (candidates.length === 1) return sacrificeAndDamage(state, candidates[0]);
@@ -6550,8 +6550,18 @@ const purgatoryTypedBeingsWithCost = (purgatory, typing, cost) =>
 // aren't tied to one specific named Armament (Tiny Forge Master) — unlike
 // engageExtraCostSacrificeCell/sacrificeOccupantAt above, which sacrifice
 // a whole occupant, this only ever removes the one Armament entry.
-const removeArmamentEntry = (state, cellId, armamentInstanceId) => {
+// `toPurgatory` (default false, so moveArmamentEntry/moveAutoAttachArmaments'
+// own relocation calls are completely unaffected) marks a genuine "leaving
+// play" removal — a sacrifice cost being paid, not a reposition — and does
+// two things a plain relocation must NOT: sends the real card to its
+// owner's Purgatory (so a later "search Purgatory for an Armament" effect,
+// e.g. Crucible, can actually find it — it used to just vanish from the
+// game entirely) and claws back any Lifespan stat bonus it was granting
+// (removeArmamentsLifespanBonus — it used to stay permanently banked on
+// the Being even after the Armament itself was long gone).
+const removeArmamentEntry = (state, cellId, armamentInstanceId, { toPurgatory = false } = {}) => {
   const occupant = state.board[cellId];
+  const removed = (occupant.armaments || []).find(a => a.card.instanceId === armamentInstanceId);
   const armaments = (occupant.armaments || []).filter(a => a.card.instanceId !== armamentInstanceId);
   const board = { ...state.board };
   if (armaments.length === 0 && occupant.type === 'armament-stack') {
@@ -6559,7 +6569,15 @@ const removeArmamentEntry = (state, cellId, armamentInstanceId) => {
   } else {
     board[cellId] = { ...occupant, armaments };
   }
-  return { ...state, board };
+  let next = { ...state, board };
+  if (!toPurgatory || !removed) return next;
+  next = removeArmamentsLifespanBonus(next, cellId, [removed]);
+  // Same "never let Kalmahka's board-only synthetic stand-in leak into a
+  // permanent zone" fix destroyArmamentEntryAt's own comment documents.
+  const realCard = removed.kalmahkaOriginalCard || removed.card;
+  const owner = next.players[occupant.ownerId];
+  next = { ...next, players: { ...next.players, [occupant.ownerId]: { ...owner, purgatory: purgatoryAfterAdding(owner.purgatory, realCard) } } };
+  return next;
 };
 
 // Destroys a whole board occupant (Prophecy or standalone Relic) for a
@@ -6627,24 +6645,21 @@ const destroyRelicTarget = (state, target) => {
 };
 
 // Destroys one specific Armament entry (DESTROY_ARMAMENT_RE) — removes it
-// via removeArmamentEntry (same primitive Tiny Forge Master's own
-// sacrifice already uses) and, unlike that sacrifice-cost precedent, sends
-// it to Purgatory (RULES.md > Zones), since this is a genuine "destroy"
-// effect, not a cost being paid.
+// via removeArmamentEntry with `toPurgatory: true` (same primitive Tiny
+// Forge Master's own sacrifice now shares — both send the real card to
+// Purgatory and claw back any Lifespan bonus it was granting; a genuine
+// "destroy" effect is exactly as much "leaving play" as a sacrifice cost
+// being paid, they're no longer two different precedents here).
 const destroyArmamentEntryAt = (state, cellId, armamentInstanceId) => {
   const occupant = state.board[cellId];
   const entry = occupant?.armaments?.find(a => a.card.instanceId === armamentInstanceId);
   if (!entry) return state;
   // entry.kalmahkaOriginalCard || entry.card — same "never let Kalmahka's
-  // board-only synthetic stand-in leak into a permanent zone" fix as
-  // realCardFor above, just inlined here since this already has the raw
-  // entry (not an actorView) in hand. Self-play found the un-guarded
-  // version put a "Warped Armament" card with no castingCost into
-  // Purgatory, crashing the moment it was later searched back to hand.
+  // board-only synthetic stand-in leak into a permanent zone" fix
+  // removeArmamentEntry's own `toPurgatory` branch already applies; read
+  // here too only for this function's own log line.
   const realCard = entry.kalmahkaOriginalCard || entry.card;
-  let next = removeArmamentEntry(state, cellId, armamentInstanceId);
-  const owner = next.players[occupant.ownerId];
-  next = { ...next, players: { ...next.players, [occupant.ownerId]: { ...owner, purgatory: purgatoryAfterAdding(owner.purgatory, realCard) } } };
+  const next = removeArmamentEntry(state, cellId, armamentInstanceId, { toPurgatory: true });
   return addLog(next, `${realCard.name} is destroyed.`);
 };
 
@@ -7288,6 +7303,31 @@ const applyDryadAttachLifespanBonus = (state, cellId) => {
   const bonus = occupant?.dryadAttached?.currentLifespan || 0;
   if (bonus === 0) return state;
   return { ...state, board: { ...state.board, [cellId]: { ...occupant, currentLifespan: occupant.currentLifespan + bonus } } };
+};
+
+// The inverse of applyNewArmamentsLifespanBonus above, for a Lifespan-
+// bonus-granting Armament that's genuinely LEAVING play (sacrificed,
+// destroyed) rather than merely relocating — see removeArmamentEntry's own
+// `toPurgatory` option and destroyArmamentEntryAt below, both of which call
+// this. A positive bonus is clawed back as real damage through the same
+// death pipeline a negative bonus's own attach-time application already
+// uses (so a Being that was only alive because of the bonus can die the
+// moment it's lost, symmetric with attaching a lethal negative one); a
+// negative bonus (e.g. "gains +6/-3") heals back the amount it was
+// costing. Deliberately NOT called by a plain relocation (Ay-gruhda's
+// moveArmamentEntry, moveAutoAttachArmaments) — RULES.md's own documented
+// precedent for those is that a moved Armament's Lifespan bonus stays
+// banked on whichever Being it was already granted to, not clawed back.
+const removeArmamentsLifespanBonus = (state, cellId, removedArmaments) => {
+  const bonus = removedArmaments.reduce((sum, a) => sum + (a.card.keywords?.statBonus?.lifespan || 0), 0);
+  if (bonus === 0) return state;
+  const occupant = state.board[cellId];
+  if (!occupant) return state; // the whole freestanding pile emptied out along with this entry
+  if (occupant.type !== 'being') {
+    return { ...state, board: { ...state.board, [cellId]: { ...occupant, armaments: applyLifespanBonusToArmamentEntry(occupant.armaments, -bonus) } } };
+  }
+  if (bonus > 0) return dealDamageToBeing(state, cellId, bonus);
+  return { ...state, board: { ...state.board, [cellId]: { ...occupant, currentLifespan: occupant.currentLifespan - bonus } } };
 };
 
 // Sporangium: "When a Being with Dryad moves onto this, X." — fired the
@@ -12309,7 +12349,7 @@ const gameReducerCore = (state, action) => {
       const entry = occupant?.armaments?.find(a => a.card.instanceId === action.armamentInstanceId);
       if (!occupant || occupant.ownerId !== playerId || !entry) return state;
       let next = addLog({ ...state, pendingChoice: null }, `${playerId} sacrifices ${entry.card.name} to ${cardName}'s When Summoned.`);
-      next = removeArmamentEntry(next, action.cellId, action.armamentInstanceId);
+      next = removeArmamentEntry(next, action.cellId, action.armamentInstanceId, { toPurgatory: true });
       return resolveOrLogEffect(next, playerId, cardName, `draw (${drawCount}) card(s).`, 'When Summoned');
     }
 
@@ -12321,7 +12361,7 @@ const gameReducerCore = (state, action) => {
       if (!occupant || occupant.ownerId !== playerId || !entry) return state;
       const cost = totalCastingCost(entry.card);
       let next = addLog({ ...state, pendingChoice: null }, `${playerId} sacrifices ${entry.card.name} (cost ${cost}) to ${cardName}'s ${label}.`);
-      next = removeArmamentEntry(next, action.cellId, action.armamentInstanceId);
+      next = removeArmamentEntry(next, action.cellId, action.armamentInstanceId, { toPurgatory: true });
       return resolveOrLogEffect(next, playerId, cardName, `Deal (${cost}) damage to any target.`, label, context);
     }
 

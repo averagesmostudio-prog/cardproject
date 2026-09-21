@@ -6575,6 +6575,50 @@ describe('"When Summoned" mechanics on Beings', () => {
       expect(next.players.A.hand).toHaveLength(0); // never drew
       expect(next.log.some(e => e.message.includes('has no Armament to sacrifice'))).toBe(true);
     });
+
+    // Regression: a sacrificed Armament used to just vanish entirely — not
+    // on the board, not in Purgatory, nowhere — so a later "search
+    // Purgatory for an Armament" effect (Crucible) could never find it, and
+    // any Lifespan stat bonus it had granted (Dancing Swords: "Being gains
+    // +1/+1") stayed permanently banked on the Being even though the
+    // Armament itself was long gone. Sacrifice now goes through the same
+    // "genuinely leaving play" treatment as an outright Destroy.
+    describe('sends the sacrificed Armament to Purgatory and reverses any Lifespan stat bonus it granted', () => {
+      const dancingSwords = (id = 'ds#0') => ({
+        id: 'ds', instanceId: id, name: 'Dancing Swords', kind: 'relic-armament', typing: 'Relic, Armament',
+        castingCost: { faithless: 0, colored: {} }, keywords: { animated: true, statBonus: { strength: 1, lifespan: 1 } },
+      });
+
+      it('reverses the +1 Lifespan bonus on the Being it was attached to', () => {
+        const ally = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'ally' }), currentLifespan: 5, engaged: false, armaments: [equip(dancingSwords())] };
+        const next = summon(tinyForgeMaster(), { r2c1: ally }, { A: { mainDeck: [{ instanceId: 'd1' }] } });
+        expect(next.board.r2c1.armaments).toEqual([]);
+        expect(next.board.r2c1.currentLifespan).toBe(4); // 5 - the +1 bonus, clawed back rather than left stale
+      });
+
+      it('sends the real Dancing Swords card to Purgatory, findable by name/typing', () => {
+        const ally = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'ally' }), currentLifespan: 5, engaged: false, armaments: [equip(dancingSwords())] };
+        const next = summon(tinyForgeMaster(), { r2c1: ally }, { A: { mainDeck: [{ instanceId: 'd1' }] } });
+        expect(next.players.A.purgatory).toContainEqual(dancingSwords());
+      });
+
+      it('lets Crucible actually find it in Purgatory afterward', () => {
+        const ally = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'ally' }), currentLifespan: 5, engaged: false, armaments: [equip(dancingSwords())] };
+        let state = summon(tinyForgeMaster(), { r2c1: ally }, { A: { mainDeck: [{ instanceId: 'd1' }] } });
+        const crucible = {
+          type: 'relic', ownerId: 'A', engaged: false, counters: { forge: 2 },
+          card: {
+            id: 'crucible', instanceId: 'crucible#0', name: 'Crucible', kind: 'relic', castingCost: { faithless: 0, colored: {} },
+            keywords: { engage: 'add an Armament to hand from your Purgatory.', engageCounterCost: { type: 'forge', amount: 1 } },
+          },
+        };
+        state = { ...state, board: { ...state.board, r2c2: crucible } };
+        const engaged = gameReducer(state, { type: 'ACTIVATE_ENGAGE', cellId: 'r2c2' });
+        expect(engaged.pendingChoice).toEqual({ kind: 'search', playerId: 'A', source: 'purgatory', query: 'Armament', cardName: 'Crucible' });
+        const resolved = gameReducer(engaged, { type: 'RESOLVE_CHOICE', instanceId: 'ds#0' });
+        expect(resolved.players.A.hand).toContainEqual(dancingSwords());
+      });
+    });
   });
 
   describe('"Sacrifice an Armament, then draw one card." (Forge Master) — word-form count, not a digit', () => {
