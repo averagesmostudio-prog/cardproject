@@ -1,9 +1,10 @@
 import React from 'react';
 import { Pencil, X } from 'lucide-react';
 
-// Shared card grid for both the standalone Library screen (management —
-// edit/remove) and PreconSelect's in-match deck picker (pick, optionally
-// edit; never remove — deletion stays a Library-only action). `decks` is
+// Shared card grid for both the standalone Library screen and PreconSelect's
+// in-match deck picker — both offer the full pick/edit/remove set; a precon
+// (deck.source === 'precon') never shows a remove control regardless, since
+// it isn't stored in the removable deckLibrary.js store at all. `decks` is
 // the normalized list from deckLibrary.js's buildDeckLibraryList().
 export default function DeckLibraryGrid({ decks, onPick, onEdit, onRemove }) {
   return (

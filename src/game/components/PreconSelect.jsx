@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Layers } from 'lucide-react';
 import { resolveDeckEntries, validateMainDeck } from '../engine/deck.js';
-import { buildDeckLibraryList, toDeckSeed } from '../../lib/deckLibrary.js';
+import { buildDeckLibraryList, removeDeck, toDeckSeed } from '../../lib/deckLibrary.js';
 import DeckLibraryGrid from './DeckLibraryGrid.jsx';
 
 // The "Play a Game" landing screen: the Library's full deck list (precons +
@@ -11,6 +11,13 @@ import DeckLibraryGrid from './DeckLibraryGrid.jsx';
 // that routes into the existing DeckImport → DeckBuilder flow unchanged.
 export default function PreconSelect({ pool, onStart, onCustom, onEdit, onBack, competitiveMode, onToggleCompetitiveMode, aiDifficulty, onChangeAiDifficulty }) {
   const [error, setError] = useState(null);
+  const [, setVersion] = useState(0); // bumped to force the grid to re-read the store after a remove
+
+  const handleRemove = (deck) => {
+    if (deck.source !== 'saved') return;
+    removeDeck(deck.id);
+    setVersion(v => v + 1);
+  };
 
   const handlePick = (deck) => {
     const { entries, effigyCounts, warnings } = resolveDeckEntries(pool, deck.raw);
@@ -95,7 +102,7 @@ export default function PreconSelect({ pool, onStart, onCustom, onEdit, onBack, 
         </div>
 
         <div className="mb-6">
-          <DeckLibraryGrid decks={buildDeckLibraryList()} onPick={handlePick} onEdit={handleEdit} />
+          <DeckLibraryGrid decks={buildDeckLibraryList()} onPick={handlePick} onEdit={handleEdit} onRemove={handleRemove} />
         </div>
 
         {error && (
