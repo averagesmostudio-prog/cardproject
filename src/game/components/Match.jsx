@@ -1022,24 +1022,28 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
     }
   };
 
-  // Double-clicking a stack carrying one or more Armaments (a Being with
-  // Armaments attached, or a freestanding Armament pile) opens an expanded
-  // view showing each card independently, so a specific Armament can be
-  // interacted with (e.g. Engaged) without that choice being ambiguous —
-  // works for either side's stacks, though only the human's own offers
-  // action buttons.
+  // Double-clicking a stack carrying more than one real card on the tile
+  // (a Being with Armaments attached, a freestanding Armament pile, a
+  // Dryad-attached mount — including Armaments attached to THAT mount —
+  // or a Being/Prophecy co-located with a ground Relic, e.g. Planchette/
+  // Shifting Sands) opens an expanded view showing each card
+  // independently, so a specific Armament can be interacted with (e.g.
+  // Engaged) without that choice being ambiguous — works for either
+  // side's stacks, though only the human's own offers action buttons. A
+  // ground Relic lives outside `state.board` entirely (state.groundRelics,
+  // same cellId), so it needs its own check here — `state.board[id]` alone
+  // would never see it.
   const onCellDoubleClick = (id) => {
     const occupant = state.board[id];
-    // A Dryad-attached mount (occupant.dryadAttached) is the same "more
-    // than one real card on this tile" situation an Armament pile already
-    // is — same expanded-stack popup, just a different second card.
-    if (!occupant || !(occupant.armaments?.length > 0 || occupant.dryadAttached)) return;
+    const groundRelic = state.groundRelics[id];
+    if (!(occupant?.armaments?.length > 0 || occupant?.dryadAttached || groundRelic)) return;
     setSelectedCell(null);
     setSelectedHand(null);
     setExpandedCell(id);
   };
 
   const expandedOccupant = expandedCell ? state.board[expandedCell] : null;
+  const expandedGroundRelic = expandedCell ? state.groundRelics[expandedCell] : null;
 
   // Legal ACTIVATE_ARMAMENT_ENGAGE actions for the expanded stack, keyed by
   // which Armament instance they belong to — a stack can carry more than
@@ -2629,7 +2633,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
         </div>
       )}
 
-      {(expandedOccupant?.armaments?.length > 0 || expandedOccupant?.dryadAttached) && (
+      {(expandedOccupant?.armaments?.length > 0 || expandedOccupant?.dryadAttached || expandedGroundRelic) && (
         <div
           className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
           onClick={() => setExpandedCell(null)}
@@ -2646,11 +2650,13 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
               <X className="w-5 h-5" />
             </button>
             <div className="font-semibold text-stone-800 mb-3 pr-8">
-              {expandedOccupant.type === 'being' ? expandedOccupant.card.name : 'Armament pile'} at {expandedCell}
+              {expandedOccupant
+                ? (expandedOccupant.type === 'being' ? expandedOccupant.card.name : 'Armament pile')
+                : expandedGroundRelic.card.name} at {expandedCell}
             </div>
             <div className="overflow-auto">
               <div className="flex gap-4 pb-2 w-max">
-                {expandedOccupant.type === 'being' && (
+                {expandedOccupant?.type === 'being' && (
                   <div className="flex flex-col items-center gap-2 shrink-0">
                     <CardTile
                       card={expandedOccupant.card}
@@ -2669,7 +2675,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
                     <span className="text-[10px] text-stone-400 uppercase tracking-wide">Click to select</span>
                   </div>
                 )}
-                {expandedOccupant.dryadAttached && (
+                {expandedOccupant?.dryadAttached && (
                   <div className="flex flex-col items-center gap-2 shrink-0">
                     <CardTile
                       card={expandedOccupant.dryadAttached.card}
@@ -2687,7 +2693,59 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
                     <span className="text-[10px] text-stone-400 uppercase tracking-wide">Dryad mount</span>
                   </div>
                 )}
-                {expandedOccupant.armaments?.map(({ card, engaged, counters }) => {
+                {/* Armaments attached to the Dryad mount ITSELF, not the
+                    rider — display-only here (no Engage/Sacrifice/Martyr
+                    buttons wired up, unlike the rider's own armaments
+                    below): previously silently dropped from this popup
+                    entirely. */}
+                {expandedOccupant?.dryadAttached?.armaments?.map(({ card, engaged, counters }) => (
+                  <div key={card.instanceId} className="flex flex-col items-center gap-2 shrink-0">
+                    <CardTile
+                      card={card}
+                      engaged={engaged}
+                      size="lg"
+                      borderImages={borderImages}
+                      borderImagesLoaded={borderImagesLoaded}
+                      artImages={artImages}
+                      artBorderImages={artBorderImages}
+                      artImagesLoaded={artImagesLoaded}
+                      fontLoaded={fontLoaded}
+                    />
+                    {counters && Object.keys(counters).length > 0 && (
+                      <span className="text-[10px] text-stone-500">
+                        {Object.entries(counters).map(([type, n]) => `${n} ${type}`).join(', ')} Counter{Object.values(counters).some(n => n !== 1) ? 's' : ''}
+                      </span>
+                    )}
+                    <span className="text-[10px] text-stone-400 uppercase tracking-wide">On the mount</span>
+                  </div>
+                ))}
+                {/* A ground Relic co-located on this same tile (Planchette,
+                    Shifting Sands, ...) — lives entirely outside
+                    state.board, so it was previously invisible to this
+                    popup no matter what else was here. Relics have no
+                    Strength/Lifespan of their own to show. */}
+                {expandedGroundRelic && (
+                  <div className="flex flex-col items-center gap-2 shrink-0">
+                    <CardTile
+                      card={expandedGroundRelic.card}
+                      engaged={expandedGroundRelic.engaged}
+                      size="lg"
+                      borderImages={borderImages}
+                      borderImagesLoaded={borderImagesLoaded}
+                      artImages={artImages}
+                      artBorderImages={artBorderImages}
+                      artImagesLoaded={artImagesLoaded}
+                      fontLoaded={fontLoaded}
+                    />
+                    {expandedGroundRelic.counters && Object.keys(expandedGroundRelic.counters).length > 0 && (
+                      <span className="text-[10px] text-stone-500">
+                        {Object.entries(expandedGroundRelic.counters).map(([type, n]) => `${n} ${type}`).join(', ')} Counter{Object.values(expandedGroundRelic.counters).some(n => n !== 1) ? 's' : ''}
+                      </span>
+                    )}
+                    <span className="text-[10px] text-stone-400 uppercase tracking-wide">Ground Relic</span>
+                  </div>
+                )}
+                {expandedOccupant?.armaments?.map(({ card, engaged, counters }) => {
                   const engageAction = expandedArmamentEngageActions.get(card.instanceId);
                   const sacrificeAction = expandedArmamentSacrificeActions.get(card.instanceId);
                   const armamentMartyrAction = expandedArmamentMartyrActions.get(card.instanceId);
