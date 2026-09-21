@@ -1,0 +1,71 @@
+{
+  "format": "tcg-deck",
+  "version": 1,
+  "exportedAt": "2026-09-18T07:57:59.631Z",
+  "mainDeck": [
+    {
+      "name": "Orbital Acceleration",
+      "count": 3
+    },
+    {
+      "name": "Freeze Frame",
+      "count": 3
+    },
+    {
+      "name": "Immen Gorta, the Boundless Hunger",
+      "count": 2
+    },
+    {
+      "name": "Terranean Gates",
+      "count": 2
+    },
+    {
+      "name": "Mouth of Madness",
+      "count": 2
+    },
+    {
+      "name": "Eònion Altar",
+      "count": 3
+    },
+    {
+      "name": "Pangs of Hunger",
+      "count": 2
+    },
+    {
+      "name": "By Teeth and bounds",
+      "count": 2
+    },
+    {
+      "name": "Daylight Savings",
+      "count": 3
+    },
+    {
+      "name": "Equanimity",
+      "count": 3
+    },
+    {
+      "name": "Clock Tower Custodian",
+      "count": 3
+    },
+    {
+      "name": "Surveyor",
+      "count": 2
+    },
+    {
+      "name": "Training dummy",
+      "count": 3
+    },
+    {
+      "name": "Priestly Practitioner",
+      "count": 3
+    },
+    {
+      "name": "Hourglass",
+      "count": 2
+    },
+    {
+      "name": "Instigator",
+      "count": 2
+    }
+  ]
+}

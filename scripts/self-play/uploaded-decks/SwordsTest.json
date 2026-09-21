@@ -1,0 +1,67 @@
+{
+  "format": "tcg-deck",
+  "version": 1,
+  "exportedAt": "2026-09-15T04:46:35.910Z",
+  "mainDeck": [
+    {
+      "name": "Dancing Swords",
+      "count": 3
+    },
+    {
+      "name": "Rhak-tùrin Zealot",
+      "count": 3
+    },
+    {
+      "name": "Happy Hammer",
+      "count": 3
+    },
+    {
+      "name": "Mahka-Rahva",
+      "count": 2
+    },
+    {
+      "name": "Sharpshoot",
+      "count": 3
+    },
+    {
+      "name": "Crucible",
+      "count": 3
+    },
+    {
+      "name": "Tiny Forge Master",
+      "count": 3
+    },
+    {
+      "name": "Persitent Recruit",
+      "count": 3
+    },
+    {
+      "name": "Scrap removal",
+      "count": 3
+    },
+    {
+      "name": "Animate",
+      "count": 3
+    },
+    {
+      "name": "Desecration",
+      "count": 2
+    },
+    {
+      "name": "Blacksmithing",
+      "count": 3
+    },
+    {
+      "name": "Broken Broom",
+      "count": 2
+    },
+    {
+      "name": "Feathers of the Fallen",
+      "count": 2
+    },
+    {
+      "name": "Anahk-sha",
+      "count": 2
+    }
+  ]
+}

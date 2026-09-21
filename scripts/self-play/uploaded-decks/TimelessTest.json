@@ -1,0 +1,63 @@
+{
+  "format": "tcg-deck",
+  "version": 1,
+  "exportedAt": "2026-09-16T04:54:55.068Z",
+  "mainDeck": [
+    {
+      "name": "Clock Tower Custodian",
+      "count": 3
+    },
+    {
+      "name": "Daylight Savings",
+      "count": 3
+    },
+    {
+      "name": "Eònion Zealot",
+      "count": 3
+    },
+    {
+      "name": "Mini Mage",
+      "count": 3
+    },
+    {
+      "name": "Orbital Acceleration",
+      "count": 3
+    },
+    {
+      "name": "Timeline Tinker",
+      "count": 3
+    },
+    {
+      "name": "Recollect",
+      "count": 2
+    },
+    {
+      "name": "Medium Mage",
+      "count": 3
+    },
+    {
+      "name": "Eònion Altar",
+      "count": 3
+    },
+    {
+      "name": "Horological Horror",
+      "count": 3
+    },
+    {
+      "name": "Hourglass",
+      "count": 3
+    },
+    {
+      "name": "Singularity",
+      "count": 3
+    },
+    {
+      "name": "Dial of Metatoris",
+      "count": 3
+    },
+    {
+      "name": "MetaToris",
+      "count": 2
+    }
+  ]
+}

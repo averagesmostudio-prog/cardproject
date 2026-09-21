@@ -1,0 +1,83 @@
+{
+  "format": "tcg-deck",
+  "version": 1,
+  "exportedAt": "2026-09-19T21:09:03.511Z",
+  "mainDeck": [
+    {
+      "name": "Kendasha",
+      "count": 2
+    },
+    {
+      "name": "Kalduran Altar",
+      "count": 3
+    },
+    {
+      "name": "Eònion Altar",
+      "count": 3
+    },
+    {
+      "name": "MetaToris",
+      "count": 2
+    },
+    {
+      "name": "Scarab",
+      "count": 2
+    },
+    {
+      "name": "Locust swarm",
+      "count": 3
+    },
+    {
+      "name": "Skeleton Key",
+      "count": 2
+    },
+    {
+      "name": "Hourglass",
+      "count": 2
+    },
+    {
+      "name": "Horological Horror",
+      "count": 2
+    },
+    {
+      "name": "Daylight Savings",
+      "count": 3
+    },
+    {
+      "name": "Shifting Sands",
+      "count": 3
+    },
+    {
+      "name": "Orbital Acceleration",
+      "count": 3
+    },
+    {
+      "name": "Surveyor",
+      "count": 2
+    },
+    {
+      "name": "Canopic Jar",
+      "count": 2
+    },
+    {
+      "name": "Brick",
+      "count": 1
+    },
+    {
+      "name": "Divine Winds",
+      "count": 1
+    },
+    {
+      "name": "False Testament",
+      "count": 1
+    },
+    {
+      "name": "Claws of Onoushara",
+      "count": 1
+    },
+    {
+      "name": "Drown out the Screams",
+      "count": 2
+    }
+  ]
+}

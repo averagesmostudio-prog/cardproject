@@ -1,0 +1,79 @@
+{
+  "format": "tcg-deck",
+  "version": 1,
+  "exportedAt": "2026-09-16T17:53:05.349Z",
+  "mainDeck": [
+    {
+      "name": "Hoarder",
+      "count": 3
+    },
+    {
+      "name": "Greenseer",
+      "count": 2
+    },
+    {
+      "name": "Al khali the Empty",
+      "count": 2
+    },
+    {
+      "name": "Shifting Sands",
+      "count": 3
+    },
+    {
+      "name": "Arbosalis Altar",
+      "count": 3
+    },
+    {
+      "name": "Kalduran Zealot",
+      "count": 2
+    },
+    {
+      "name": "Divine Winds",
+      "count": 3
+    },
+    {
+      "name": "Blooming Seed",
+      "count": 2
+    },
+    {
+      "name": "Classic Familiar",
+      "count": 2
+    },
+    {
+      "name": "White Whisker",
+      "count": 1
+    },
+    {
+      "name": "Greenseer's assistant",
+      "count": 3
+    },
+    {
+      "name": "Onoushara",
+      "count": 2
+    },
+    {
+      "name": "Strike Down",
+      "count": 3
+    },
+    {
+      "name": "Martyrdom",
+      "count": 2
+    },
+    {
+      "name": "Canopic Jar",
+      "count": 2
+    },
+    {
+      "name": "Balance the Scales",
+      "count": 2
+    },
+    {
+      "name": "Antiquities Dealer",
+      "count": 2
+    },
+    {
+      "name": "Stray",
+      "count": 1
+    }
+  ]
+}

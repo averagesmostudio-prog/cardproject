@@ -1,0 +1,79 @@
+{
+  "format": "tcg-deck",
+  "version": 1,
+  "exportedAt": "2026-09-20T01:28:59.901Z",
+  "mainDeck": [
+    {
+      "name": "Lingering Doubt",
+      "count": 3
+    },
+    {
+      "name": "Fidian Nol",
+      "count": 2
+    },
+    {
+      "name": "Passing Doubt",
+      "count": 3
+    },
+    {
+      "name": "Skeptic",
+      "count": 3
+    },
+    {
+      "name": "Appease the Masses",
+      "count": 2
+    },
+    {
+      "name": "Collapsing Bridge",
+      "count": 2
+    },
+    {
+      "name": "Divine Winds",
+      "count": 3
+    },
+    {
+      "name": "Faithless Altar",
+      "count": 2
+    },
+    {
+      "name": "Lighten the Load",
+      "count": 2
+    },
+    {
+      "name": "Priestly Practitioner",
+      "count": 2
+    },
+    {
+      "name": "Skeptical Scrawling",
+      "count": 2
+    },
+    {
+      "name": "Surveyor",
+      "count": 2
+    },
+    {
+      "name": "Temple of Dubiety",
+      "count": 3
+    },
+    {
+      "name": "Thespian",
+      "count": 2
+    },
+    {
+      "name": "Zealot",
+      "count": 2
+    },
+    {
+      "name": "My Body as a Shield",
+      "count": 1
+    },
+    {
+      "name": "Martyrdom",
+      "count": 2
+    },
+    {
+      "name": "One Above All",
+      "count": 2
+    }
+  ]
+}

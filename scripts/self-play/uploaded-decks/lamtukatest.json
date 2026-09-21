@@ -1,0 +1,67 @@
+{
+  "format": "tcg-deck",
+  "version": 1,
+  "exportedAt": "2026-09-20T03:23:19.457Z",
+  "mainDeck": [
+    {
+      "name": "Ravenous Lamtukka",
+      "count": 3
+    },
+    {
+      "name": "Vassal Matriach",
+      "count": 2
+    },
+    {
+      "name": "Lamtukka Gentleman",
+      "count": 3
+    },
+    {
+      "name": "NamKaranian Zealot",
+      "count": 3
+    },
+    {
+      "name": "Lesser Summoning Circle",
+      "count": 3
+    },
+    {
+      "name": "Planchette",
+      "count": 2
+    },
+    {
+      "name": "NamKaranian Altar",
+      "count": 3
+    },
+    {
+      "name": "Simple Summoner",
+      "count": 3
+    },
+    {
+      "name": "Illegible Grimoire",
+      "count": 3
+    },
+    {
+      "name": "Legion's Onset",
+      "count": 2
+    },
+    {
+      "name": "Priestly Practitioner",
+      "count": 3
+    },
+    {
+      "name": "Údarik Hunger",
+      "count": 2
+    },
+    {
+      "name": "Imp-practical Joker",
+      "count": 3
+    },
+    {
+      "name": "Vassal",
+      "count": 2
+    },
+    {
+      "name": "Divine Winds",
+      "count": 3
+    }
+  ]
+}

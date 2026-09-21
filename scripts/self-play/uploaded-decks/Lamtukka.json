@@ -1,0 +1,26 @@
+{
+  "id": "deck-1789962431133-yqqgpc",
+  "name": "Lamtukka",
+  "entries": [
+    {"name": "Divine Winds", "count": 3},
+    {"name": "Priestly Practitioner", "count": 3},
+    {"name": "Illegible Grimoire", "count": 3},
+    {"name": "Imp-practical Joker", "count": 3},
+    {"name": "Lamtukka Gentleman", "count": 3},
+    {"name": "Legion's Onset", "count": 2},
+    {"name": "Lesser Summoning Circle", "count": 3},
+    {"name": "NamKaranian Altar", "count": 3},
+    {"name": "NamKaranian Zealot", "count": 3},
+    {"name": "Planchette", "count": 2},
+    {"name": "Ravenous Lamtukka", "count": 3},
+    {"name": "Simple Summoner", "count": 3},
+    {"name": "Vardik Hunger", "count": 2},
+    {"name": "Vassal", "count": 2},
+    {"name": "Vassal Matriach", "count": 2}
+  ],
+  "effigyCounts": {"bleeding": 0, "timeless": 0, "formless": 15, "living": 0, "shifting": 0},
+  "colorKey": "formless",
+  "iconKey": "zap",
+  "createdAt": "2026-09-21T03:47:11.133Z",
+  "updatedAt": "2026-09-21T03:47:11.133Z"
+}

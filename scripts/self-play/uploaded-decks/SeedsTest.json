@@ -1,0 +1,71 @@
+{
+  "format": "tcg-deck",
+  "version": 1,
+  "exportedAt": "2026-09-19T06:05:48.977Z",
+  "mainDeck": [
+    {
+      "name": "Sporangium",
+      "count": 3
+    },
+    {
+      "name": "Boknea Druid",
+      "count": 3
+    },
+    {
+      "name": "Jirahperā",
+      "count": 2
+    },
+    {
+      "name": "Crathea",
+      "count": 2
+    },
+    {
+      "name": "Dendrify",
+      "count": 3
+    },
+    {
+      "name": "Elderflower Ancient",
+      "count": 3
+    },
+    {
+      "name": "Growth Spurt",
+      "count": 3
+    },
+    {
+      "name": "Lumbering Leadwood",
+      "count": 1
+    },
+    {
+      "name": "Samara Seed",
+      "count": 3
+    },
+    {
+      "name": "Sapling",
+      "count": 3
+    },
+    {
+      "name": "Blooming Seed",
+      "count": 3
+    },
+    {
+      "name": "Farm hand",
+      "count": 2
+    },
+    {
+      "name": "Arbosalis Altar",
+      "count": 3
+    },
+    {
+      "name": "Arbosalis Zealot",
+      "count": 2
+    },
+    {
+      "name": "Propagate",
+      "count": 2
+    },
+    {
+      "name": "Thespian",
+      "count": 2
+    }
+  ]
+}

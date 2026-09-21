@@ -1,0 +1,79 @@
+{
+  "format": "tcg-deck",
+  "version": 1,
+  "exportedAt": "2026-09-18T04:18:26.522Z",
+  "mainDeck": [
+    {
+      "name": "Cycle of Hunger",
+      "count": 3
+    },
+    {
+      "name": "Immen Gorta, the Boundless Hunger",
+      "count": 2
+    },
+    {
+      "name": "Mouth of Madness",
+      "count": 2
+    },
+    {
+      "name": "NamKaranian Altar",
+      "count": 2
+    },
+    {
+      "name": "Onagīous Hunger",
+      "count": 2
+    },
+    {
+      "name": "Ounati Hunger",
+      "count": 2
+    },
+    {
+      "name": "Pangs of Hunger",
+      "count": 2
+    },
+    {
+      "name": "Sanative Siphon",
+      "count": 2
+    },
+    {
+      "name": "Saan tachīan Hunger",
+      "count": 2
+    },
+    {
+      "name": "Scā-vuhk Hunger",
+      "count": 3
+    },
+    {
+      "name": "Simple Summoner",
+      "count": 2
+    },
+    {
+      "name": "Terranean Gates",
+      "count": 2
+    },
+    {
+      "name": "Thōgrakin Hunger",
+      "count": 3
+    },
+    {
+      "name": "Údarik Hunger",
+      "count": 3
+    },
+    {
+      "name": "By Teeth and bounds",
+      "count": 2
+    },
+    {
+      "name": "Divine Winds",
+      "count": 2
+    },
+    {
+      "name": "Priestly Practitioner",
+      "count": 2
+    },
+    {
+      "name": "Drown out the Screams",
+      "count": 2
+    }
+  ]
+}

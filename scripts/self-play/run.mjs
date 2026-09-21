@@ -6,14 +6,15 @@
 // loops, and rank individual cards' own IMPACT on win rate (see cardStats'
 // own comment) — included-vs-excluded, not a raw win rate, which stays
 // deeply confounded by whatever OTHER cards a deck-building process
-// happens to pair a card with. Evolved mono-color AND hybrid (2-color)
-// decks are built by ranking each color's card pool on that impact, PLUS
-// independent per-card random noise (RANK_NOISE — see fillDeckEntries'
-// own comment for why the noise is the actual fix, not just extra
-// randomness). The 6 precon decks in src/game/decks/precons.js are only
-// ever READ (resolvePreconEntries) — every evolved/hybrid deck built here
-// is a fresh, in-memory-only entries list, never written back to
-// precons.js or any other tracked file.
+// happens to pair a card with. Evolved mono-color, hybrid (2-color), AND
+// triple (3-color) decks are built by ranking each color combo's card pool
+// on that impact, PLUS independent per-card random noise (RANK_NOISE — see
+// fillDeckEntries' own comment for why the noise is the actual fix, not
+// just extra randomness). The 6 precon decks in src/game/decks/precons.js,
+// and any user-provided deck exports dropped in ./uploaded-decks/, are only
+// ever READ (resolveDeckEntries) — every evolved/hybrid/triple deck built
+// here is a fresh, in-memory-only entries list, never written back to
+// precons.js, uploaded-decks/, or any other tracked file.
 //
 // Must be run with vite-node (not plain `node`) — cardData.js references
 // import.meta.env.BASE_URL at module load time, which only vite-node's
@@ -28,7 +29,7 @@ import { parseCSV, toGameCard, EFFIGY_COLORS } from '../../src/lib/cardData.js';
 import { createInitialState, gameReducer } from '../../src/game/engine/actions.js';
 import {
   buildMainDeckList, buildEffigyDeckList, autoBuildMainDeckEntries,
-  autoBuildEffigyCounts, randomEffigyColor, resolvePreconEntries, MAIN_DECK_SIZE,
+  autoBuildEffigyCounts, randomEffigyColor, resolveDeckEntries, MAIN_DECK_SIZE,
   MAX_COPIES, MAX_DEITY_COPIES, EFFIGY_DECK_SIZE,
 } from '../../src/game/engine/deck.js';
 import { pickAiAction, pickAiReaction } from '../../src/game/engine/ai.js';
@@ -73,17 +74,100 @@ log(`Loaded ${pool.length} cards from default-card-set.csv`);
 // ---------- deck sources ----------
 // Precons are only ever resolved (read), never mutated.
 const preconDeckFor = (precon) => {
-  const { entries, effigyCounts } = resolvePreconEntries(pool, precon);
+  const { entries, effigyCounts } = resolveDeckEntries(pool, precon);
   return { mainDeck: buildMainDeckList(entries), effigyDeck: buildEffigyDeckList(effigyCounts), label: `precon:${precon.id}` };
 };
+
+// ---------- uploaded decks (user-provided deck exports — never modified) ----------
+// Dropped as plain {format:'tcg-deck', mainDeck:[{name,count}]} export files
+// (DeckBuilder's own "Export deck list" shape) into ./uploaded-decks/ — read
+// here, resolved against the pool by name (same lookup resolveDeckEntries
+// gives the real app's own Import Deck List), and played alongside every
+// other deck source below. Read-only: nothing here ever writes back to
+// uploaded-decks/, precons.js, or the Deck Library.
+const UPLOADED_DECKS_DIR = path.join(__dirname, 'uploaded-decks');
+// A plain deck-list export has no Effigy composition of its own (that's a
+// separate, per-player build choice in the real app) — supplied here per
+// the user's own explicit instructions rather than guessed. `variants`
+// lets one deck list be tested under more than one Effigy split at once
+// (the user's own "pivot between 8/7 and 7/8" ask for winnertorusdeck) —
+// each variant gets its own distinct label so its win rate is tracked
+// separately, never blended together.
+const UPLOADED_DECK_CONFIG = {
+  DoubtsTest: { variants: [{ suffix: '', effigyCounts: { shifting: 15 } }] },
+  SeedsTest: { variants: [{ suffix: '', effigyCounts: { living: 15 } }] },
+  winnertorusdeck: {
+    variants: [
+      { suffix: ':8timeless-7shifting', effigyCounts: { timeless: 8, shifting: 7 } },
+      { suffix: ':7timeless-8shifting', effigyCounts: { timeless: 7, shifting: 8 } },
+    ],
+  },
+  // BonesTest/ComboTest/FormlessTest/RatsTest/SwordsTest/TimelessTest are
+  // each byte-for-byte the same card list as an existing precon (Graveyard
+  // Bash/Call of the Void/Famished Phantoms/Plague Rats/Armed and Ready/
+  // Tick Tock respectively — precons.js) — Effigy splits below mirror
+  // those precons' own exactly, for the same reason: these add no new deck
+  // shape to test, just another equally-weighted sample of an already-
+  // tracked one under a second label, included per the user's own request
+  // rather than silently deduplicated away.
+  BonesTest: { variants: [{ suffix: '', effigyCounts: { shifting: 15 } }] },
+  ComboTest: { variants: [{ suffix: '', effigyCounts: { formless: 8, timeless: 7 } }] },
+  FormlessTest: { variants: [{ suffix: '', effigyCounts: { formless: 15 } }] },
+  RatsTest: { variants: [{ suffix: '', effigyCounts: { living: 8, shifting: 7 } }] },
+  SwordsTest: { variants: [{ suffix: '', effigyCounts: { bleeding: 15 } }] },
+  TimelessTest: { variants: [{ suffix: '', effigyCounts: { timeless: 15 } }] },
+  // An earlier draft of the Lamtukka (Formless/Hunger-tribal) build pulled
+  // from the app's own Deck Library — distinct card list from Lamtukka.json
+  // above, worth its own separate track rather than assuming it's obsolete.
+  lamtukatest: { variants: [{ suffix: '', effigyCounts: { formless: 15 } }] },
+};
+const loadUploadedDecks = () => {
+  const decks = [];
+  if (!fs.existsSync(UPLOADED_DECKS_DIR)) return decks;
+  for (const file of fs.readdirSync(UPLOADED_DECKS_DIR)) {
+    if (!file.endsWith('.json')) continue;
+    const base = file.slice(0, -'.json'.length);
+    const raw = JSON.parse(fs.readFileSync(path.join(UPLOADED_DECKS_DIR, file), 'utf-8'));
+    const rawEntries = raw.mainDeck || raw.entries || [];
+    // A real Deck-Library-saved record (pulled straight from the app's own
+    // localStorage, e.g. Lamtukka) already carries its own effigyCounts —
+    // self-contained, no config entry needed. A plain "Export deck list"
+    // file (DoubtsTest/SeedsTest/winnertorusdeck) has no Effigy composition
+    // of its own, so it needs one supplied via UPLOADED_DECK_CONFIG instead.
+    const variants = raw.effigyCounts
+      ? [{ suffix: '', effigyCounts: raw.effigyCounts }]
+      : UPLOADED_DECK_CONFIG[base]?.variants;
+    if (!variants) {
+      log(`Uploaded deck file "${file}" has no effigyCounts of its own and no entry in UPLOADED_DECK_CONFIG — skipped.`);
+      continue;
+    }
+    variants.forEach((variant) => {
+      const { entries, warnings } = resolveDeckEntries(pool, { entries: rawEntries, effigyCounts: variant.effigyCounts });
+      warnings.forEach((w) => log(`Uploaded deck "${base}": ${w}`));
+      decks.push({
+        mainDeck: buildMainDeckList(entries),
+        effigyDeck: buildEffigyDeckList(variant.effigyCounts),
+        label: `uploaded:${base}${variant.suffix}`,
+      });
+    });
+  }
+  return decks;
+};
+const uploadedDecks = loadUploadedDecks();
+log(`Loaded ${uploadedDecks.length} uploaded deck build(s): ${uploadedDecks.map((d) => d.label).join(', ') || '(none)'}`);
+const uploadedDeckFor = () => uploadedDecks[Math.floor(Math.random() * uploadedDecks.length)];
 // entries/eligiblePool are attached so playOneGame can feed this deck's
 // choices into the included-vs-excluded card stats below — a plain random
 // pick is actually the CLEANEST possible sample for that comparison (truly
 // unbiased, no score-based influence at all), so it isn't wasted.
+// `pairKey: color` (mirroring the hybrid/triple/faithless archetypes below)
+// is what makes bumpPairStats track a single Effigy typing's own OVERALL
+// win rate — the "best/worst effigy typing" question — not just its
+// individual cards' impact within that color.
 const randomDeckFor = (color) => {
   const eligiblePool = eligibleFor(color);
   const entries = autoBuildMainDeckEntries(pool, color);
-  return { mainDeck: buildMainDeckList(entries), effigyDeck: buildEffigyDeckList(autoBuildEffigyCounts(color)), label: `random:${color}`, entries, eligiblePool };
+  return { mainDeck: buildMainDeckList(entries), effigyDeck: buildEffigyDeckList(autoBuildEffigyCounts(color)), label: `random:${color}`, entries, eligiblePool, pairKey: color };
 };
 
 // Per-card IMPACT tracking, used to evolve a candidate deck per color (and
@@ -146,6 +230,24 @@ const bumpPairStats = (pairKey, won) => {
 };
 const pairWinRate = (pairKey) => {
   const s = pairStats.get(pairKey);
+  return s ? (s.wins + 1) / (s.games + 2) : 0.5;
+};
+
+// Every exact deck BUILD's own overall win rate, keyed by its label
+// (precon:swords, uploaded:Lamtukka, evolved:shifting, evolved-hybrid:
+// bleeding+shifting, evolved-triple:..., random:faithless, ...) — the
+// "what is the seemingly best deck overall" question, spanning every deck
+// source uniformly (unlike pairStats, which only covers the archetype
+// tracks that have a pairKey). Bumped for literally every deck played.
+const labelStats = new Map(); // label -> { games, wins }
+const bumpLabelStats = (label, won) => {
+  const s = labelStats.get(label) || { games: 0, wins: 0 };
+  s.games += 1;
+  if (won) s.wins += 1;
+  labelStats.set(label, s);
+};
+const labelWinRate = (label) => {
+  const s = labelStats.get(label);
   return s ? (s.wins + 1) / (s.games + 2) : 0.5;
 };
 
@@ -237,42 +339,62 @@ const fillDeckEntries = (eligible, rng, noiseScale, impactFn = impactOf) => {
 const evolvedDeckFor = (color) => {
   const eligiblePool = eligibleFor(color);
   const entries = fillDeckEntries(eligiblePool, Math.random, RANK_NOISE);
-  return { mainDeck: buildMainDeckList(entries), effigyDeck: buildEffigyDeckList(autoBuildEffigyCounts(color)), label: `evolved:${color}`, entries, eligiblePool };
+  return { mainDeck: buildMainDeckList(entries), effigyDeck: buildEffigyDeckList(autoBuildEffigyCounts(color)), label: `evolved:${color}`, entries, eligiblePool, pairKey: color };
 };
 
-// Hybrid (2-color) evolution — same evolved-deck idea as evolvedDeckFor,
-// just drawing from cards restricted to EITHER of two colors instead of
-// one (mirrors "Call of the Void"/"Plague Rats", precons.js — a real,
-// user-confirmed-good archetype shape, not a hypothetical). Its own Effigy
-// Deck is a proportional split of the 15 slots by how much each color's
-// pips are actually demanded across the evolved entries, not an even 50/50
-// — the same idea those two precons' own hand-picked splits (8/7) follow.
-const hybridEffigyCounts = (colorA, colorB, entries) => {
+// Multi-color (hybrid 2-color, or triple 3-color) evolution — same evolved-
+// deck idea as evolvedDeckFor, just drawing from cards restricted to ANY of
+// `colors` instead of one (2-color mirrors "Call of the Void"/"Plague
+// Rats", precons.js — a real, user-confirmed-good archetype shape, not a
+// hypothetical; 3-color has no existing precon precedent, but the user
+// explicitly wants it tested regardless of whether it turns out good).
+// Its own Effigy Deck is a proportional split of the 15 slots by how much
+// each color's pips are actually demanded across the evolved entries, not
+// an even split — the same idea 2-color precons' own hand-picked splits
+// (8/7) follow, generalized to N colors. Every color is guaranteed at
+// least 1 slot so a 3-color deck never silently degrades to fewer colors
+// than requested.
+const multiColorEffigyCounts = (colors, entries) => {
   const counts = {};
   EFFIGY_COLORS.forEach((c) => { counts[c] = 0; });
-  let demandA = 0, demandB = 0;
+  const demand = {};
+  colors.forEach((c) => { demand[c] = 0; });
   entries.forEach(({ card, count }) => {
-    demandA += (card.castingCost?.colored?.[colorA] || 0) * count;
-    demandB += (card.castingCost?.colored?.[colorB] || 0) * count;
+    colors.forEach((c) => { demand[c] += (card.castingCost?.colored?.[c] || 0) * count; });
   });
-  const total = demandA + demandB;
-  let countA = total > 0 ? Math.round(EFFIGY_DECK_SIZE * demandA / total) : Math.round(EFFIGY_DECK_SIZE / 2);
-  countA = Math.max(1, Math.min(EFFIGY_DECK_SIZE - 1, countA)); // keep both colors real
-  counts[colorA] = countA;
-  counts[colorB] = EFFIGY_DECK_SIZE - countA;
+  const totalDemand = colors.reduce((sum, c) => sum + demand[c], 0);
+  let remaining = EFFIGY_DECK_SIZE;
+  colors.forEach((c, i) => {
+    const isLast = i === colors.length - 1;
+    const share = totalDemand > 0 ? Math.round(EFFIGY_DECK_SIZE * demand[c] / totalDemand) : Math.round(EFFIGY_DECK_SIZE / colors.length);
+    // Keep every color real (>= 1) and never overshoot what's left, so the
+    // final color's own share always exactly finishes the deck at 15.
+    const count = isLast ? remaining : Math.max(1, Math.min(remaining - (colors.length - i - 1), share));
+    counts[c] = count;
+    remaining -= count;
+  });
   return counts;
 };
-const evolvedHybridDeckFor = (colorA, colorB) => {
-  const eligiblePool = eligibleFor(colorA, colorB);
+const evolvedMultiColorDeckFor = (colors, labelPrefix) => {
+  const eligiblePool = eligibleFor(...colors);
   const entries = fillDeckEntries(eligiblePool, Math.random, RANK_NOISE);
-  const pairKey = [colorA, colorB].sort().join('+');
+  const pairKey = [...colors].sort().join('+');
   return {
     mainDeck: buildMainDeckList(entries),
-    effigyDeck: buildEffigyDeckList(hybridEffigyCounts(colorA, colorB, entries)),
-    label: `evolved-hybrid:${pairKey}`, entries, pairKey, eligiblePool,
+    effigyDeck: buildEffigyDeckList(multiColorEffigyCounts(colors, entries)),
+    label: `${labelPrefix}:${pairKey}`, entries, pairKey, eligiblePool,
   };
 };
+const evolvedHybridDeckFor = (colorA, colorB) => evolvedMultiColorDeckFor([colorA, colorB], 'evolved-hybrid');
+const evolvedTripleDeckFor = (colorA, colorB, colorC) => evolvedMultiColorDeckFor([colorA, colorB, colorC], 'evolved-triple');
 const ALL_COLOR_PAIRS = EFFIGY_COLORS.flatMap((a, i) => EFFIGY_COLORS.slice(i + 1).map((b) => [a, b]));
+// C(5,3) = 10 distinct 3-color combinations — per the user's own framing
+// ("3 or more colors may be bad, but it is worth testing"), capped at 3
+// (not 4+) so each combination still gets a meaningful sample size within
+// the run's time budget rather than spreading too thin.
+const ALL_COLOR_TRIPLES = EFFIGY_COLORS.flatMap((a, i) =>
+  EFFIGY_COLORS.slice(i + 1).flatMap((b, j) =>
+    EFFIGY_COLORS.slice(i + 1 + j + 1).map((c) => [a, b, c])));
 
 // A fully Faithless (colorless) deck — every Main Deck card costs only
 // Faithless pips, no colored ones at all (eligibleFor() with zero color
@@ -314,24 +436,41 @@ const evolvedFaithlessDeckFor = () => {
   return { mainDeck: buildMainDeckList(entries), effigyDeck: buildEffigyDeckList(autoBuildEffigyCounts(randomEffigyColor())), label: 'evolved:faithless', entries, pairKey: FAITHLESS_ARCHETYPE_KEY, eligiblePool };
 };
 
+// Whether to reserve a share of games for the uploaded decks at all — only
+// meaningful once at least one was actually found in ./uploaded-decks/.
+const HAS_UPLOADED = uploadedDecks.length > 0;
 const pickDeck = (gamesPlayed) => {
   const r = Math.random();
-  if (r < 0.2) return preconDeckFor(PRECON_DECKS[Math.floor(Math.random() * PRECON_DECKS.length)]);
-  if (r < 0.4) return randomDeckFor(randomEffigyColor());
+  let t = 0;
+  t += 0.15;
+  if (r < t) return preconDeckFor(PRECON_DECKS[Math.floor(Math.random() * PRECON_DECKS.length)]);
+  if (HAS_UPLOADED) {
+    t += 0.05;
+    if (r < t) return uploadedDeckFor();
+  }
   // Every evolution/archetype track below needs real signal first — plain
-  // random for its own warm-up stretch (hybrids and faithless need more
-  // games than a solo color: hybrids cover 10 color pairs, faithless is
-  // competing for slots against every colored card's own deck too), then
-  // mixed in for real.
-  if (r < 0.6) {
+  // random for its own warm-up stretch (hybrid/triple/faithless each need
+  // more games than a solo color: hybrid covers 10 color pairs, triple
+  // covers 10 color triples, faithless is competing for slots against
+  // every colored card's own deck too), then mixed in for real.
+  t += HAS_UPLOADED ? 0.40 : 0.45; // mono-color: random + evolved
+  if (r < t) {
     if (gamesPlayed < 200) return randomDeckFor(randomEffigyColor());
     return evolvedDeckFor(randomEffigyColor());
   }
-  if (r < 0.8) {
+  t += 0.20; // hybrid (2-color)
+  if (r < t) {
     if (gamesPlayed < 400) return randomDeckFor(randomEffigyColor());
     const [colorA, colorB] = ALL_COLOR_PAIRS[Math.floor(Math.random() * ALL_COLOR_PAIRS.length)];
     return evolvedHybridDeckFor(colorA, colorB);
   }
+  t += 0.12; // triple (3-color) — per the user's own "worth testing" ask
+  if (r < t) {
+    if (gamesPlayed < 400) return randomDeckFor(randomEffigyColor());
+    const [colorA, colorB, colorC] = ALL_COLOR_TRIPLES[Math.floor(Math.random() * ALL_COLOR_TRIPLES.length)];
+    return evolvedTripleDeckFor(colorA, colorB, colorC);
+  }
+  // Remaining share -> faithless (colorless).
   if (gamesPlayed < 300) return randomFaithlessDeckFor();
   return evolvedFaithlessDeckFor();
 };
@@ -427,6 +566,8 @@ const playOneGame = () => {
   if (deckB.pairKey) bumpPairStats(deckB.pairKey, state.winner === 'B');
   if (deckA.pairKey === FAITHLESS_ARCHETYPE_KEY) bumpFaithlessCardStats(deckA.eligiblePool, deckA.entries, state.winner === 'A');
   if (deckB.pairKey === FAITHLESS_ARCHETYPE_KEY) bumpFaithlessCardStats(deckB.eligiblePool, deckB.entries, state.winner === 'B');
+  bumpLabelStats(deckA.label, state.winner === 'A');
+  bumpLabelStats(deckB.label, state.winner === 'B');
 
   const record = {
     id, deckA: deckA.label, deckB: deckB.label, startingPlayer,
@@ -479,33 +620,84 @@ const writeSummary = () => {
     const pairKey = [colorA, colorB].sort().join('+');
     topHybridDecks[pairKey] = rankedReport(eligibleFor(colorA, colorB), impactOf, winRateIncluded, winRateExcluded);
   });
+  const topTripleDecks = {};
+  ALL_COLOR_TRIPLES.forEach(([colorA, colorB, colorC]) => {
+    const pairKey = [colorA, colorB, colorC].sort().join('+');
+    topTripleDecks[pairKey] = rankedReport(eligibleFor(colorA, colorB, colorC), impactOf, winRateIncluded, winRateExcluded);
+  });
   const topFaithlessCards = rankedReport(eligibleFor(), faithlessImpactOf, faithlessWinRateIncluded, faithlessWinRateExcluded);
-  const hybridPairWinRates = [...pairStats.entries()]
-    // The faithless archetype's own overall win rate is tracked through the
-    // exact same pairStats map (FAITHLESS_ARCHETYPE_KEY, a plain string key
-    // — pairStats never actually required a "colorA+colorB" shape) rather
-    // than a second, near-identical Map, but it's reported separately below
-    // (faithlessArchetypeWinRate), not mixed into this colored-pair list.
-    .filter(([pairKey]) => pairKey !== FAITHLESS_ARCHETYPE_KEY)
-    .map(([pairKey, s]) => ({ pair: pairKey, games: s.games, winRate: +pairWinRate(pairKey).toFixed(3) }))
+
+  // pairStats now holds THREE different shapes of key (mono colors, plus
+  // FAITHLESS_ARCHETYPE_KEY, all mixed in alongside "+"-joined hybrid/
+  // triple keys since randomDeckFor/evolvedDeckFor now also set pairKey to
+  // their own single color — see its own comment) — split back out by
+  // counting "+" separators, the one property that unambiguously tells
+  // them apart, so each gets its own clearly-labeled report section below.
+  const pairEntries = [...pairStats.entries()].filter(([k]) => k !== FAITHLESS_ARCHETYPE_KEY);
+  const effigyTypingWinRates = pairEntries.filter(([k]) => !k.includes('+'))
+    .map(([key, s]) => ({ color: key, games: s.games, winRate: +pairWinRate(key).toFixed(3) }))
     .sort((a, b) => b.winRate - a.winRate);
+  const hybridPairWinRates = pairEntries.filter(([k]) => k.split('+').length === 2)
+    .map(([key, s]) => ({ pair: key, games: s.games, winRate: +pairWinRate(key).toFixed(3) }))
+    .sort((a, b) => b.winRate - a.winRate);
+  const tripleColorWinRates = pairEntries.filter(([k]) => k.split('+').length === 3)
+    .map(([key, s]) => ({ triple: key, games: s.games, winRate: +pairWinRate(key).toFixed(3) }))
+    .sort((a, b) => b.winRate - a.winRate);
+
+  // "What is the seemingly best deck overall" — every exact deck BUILD's
+  // own win rate (precons, uploaded decks, and every evolved/random
+  // archetype build alike), sorted best to worst. Only built decks that
+  // actually got played enough to mean anything (>= 20 games) make this
+  // list — an archetype with 2 games at 100% would otherwise swamp the top
+  // purely on small-sample noise.
+  const MIN_GAMES_FOR_DECK_RANKING = 20;
+  const deckWinRates = [...labelStats.entries()]
+    .filter(([, s]) => s.games >= MIN_GAMES_FOR_DECK_RANKING)
+    .map(([label, s]) => ({ label, games: s.games, winRate: +labelWinRate(label).toFixed(3) }))
+    .sort((a, b) => b.winRate - a.winRate);
+
+  // "Overall power rankings of the cards" — cardStats already accumulates
+  // every card's included-vs-excluded impact across EVERY mono/hybrid/
+  // triple deck context it was ever eligible for (shared Map keyed by card
+  // name, bumped regardless of which color combo built the deck — see
+  // bumpCardStats' own call sites), so this is a real cross-color ranking,
+  // not just a union of the per-color top-12 lists above. Faithless cards
+  // are tracked in their own separately-scoped faithlessCardStats (see its
+  // own comment on why) and reported alongside, not merged in here.
+  const MIN_GAMES_FOR_CARD_RANKING = 30;
+  const overallCardRows = [...cardStats.entries()]
+    .filter(([, s]) => s.gamesIncluded + s.gamesExcluded >= MIN_GAMES_FOR_CARD_RANKING)
+    .map(([name]) => ({
+      name,
+      impact: +impactOf(name).toFixed(3),
+      winRateIncluded: +winRateIncluded(name).toFixed(3),
+      winRateExcluded: +winRateExcluded(name).toFixed(3),
+    }))
+    .sort((a, b) => b.impact - a.impact);
+
   fs.writeFileSync(summaryPath, JSON.stringify({
     updatedAt: new Date().toISOString(),
     totalGames, wins, crashes, stalls,
     avgTurns: totalGames ? +(turnSum / totalGames).toFixed(1) : 0,
     minutesElapsed: +((MINUTES * 60_000 - (deadline - Date.now())) / 60_000).toFixed(1),
     minutesBudget: MINUTES,
-    topCardsByColor: topByColor,
-    // Ranked by which color PAIR wins most as a combo (not any one card's
-    // own rate) — Goal #2's "which combination of cards" question, one
-    // level up from a single color's own top-12.
+    uploadedDeckLabels: uploadedDecks.map((d) => d.label),
+    // "Best deck overall" / "best effigy typing, worst effigy typing" /
+    // "best color combination, worst color combination" — best is index 0,
+    // worst is the last entry, of each list below.
+    deckWinRatesOverall: deckWinRates,
+    effigyTypingWinRates,
     hybridPairWinRates,
-    topCardsByHybridPair: topHybridDecks,
-    // A fully Faithless (colorless) deck — every card costs only Faithless
-    // pips, no colored ones — as its own tracked archetype, not just
-    // whatever colorless cards happened to get folded into a colored deck.
+    tripleColorWinRates,
     faithlessArchetypeWinRate: pairStats.has(FAITHLESS_ARCHETYPE_KEY) ? +pairWinRate(FAITHLESS_ARCHETYPE_KEY).toFixed(3) : null,
     faithlessArchetypeGames: pairStats.get(FAITHLESS_ARCHETYPE_KEY)?.games || 0,
+    // "Overall power rankings of the cards" — top 30 / bottom 10 by impact,
+    // plus the full per-color/hybrid/triple/faithless top-12 breakdowns.
+    topCardsOverall: overallCardRows.slice(0, 30),
+    worstCardsOverall: overallCardRows.slice(-10).reverse(),
+    topCardsByColor: topByColor,
+    topCardsByHybridPair: topHybridDecks,
+    topCardsByTriple: topTripleDecks,
     topFaithlessCards,
   }, null, 2));
 };

@@ -1,0 +1,71 @@
+{
+  "format": "tcg-deck",
+  "version": 1,
+  "exportedAt": "2026-09-16T02:20:59.511Z",
+  "mainDeck": [
+    {
+      "name": "Kalduran Altar",
+      "count": 3
+    },
+    {
+      "name": "Osteomancer",
+      "count": 3
+    },
+    {
+      "name": "Ditch Digger Steve",
+      "count": 3
+    },
+    {
+      "name": "Bone collector",
+      "count": 3
+    },
+    {
+      "name": "Cemetery Physician",
+      "count": 2
+    },
+    {
+      "name": "Cookie",
+      "count": 3
+    },
+    {
+      "name": "Grave robber",
+      "count": 1
+    },
+    {
+      "name": "Mausoleum Gates",
+      "count": 1
+    },
+    {
+      "name": "Skeletal Colossus",
+      "count": 3
+    },
+    {
+      "name": "Venefica",
+      "count": 3
+    },
+    {
+      "name": "Al khali the Empty",
+      "count": 2
+    },
+    {
+      "name": "Kalduran Zealot",
+      "count": 3
+    },
+    {
+      "name": "Martyrdom",
+      "count": 3
+    },
+    {
+      "name": "Shifting Sands",
+      "count": 3
+    },
+    {
+      "name": "Fetch",
+      "count": 1
+    },
+    {
+      "name": "Surveyor",
+      "count": 3
+    }
+  ]
+}
