@@ -13038,6 +13038,92 @@ describe('Eighteenth wave: Ethereal Conjuring reactive timing (priority window)'
   });
 });
 
+// Confirmed with the user: once a real response actually happens inside an
+// open reactiveWindow, the exchange gets genuine "everybody passes in a row"
+// stack priority — the responder gets one more real look after their
+// opponent's very next decline, rather than that decline immediately
+// resolving whatever's still pending. The everyday "declare something, the
+// opponent has nothing worth doing" case is completely unaffected — that
+// still resolves on the very first pass, same as always (see the
+// Eighteenth wave's own "an explicit PASS_PRIORITY closes the window
+// outright" and "chains" tests above, both still passing unmodified).
+describe('Twentieth wave: real "everybody passes in a row" priority once a response chain is underway', () => {
+  const vassal = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'vassal#0', name: 'Vassal', strength: 1 }), currentLifespan: 1, engaged: false };
+  const zealot = {
+    type: 'being', ownerId: 'B',
+    card: beingCard({ instanceId: 'zealot#0', name: 'Rhak-tùrin Zealot', keywords: { engage: 'Add (1) Bleeding Essence then deal (1) Damage to this.' } }),
+    currentLifespan: 2, engaged: false,
+  };
+  const sharpshoot = {
+    id: 'ss', instanceId: 'ss#0', name: 'Sharpshoot', kind: 'ethereal-conjuring',
+    castingCost: { faithless: 0, colored: { bleeding: 1 } }, textBox: 'Deal (1) damage to any target.',
+  };
+  // A genuinely affordable (if irrelevant) response of A's own — without
+  // this, the auto-skip loop correctly fast-forwards straight past A
+  // (nothing to respond with) and hands priority right back to B, which is
+  // ALSO correct but doesn't exercise A's own explicit PASS_PRIORITY, the
+  // exact moment the user's own scenario describes ("after the opponent
+  // passes on their priority response").
+  const fillerConjuring = {
+    id: 'filler', instanceId: 'filler#0', name: 'Filler Conjuring', kind: 'ethereal-conjuring',
+    castingCost: { faithless: 0, colored: {} }, textBox: 'Gain (1) Lifespan.',
+  };
+
+  it('gives the responder a genuine second priority window (to cast something new with essence their own response just produced) once the opponent declines the first response, instead of resolving the original attack immediately', () => {
+    const state = baseState({
+      turnPlayer: 'A',
+      board: { r2c1: vassal, r4c1: zealot },
+      players: { A: player({ hand: [fillerConjuring] }), B: player({ hand: [sharpshoot] }) },
+    });
+    let next = gameReducer(state, { type: 'MOVE_OR_ATTACK', fromCellId: 'r2c1', toCellId: 'r4c1', isAttack: true });
+    expect(next.reactiveWindow).toEqual(expect.objectContaining({ openFor: 'B', everResponded: false }));
+    expect(next.pendingResolution).toEqual(expect.objectContaining({ kind: 'attack', fromCellId: 'r2c1' }));
+
+    // B engages the Zealot in response — a real response, producing
+    // Bleeding Essence (and dealing the Zealot itself 1 damage, per its own
+    // printed cost). A has a real (if irrelevant) response available of
+    // its own, so priority correctly stops with A rather than auto-skipping
+    // straight past.
+    next = gameReducer(next, { type: 'ACTIVATE_ENGAGE', cellId: 'r4c1' });
+    expect(next.players.B.effigyPool.some(e => e.effigyType === 'bleeding')).toBe(true);
+    expect(next.reactiveWindow).toEqual(expect.objectContaining({ openFor: 'A', everResponded: true, passedOnce: false }));
+
+    // A declines to respond to the Zealot activation itself. Old behavior:
+    // this would have resolved the original attack immediately. New
+    // behavior: a real response already happened in this chain, so B gets
+    // one more look before anything resolves.
+    next = gameReducer(next, { type: 'PASS_PRIORITY' });
+    expect(next.pendingResolution).not.toBeNull(); // the attack has NOT resolved yet
+    expect(next.reactiveWindow).toEqual(expect.objectContaining({ openFor: 'B', everResponded: true, passedOnce: true }));
+
+    // B spends the freshly-produced essence on Sharpshoot, targeting the
+    // attacking Vassal — killing it before its own attack ever resolves.
+    next = gameReducer(next, { type: 'CAST_CONJURING', instanceId: 'ss#0' });
+    expect(next.pendingChoice).toEqual(expect.objectContaining({ kind: 'damage-target' }));
+    next = gameReducer(next, { type: 'RESOLVE_DAMAGE_TARGET', cellId: 'r2c1' });
+    expect(next.board.r2c1).toBeUndefined(); // the Vassal died
+
+    // The attack still hasn't resolved — both players now need to decline
+    // in a row (a fresh single-shot window, since nobody responds to THIS
+    // Sharpshoot) before it finally fizzles.
+    expect(next.pendingResolution).not.toBeNull();
+    next = gameReducer(next, { type: 'PASS_PRIORITY' });
+    expect(next.pendingResolution).toBeNull(); // fizzled — the attacker isn't on the battlefield anymore
+    expect(next.log.some(e => e.message.includes("fizzles — it's no longer on the battlefield"))).toBe(true);
+  });
+
+  it('still resolves on a single pass when nothing was ever actually responded to (the everyday case is unaffected)', () => {
+    const state = baseState({
+      turnPlayer: 'A',
+      board: { r2c1: vassal, r4c1: { ...zealot, card: { ...zealot.card, keywords: {} } } }, // no Engage ability at all — nothing for B to respond with
+      players: { A: player(), B: player() },
+    });
+    let next = gameReducer(state, { type: 'MOVE_OR_ATTACK', fromCellId: 'r2c1', toCellId: 'r4c1', isAttack: true });
+    expect(next.reactiveWindow).toBeNull(); // auto-closed within the same dispatch — B had nothing real to respond with
+    expect(next.pendingResolution).toBeNull(); // and the attack already resolved
+  });
+});
+
 describe('Nineteenth wave: user-reported bug sweep', () => {
   describe('Cycle of Hunger: "Shuffle (2) Hungers into your deck from your Purgatory, then draw (1) card." — never offered without 2 real Hungers in Purgatory', () => {
     const cycleOfHunger = {

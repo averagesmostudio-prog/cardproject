@@ -14304,16 +14304,47 @@ const resolvePendingResolution = (state) => {
   return cleared;
 };
 //
-// state.reactiveWindow is `null | { openFor: playerId }` — no "who has
-// passed" bookkeeping is needed: PASS_PRIORITY from the current openFor
-// always closes the window outright (nobody else is ever simultaneously
-// "owed" a check); only a real CAST_CONJURING flips openFor to the other
-// player for a fresh, single opportunity to react to that specific cast.
+// state.reactiveWindow is `null | { openFor: playerId, triggerDescription,
+// everResponded: boolean, passedOnce: boolean }`. Confirmed with the user:
+// once a REAL response has actually been made (CAST_CONJURING/
+// ACTIVATE_ENGAGE/etc.), the exchange gets genuine "everybody passes in a
+// row" stack priority — a player who spent a response (e.g. Engaging a
+// Zealot for essence) gets a real second opportunity, once their opponent
+// declines to escalate further, to do something else with what that
+// response produced (spend the essence on a totally different card, say)
+// — rather than the original pending action resolving the instant the
+// opponent passes once. `everResponded` is what scopes this to ONLY an
+// exchange that actually had a response in it: the plain, everyday case
+// (declare something, the opponent has nothing worth doing, done) opens
+// `everResponded: false` and still resolves on the very first pass, same
+// single-shot behavior as always — this only ever adds an extra round once
+// somebody has genuinely acted. Every real response resets
+// `passedOnce: false` and sets `everResponded: true`, flipping `openFor`
+// to the responder's opponent same as before; passReactiveWindowPriority
+// (just below) is the single shared "what happens on a pass" rule both the
+// real PASS_PRIORITY case and the auto-skip loop apply identically.
 //
 // `prevState` is the state from BEFORE gameReducerCore + the recomputes
 // above ran (already in scope in gameReducer's own closure below), `state`
 // is the fully-resolved post-action state, `action` is what was just
 // dispatched.
+// What happens when the CURRENT reactiveWindow holder passes — whether via
+// an explicit PASS_PRIORITY dispatch or auto-skipped by manageReactiveWindow's
+// own loop below because they have nothing real to respond with. Shared so
+// both paths apply the exact same rule: if nothing has EVER been responded
+// to in this window (a plain single-shot decline) or this is already the
+// second consecutive pass since the last real response, nothing more is
+// coming — resolve. Otherwise a real response happened somewhere in this
+// chain and nobody has passed on it yet, so flip to the other side for
+// exactly one more look before anything resolves.
+const passReactiveWindowPriority = (state) => {
+  const { openFor, everResponded, passedOnce, triggerDescription } = state.reactiveWindow;
+  if (!everResponded || passedOnce) {
+    return resolvePendingResolution({ ...state, reactiveWindow: null });
+  }
+  return { ...state, reactiveWindow: { openFor: opponentOf(openFor), triggerDescription, everResponded, passedOnce: true } };
+};
+
 const manageReactiveWindow = (prevState, state, action) => {
   if (state.phase !== 'playing' || state.winner) {
     // Always explicitly null (never left undefined) — createInitialState
@@ -14363,7 +14394,7 @@ const manageReactiveWindow = (prevState, state, action) => {
     // own whitelist above).
     const reactor = prevState.reactiveWindow.openFor;
     if (action.type === 'PASS_PRIORITY') {
-      next = resolvePendingResolution({ ...next, reactiveWindow: null });
+      next = passReactiveWindowPriority(next);
     } else if (REACTIVE_RESPONSE_ACTION_TYPES.has(action.type)) {
       // Defense in depth, mirroring the no-op check in the "no window was
       // open" branch below: a REACTIVE_RESPONSE_ACTION_TYPES entry that the
@@ -14382,7 +14413,7 @@ const manageReactiveWindow = (prevState, state, action) => {
       // prevState` is always true for it and would otherwise wrongly
       // short-circuit its real close-the-window behavior.
       if (state === prevState) return next;
-      next = { ...next, reactiveWindow: { openFor: opponentOf(reactor), triggerDescription: lastLogMessage } };
+      next = { ...next, reactiveWindow: { openFor: opponentOf(reactor), triggerDescription: lastLogMessage, everResponded: true, passedOnce: false } };
     } else {
       return next;
     }
@@ -14404,21 +14435,25 @@ const manageReactiveWindow = (prevState, state, action) => {
     // defender's Depart triggers during the attacker's turn"), so the
     // choice's own owner is the real actor whenever one was just pending.
     const actor = prevState.pendingChoice ? prevState.pendingChoice.playerId : prevState.turnPlayer;
-    next = { ...next, reactiveWindow: { openFor: opponentOf(actor), triggerDescription: lastLogMessage } };
+    next = { ...next, reactiveWindow: { openFor: opponentOf(actor), triggerDescription: lastLogMessage, everResponded: false, passedOnce: false } };
   }
 
-  // Auto-close (not flip-and-check-the-other-side — per the state shape
-  // above, nobody else is owed a check) whenever the current holder has
-  // nothing real to cast — same "auto-resolve what nobody can act on"
-  // philosophy clearStuckPendingChoice uses just below. In the
-  // overwhelming majority of actions (neither side holding an affordable
-  // Ethereal Conjuring), this collapses the window shut within the same
-  // dispatch, completely invisible to either player.
+  // Auto-skip whenever the current holder has nothing real to cast —
+  // same "auto-resolve what nobody can act on" philosophy
+  // clearStuckPendingChoice uses just below, applying the exact same
+  // passReactiveWindowPriority rule a real PASS_PRIORITY does. For the
+  // overwhelmingly common case (a fresh declare nobody ever responds to,
+  // `everResponded: false`), that rule resolves on the very first
+  // iteration — completely invisible to either player, identical to
+  // today's single-shot behavior. It only ever surfaces as a real extra
+  // PASS_PRIORITY a player has to make once a genuine response chain
+  // (`everResponded: true`) is already underway and they held a further
+  // response they chose not to use.
   while (next.reactiveWindow) {
     const { openFor } = next.reactiveWindow;
     const hasRealOption = getLegalActions(next, openFor).some(a => REACTIVE_RESPONSE_ACTION_TYPES.has(a.type));
     if (hasRealOption) break;
-    next = resolvePendingResolution({ ...next, reactiveWindow: null });
+    next = passReactiveWindowPriority(next);
   }
   return next;
 };
