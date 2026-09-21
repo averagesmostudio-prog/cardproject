@@ -1565,6 +1565,31 @@ describe('Dryad — "This Being may move onto another Being with the TreeFolk, V
     expect(vineCells).toHaveLength(1);
   });
 
+  // Regression: same groundRelics fix as Blooming Seed's own pointed-tile
+  // summon — a "Beings may move across this" ground Relic (Shifting Sands)
+  // lives outside state.board entirely and reads as empty for a Being/token
+  // destination by design, so it shouldn't block Sporangium's own reaction
+  // either.
+  it('Sporangium\'s reaction still summons its Vine onto a pointed tile that only has a "Beings may move across this" ground Relic on it', () => {
+    const sporangium = {
+      type: 'being', ownerId: 'A',
+      card: beingCard({ instanceId: 'spor#0', name: 'Sporangium', typing: 'Seed, Being', strength: 0, lifespan: 1, arrows: [3], keywords: { onDryadAttachedOnto: 'summon a 0/2 Vine token on a tile this points to.' } }),
+      currentLifespan: 1, engaged: false,
+    };
+    const shiftingSands = {
+      type: 'relic', ownerId: 'A',
+      card: { id: 'ss', instanceId: 'ss#0', name: 'Shifting Sands', kind: 'relic', keywords: { beingsMayMoveAcross: true } },
+    };
+    const state = baseState({
+      board: { r2c1: dryadBeing(), r2c2: sporangium },
+      groundRelics: { r2c3: shiftingSands },
+      players: { A: player(), B: player() },
+    });
+    const next = gameReducer(state, { type: 'MOVE_OR_ATTACK', fromCellId: 'r2c1', direction: 3, isAttack: false });
+    expect(next.board.r2c3.card.name).toBe('Vine');
+    expect(next.groundRelics.r2c3).toEqual(shiftingSands);
+  });
+
   it('a freshly-summoned Being\'s own When Summoned still schedules (not silently dropped) even when landing directly onto Sporangium leaves ITS OWN pendingChoice open', () => {
     // Two arrows -> two empty candidate tiles, so Sporangium's own
     // "summon a Vine on a tile this points to" opens a real pendingChoice
@@ -6902,6 +6927,28 @@ describe('Token creation ("summon a token" effects)', () => {
       expect(getLegalActions(next, 'A').some(a => a.type === 'RESOLVE_MAY_SUMMON_VINE_POINTED')).toBe(false);
       expect(getLegalActions(next, 'A').some(a => a.type === 'RESOLVE_DECLINE')).toBe(true);
     });
+
+    // Regression: same groundRelics fix as Blooming Seed's own pointed-tile
+    // summon — a "Beings may move across this" ground Relic (Shifting
+    // Sands) lives outside state.board entirely and reads as empty for a
+    // Being/token destination by design, so it shouldn't block this either.
+    it('is still offered on a pointed tile that only has a "Beings may move across this" ground Relic on it', () => {
+      const shiftingSands = {
+        type: 'relic', ownerId: 'A',
+        card: { id: 'ss', instanceId: 'ss#0', name: 'Shifting Sands', kind: 'relic', keywords: { beingsMayMoveAcross: true } },
+      };
+      const card = jirahpera();
+      const state = baseState({
+        board: {},
+        groundRelics: { r2c2: shiftingSands },
+        players: { A: player({ hand: [card] }), B: player() },
+      });
+      const next = gameReducer(state, { type: 'SUMMON_BEING', instanceId: card.instanceId, cellId: 'r1c2' });
+      expect(getLegalActions(next, 'A').some(a => a.type === 'RESOLVE_MAY_SUMMON_VINE_POINTED')).toBe(true);
+      const resolved = gameReducer(next, { type: 'RESOLVE_MAY_SUMMON_VINE_POINTED' });
+      expect(resolved.board.r2c2.card.name).toBe('Vine');
+      expect(resolved.groundRelics.r2c2).toEqual(shiftingSands);
+    });
   });
 });
 
@@ -8247,6 +8294,28 @@ describe('Growth Counters — "Pay (1) Living: Add (1) Growth Counter." / "Remov
     expect(next.log.some(e => e.message.includes('no empty tile'))).toBe(true);
     expect(next.board.r2c2).toEqual(blocker); // untouched
   });
+
+  // Regression: a "Beings may move across this" ground Relic (Shifting
+  // Sands) lives entirely outside state.board (createInitialState's own
+  // comment — a cell with only a groundRelic reads as empty in `board` by
+  // design), but the pointed-tile candidate filter here used to also
+  // exclude any cell with a groundRelic present at all, wrongly treating
+  // it as occupied and refusing to summon the Vine token there.
+  it('summons the Blooming Vine Token onto a pointed tile that only has a "Beings may move across this" ground Relic (Shifting Sands) on it', () => {
+    const shiftingSands = {
+      type: 'relic', ownerId: 'A',
+      card: { id: 'ss', instanceId: 'ss#0', name: 'Shifting Sands', kind: 'relic', keywords: { beingsMayMoveAcross: true } },
+    };
+    const state = baseState({
+      board: { r1c2: bloomingSeed({ counters: { growth: 1 } }) },
+      groundRelics: { r2c2: shiftingSands },
+      players: { A: player(), B: player() },
+    });
+    expect(getLegalActions(state, 'A').some(a => a.type === 'ACTIVATE_COUNTER_COST_SACRIFICE' && a.cellId === 'r1c2')).toBe(true);
+    const next = gameReducer(state, { type: 'ACTIVATE_COUNTER_COST_SACRIFICE', cellId: 'r1c2' });
+    expect(next.board.r2c2.card.name).toBe('Blooming Vine Token');
+    expect(next.groundRelics.r2c2).toEqual(shiftingSands); // Shifting Sands itself untouched, co-located
+  });
 });
 
 describe('"Burn (2) Shifting: Trigger the Depart of a Being you control." (Skeleton Key)', () => {
@@ -8900,6 +8969,32 @@ describe('Invoke keyword ("Add to hand, then summon/conjure")', () => {
     expect(next.board.r1c2).toBeUndefined();
     expect(next.board.r2c2.card.name).toBe('Sapling'); // only the affordable one qualifies
     expect(next.players.A.mainDeck.map(c => c.instanceId)).toEqual(['t2#0']);
+  });
+
+  // Regression: same groundRelics fix as Blooming Seed/Sporangium's own
+  // pointed-tile token summons — a "Beings may move across this" ground
+  // Relic (Shifting Sands) lives outside state.board entirely and reads as
+  // empty for a Being destination by design, so it shouldn't block an
+  // Invoke landing there either.
+  it('still invokes onto a pointed tile that only has a "Beings may move across this" ground Relic on it', () => {
+    const samaraSeed = {
+      type: 'being', ownerId: 'A',
+      card: beingCard({ instanceId: 'ss#0', name: 'Samara Seed', arrows: [1], keywords: { martyr: 'Invoke a TreeFolk with cost (4) or less on a tile this points to.' } }),
+      currentLifespan: 1, engaged: false,
+    };
+    const cheapTreefolk = { id: 't1', instanceId: 't1#0', name: 'Sapling', kind: 'being', typing: 'TreeFolk, Being', castingCost: { faithless: 0, colored: { living: 4 } }, strength: 1, lifespan: 2, keywords: {} };
+    const shiftingSands = {
+      type: 'relic', ownerId: 'A',
+      card: { id: 'ss2', instanceId: 'ss2#0', name: 'Shifting Sands', kind: 'relic', keywords: { beingsMayMoveAcross: true } },
+    };
+    const state = baseState({
+      board: { r1c2: samaraSeed },
+      groundRelics: { r2c2: shiftingSands },
+      players: { A: player({ mainDeck: [cheapTreefolk] }), B: player() },
+    });
+    const next = gameReducer(state, { type: 'ACTIVATE_MARTYR', cellId: 'r1c2' });
+    expect(next.board.r2c2.card.name).toBe('Sapling');
+    expect(next.groundRelics.r2c2).toEqual(shiftingSands);
   });
 
   // Regression: per the user's own ruling, Invoke's "on a tile this points

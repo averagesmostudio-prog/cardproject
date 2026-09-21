@@ -5625,8 +5625,11 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
   // SUMMON_VINE_POINTED_RE above for why this needs its own branch).
   if (SUMMON_VINE_POINTED_RE.test(text) && context.selfCellId) {
     const selfArrows = context.selfArrows || state.board[context.selfCellId]?.card?.arrows || [];
+    // A "Beings may move across this" ground Relic (Shifting Sands) reads
+    // as empty in `board` by design (createInitialState's own comment) —
+    // no extra `!state.groundRelics[c]` exclusion needed for a Being token.
     const candidates = [...new Set(selfArrows.map(dir => computeMoveDestination(playerId, context.selfCellId, dir)))]
-      .filter(c => c && !state.board[c] && !state.groundRelics[c]);
+      .filter(c => c && !state.board[c]);
     if (candidates.length === 0) {
       return addLog(state, `${cardName}'s ${label} has no empty tile it points to, to summon a token on.`);
     }
@@ -5652,9 +5655,15 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
     const tokenName = summonPointedMatch[2].trim().toLowerCase();
     const makeToken = TOKEN_REGISTRY[tokenName];
     if (!makeToken) return addLog(state, `${cardName}'s ${label} isn't automated yet: "${text}"`);
+    // A "Beings may move across this" ground Relic (Shifting Sands) lives
+    // outside `board` entirely (createInitialState's own comment: "a cell
+    // with only a groundRelic reads as empty in `board`") specifically so a
+    // Being can land there — the `!state.groundRelics[c]` exclusion this
+    // used to have wrongly treated it as occupied, blocking Blooming Seed's
+    // own Vine token from a tile it should have been able to land on.
     const selfArrows = context.selfArrows || state.board[context.selfCellId]?.card?.arrows || [];
     const candidates = [...new Set(selfArrows.map(dir => computeMoveDestination(playerId, context.selfCellId, dir)))]
-      .filter(c => c && !state.board[c] && !state.groundRelics[c]);
+      .filter(c => c && !state.board[c]);
     if (candidates.length === 0) {
       return addLog(state, `${cardName}'s ${label} has no empty tile it points to, to summon a token on.`);
     }
@@ -8498,9 +8507,13 @@ const placeInvokedCard = (state, playerId, cardName, label, card, destinationMod
   // own "may be summoned directly onto..." — confirmed with the user
   // ("Samara Seed should allow a Jirahperā to be summoned onto an
   // Elderflower Ancient, assuming Samara Seed points to it").
+  // A "Beings may move across this" ground Relic (Shifting Sands) reads as
+  // empty in `board` by design (createInitialState's own comment) — no
+  // extra `!state.groundRelics[c]` exclusion needed here either, same fix
+  // as SUMMON_TOKEN_POINTED_RE's own resolver above.
   const candidates = destinationMode === 'pointed'
     ? [...new Set(selfArrows.map(dir => computeMoveDestination(playerId, context.selfCellId, dir)))]
-      .filter(c => c && !state.groundRelics[c] && (!state.board[c] || dryadAttachTargetOk(state.board[c], playerId, card)))
+      .filter(c => c && (!state.board[c] || dryadAttachTargetOk(state.board[c], playerId, card)))
     : emptyMortalCellsFor(state.board, playerId);
   if (candidates.length === 0) {
     return addLog(state, `${cardName}'s ${label} has no empty tile to invoke ${card.name} onto.`);
@@ -9951,8 +9964,11 @@ export const getLegalActions = (state, playerId) => {
       // always available regardless via the generic optional mechanism.
       const { selfCellId } = state.pendingChoice.context;
       const selfArrows = state.board[selfCellId]?.card?.arrows || [];
+      // Same groundRelics fix as the resolver below — a Shifting-Sands-style
+      // tile reads as empty in `board` by design, so it's a legal Vine
+      // destination.
       const pointedEmpty = [...new Set(selfArrows.map(dir => computeMoveDestination(playerId, selfCellId, dir)))]
-        .filter(c => c && !state.board[c] && !state.groundRelics[c]);
+        .filter(c => c && !state.board[c]);
       if (pointedEmpty.length > 0) {
         actions.push({ type: 'RESOLVE_MAY_SUMMON_VINE_POINTED' });
       }
@@ -11932,8 +11948,10 @@ const gameReducerCore = (state, action) => {
       if (!state.pendingChoice || state.pendingChoice.kind !== 'may-summon-vine-pointed') return state;
       const { playerId, cardName, label, count, context } = state.pendingChoice;
       const selfArrows = state.board[context.selfCellId]?.card?.arrows || [];
+      // Same groundRelics fix as the offer-time check above — a Shifting-
+      // Sands-style tile reads as empty in `board` by design.
       const candidates = [...new Set(selfArrows.map(dir => computeMoveDestination(playerId, context.selfCellId, dir)))]
-        .filter(c => c && !state.board[c] && !state.groundRelics[c]);
+        .filter(c => c && !state.board[c]);
       let next = { ...state, pendingChoice: null };
       let placed = 0;
       candidates.slice().sort().slice(0, count).forEach(cell => {
