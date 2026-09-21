@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import CardThumbnail from './CardThumbnail.jsx';
 
 // 'lg' matches Board.jsx's onboard cell width at both breakpoints (w-36 /
@@ -20,6 +21,22 @@ const HOVER_WIDTH = 260;
 // exactly when the player wants to actually read the card, so it always
 // shows "the original card" in full, text box included.
 const HOVER_HEIGHT = Math.round(HOVER_WIDTH * 7 / 5);
+// An onboard tile's own hover preview is bigger and anchored to a single
+// fixed spot (the empty space in the opponent's left-hand panel, below
+// their Life Total — #onboard-hover-anchor in Match.jsx, which is
+// naturally shorter than the board it sits beside) instead of popping up
+// beside whichever tile is hovered — see showPreview/the render below.
+// Rendered via a React portal INTO that anchor (a `position: relative`
+// div) rather than `position: fixed` + computed viewport coordinates —
+// the whole board sits inside its own `transform: scale(...)` wrapper
+// (Match.jsx's responsive board-scale), which becomes the containing
+// block for any `fixed` descendant too, so raw getBoundingClientRect()
+// math would drift out of sync with that scale. Portaling into the
+// anchor and positioning `absolute` within it instead inherits the same
+// transform automatically, so no scale math is needed at all.
+const ONBOARD_HOVER_WIDTH = 340;
+const ONBOARD_HOVER_HEIGHT = Math.round(ONBOARD_HOVER_WIDTH * 7 / 5);
+const ONBOARD_HOVER_ANCHOR_ID = 'onboard-hover-anchor';
 
 export default function CardTile({
   card, currentLifespan, strength, engaged, faceDown, isOwn, horizontal, selected, dimmed, onClick, size = 'md',
@@ -31,6 +48,12 @@ export default function CardTile({
   const hoverTimerRef = useRef(null);
 
   const showPreview = () => {
+    if (onboard) {
+      // No coordinates to compute — see ONBOARD_HOVER_WIDTH's own comment;
+      // the portal target below handles positioning entirely via CSS.
+      setHoverPos(true);
+      return;
+    }
     const rect = wrapRef.current?.getBoundingClientRect();
     if (!rect) return;
     let top = rect.top - HOVER_HEIGHT - 12;
@@ -147,34 +170,53 @@ export default function CardTile({
         </span>
       )}
 
-      {hoverPos && (
-        <div
-          className="fixed z-[70] pointer-events-none drop-shadow-2xl"
-          style={{ left: hoverPos.left, top: hoverPos.top, width: HOVER_WIDTH }}
-        >
-          <CardThumbnail
-            card={card}
-            borderImages={borderImages}
-            borderImagesLoaded={borderImagesLoaded}
-            artImages={artImages}
-            artBorderImages={artBorderImages}
-            artImagesLoaded={artImagesLoaded}
-            fontLoaded={fontLoaded}
-            width={HOVER_WIDTH}
-            height={HOVER_HEIGHT}
-          />
-          {damaged && (
-            <span className="absolute bottom-2 right-2 bg-red-700 text-white text-sm font-bold px-2 py-0.5 rounded shadow">
-              ♥{currentLifespan}
-            </span>
-          )}
-          {boosted && (
-            <span className="absolute bottom-2 left-2 bg-amber-700 text-white text-sm font-bold px-2 py-0.5 rounded shadow">
-              ⚔{strength}
-            </span>
-          )}
-        </div>
-      )}
+      {hoverPos && (() => {
+        const previewWidth = onboard ? ONBOARD_HOVER_WIDTH : HOVER_WIDTH;
+        const previewHeight = onboard ? ONBOARD_HOVER_HEIGHT : HOVER_HEIGHT;
+        const previewInner = (
+          <>
+            <CardThumbnail
+              card={card}
+              borderImages={borderImages}
+              borderImagesLoaded={borderImagesLoaded}
+              artImages={artImages}
+              artBorderImages={artBorderImages}
+              artImagesLoaded={artImagesLoaded}
+              fontLoaded={fontLoaded}
+              width={previewWidth}
+              height={previewHeight}
+            />
+            {damaged && (
+              <span className="absolute bottom-2 right-2 bg-red-700 text-white text-sm font-bold px-2 py-0.5 rounded shadow">
+                ♥{currentLifespan}
+              </span>
+            )}
+            {boosted && (
+              <span className="absolute bottom-2 left-2 bg-amber-700 text-white text-sm font-bold px-2 py-0.5 rounded shadow">
+                ⚔{strength}
+              </span>
+            )}
+          </>
+        );
+        if (onboard) {
+          const anchor = document.getElementById(ONBOARD_HOVER_ANCHOR_ID);
+          if (!anchor) return null;
+          return createPortal(
+            <div className="absolute z-[70] pointer-events-none drop-shadow-2xl" style={{ left: 0, top: 8, width: previewWidth }}>
+              {previewInner}
+            </div>,
+            anchor
+          );
+        }
+        return (
+          <div
+            className="fixed z-[70] pointer-events-none drop-shadow-2xl"
+            style={{ left: hoverPos.left, top: hoverPos.top, width: previewWidth }}
+          >
+            {previewInner}
+          </div>
+        );
+      })()}
     </div>
   );
 }

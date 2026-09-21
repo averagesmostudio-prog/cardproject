@@ -2784,6 +2784,14 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
               <div className="w-14 shrink-0" />
               <LifeBadge value={displayLifespans[AI]} flash={lifeFlashes[AI]} strike={openLaneStrikes[AI]} targetAction={playerTargetActionFor(AI)} onSelectTarget={dispatch} />
             </div>
+            {/* Portal target for CardTile.jsx's onboard hover preview — this
+                column is naturally shorter than the board it sits beside,
+                leaving blank space here below the opponent's Life Total.
+                `relative` so the portaled preview (`absolute`) positions
+                against this div's own top-left corner rather than some
+                farther-out ancestor; no height of its own is needed since
+                the preview itself is what fills the space. */}
+            <div id="onboard-hover-anchor" className="w-full relative" />
           </div>
 
           <Board
@@ -2877,7 +2885,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
             {state.reactiveWindow?.openFor === HUMAN && (
               <div className={`${ROW_H} flex flex-col justify-center gap-1`}>
                 {state.reactiveWindow.triggerDescription && (
-                  <p className="text-base font-medium leading-snug text-stone-200 line-clamp-3">
+                  <p className="text-lg font-semibold leading-snug text-stone-200 line-clamp-3">
                     {state.reactiveWindow.triggerDescription}
                   </p>
                 )}
@@ -2900,7 +2908,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
                   )}
                   <button
                     onClick={() => dispatch({ type: 'PASS_PRIORITY' })}
-                    className="shrink-0 px-2 py-1 bg-stone-700 text-white rounded text-sm font-semibold hover:bg-stone-600 transition"
+                    className="shrink-0 px-4 py-2 bg-stone-700 text-white rounded text-base font-bold hover:bg-stone-600 transition"
                   >
                     Pass Priority
                   </button>
