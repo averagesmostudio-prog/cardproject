@@ -337,7 +337,7 @@ const singleCellChoiceLabel = (pendingChoice) => {
     case 'delay-return-summon':
       return `${cardName}: choose a highlighted Mortal Realm tile to be summoned onto.`;
     case 'shift-from-purgatory-destination':
-      return `${cardName}: choose a highlighted Mortal Realm tile to return to.`;
+      return `${pendingChoice.card?.name ?? cardName}: choose a highlighted Ethereal Realm tile to Shift onto.`;
     case 'give-different-typed-buff':
       return `${cardName}: choose a highlighted Being to buff.`;
     case 'force-shift-target':
