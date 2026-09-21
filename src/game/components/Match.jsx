@@ -427,6 +427,15 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
   // Viewer-style popups (hand/Purgatory/armament zoom, already dismissable
   // via their own X button) intentionally don't participate.
   const [popupHidden, setPopupHidden] = useState(false);
+  // Same "peek without losing what's on screen" idea as popupHidden above,
+  // for the win/lose screen specifically — that screen replaces the whole
+  // match view outright (state.phase 'gameover' short-circuits the render
+  // below) rather than overlaying it, so there's no board left mounted
+  // underneath to reveal; this instead renders a simple read-only snapshot
+  // of the final board in its place. Declared at the top level (not inside
+  // the gameover branch) since it's only ever read once phase is already
+  // 'gameover' — a hook can't be called conditionally.
+  const [showBoardOnGameOver, setShowBoardOnGameOver] = useState(false);
   const [expandedCell, setExpandedCell] = useState(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   // `.slice(-30)` on every render would otherwise hand ActionLog a brand
@@ -1665,6 +1674,44 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
     // actually lost it, per the user's own phrasing for the losing side
     // ("Your opponent has presented a loop! You Lose!").
     const humanWonLoop = state.loopWin && state.loopWin.winnerId === HUMAN;
+    // The win/lose screen replaces the whole match view outright (this
+    // branch short-circuits the return below), so unlike every pendingChoice
+    // popup's own "View Board" — which just hides an overlay, since the
+    // real board is always still mounted underneath it — there's no board
+    // left on screen to reveal here. This instead renders a simple,
+    // read-only snapshot of the final board in the result card's place:
+    // no highlight/selection state, and both cell-click handlers are no-ops
+    // (the match is already over; nothing here is actionable).
+    if (showBoardOnGameOver) {
+      return (
+        <div className="min-h-screen flex flex-col items-center bg-black p-4 gap-3">
+          <button
+            onClick={() => setShowBoardOnGameOver(false)}
+            className="self-start flex items-center gap-1.5 text-xs bg-white/90 border border-stone-300 rounded px-3 py-1.5 shadow hover:bg-white"
+          >
+            <EyeOff className="w-3.5 h-3.5" />
+            Back to Result
+          </button>
+          <div className="overflow-auto max-w-full">
+            <Board
+              state={state}
+              displayBoard={state.board}
+              flashes={{}}
+              viewerId={HUMAN}
+              highlightCells={new Set()}
+              selectedCell={null}
+              onCellClick={() => {}}
+              borderImages={borderImages}
+              borderImagesLoaded={borderImagesLoaded}
+              artImages={artImages}
+              artBorderImages={artBorderImages}
+              artImagesLoaded={artImagesLoaded}
+              fontLoaded={fontLoaded}
+            />
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="min-h-screen flex items-center justify-center bg-black p-8">
         <div className="text-center bg-white rounded-lg shadow p-8 max-w-lg">
@@ -1696,6 +1743,10 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
           </p>
           <div className="flex gap-3 justify-center flex-wrap">
             <button onClick={onExit} className="px-4 py-2 border border-stone-300 rounded-lg">Back to menu</button>
+            <button onClick={() => setShowBoardOnGameOver(true)} className="flex items-center gap-1.5 px-4 py-2 border border-stone-300 rounded-lg">
+              <Eye className="w-3.5 h-3.5" />
+              View Board
+            </button>
             {deckEntries && deckEntries.length > 0 && (
               <button onClick={exportDeckList} className="px-4 py-2 border border-stone-300 rounded-lg">Export deck list</button>
             )}
