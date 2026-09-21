@@ -75,7 +75,7 @@ export const PRECON_DECKS = [
     entries: [
       { name: 'Kalduran Altar', count: 3 },
       { name: 'Osteomancer', count: 3 },
-      { name: 'Ditch Digger Steve', count: 3 },
+      { name: 'Ditch Digger "Steve"', count: 3 },
       { name: 'Bone collector', count: 3 },
       { name: 'Cemetery Physician', count: 2 },
       { name: 'Cookie', count: 3 },
