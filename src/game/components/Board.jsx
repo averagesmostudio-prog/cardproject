@@ -180,7 +180,7 @@ function ShiftVortex({ seq }) {
   if (!seq) return null;
   return (
     <div key={`vortex-${seq}`} className="absolute inset-0 z-[16] flex items-center justify-center pointer-events-none overflow-hidden rounded">
-      <div className="w-[85%] aspect-square rounded-full shift-vortex-spin" />
+      <div className="w-full aspect-square rounded-full shift-vortex-spin" />
     </div>
   );
 }

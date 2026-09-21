@@ -7261,6 +7261,24 @@ describe('Dial of Metatoris: "Engage: Modulate (±1) on a target you control." c
     const next = gameReducer(state, { type: 'RESOLVE_MODULATE', altarInstanceId: 'eonion#0', delta: 1 });
     expect(next.altars.A).toEqual([{ card: eonionAltar.card, counters: { time: 3 } }]);
   });
+
+  it('can target its own controller\'s Shifted Being — "on a target you control" still includes a Shifted Being, which is just another owned Prophecy occupant', () => {
+    const ownShifted = { type: 'prophecy', ownerId: 'A', card: { name: 'Something', instanceId: 'sb#0' }, timer: 3, faceDown: false, shiftedFromCard: { name: 'Something', instanceId: 'sb#0', lifespan: 3 } };
+    const state = baseState({ board: { r2c1: dialOfMetatoris, r3c1: ownShifted } });
+    const opened = gameReducer(state, { type: 'ACTIVATE_ENGAGE', cellId: 'r2c1' });
+    const options = getLegalActions(opened, 'A').filter(a => a.type === 'RESOLVE_MODULATE');
+    expect(options).toContainEqual({ type: 'RESOLVE_MODULATE', cellId: 'r3c1', delta: 1 });
+    const next = gameReducer(opened, { type: 'RESOLVE_MODULATE', cellId: 'r3c1', delta: 1 });
+    expect(next.board.r3c1.timer).toBe(4);
+  });
+
+  it('cannot target an opponent\'s Shifted Being — "on a target you control" excludes it', () => {
+    const opponentShifted = { type: 'prophecy', ownerId: 'B', card: { name: 'Something', instanceId: 'sb#0' }, timer: 3, faceDown: false, shiftedFromCard: { name: 'Something', instanceId: 'sb#0', lifespan: 3 } };
+    const state = baseState({ board: { r2c1: dialOfMetatoris, r3c1: opponentShifted } });
+    const opened = gameReducer(state, { type: 'ACTIVATE_ENGAGE', cellId: 'r2c1' });
+    const options = getLegalActions(opened, 'A').filter(a => a.type === 'RESOLVE_MODULATE');
+    expect(options).not.toContainEqual(expect.objectContaining({ cellId: 'r3c1' }));
+  });
 });
 
 describe('"This gains +1/+1 whenever you Modulate (±1) except due to the Modulate Step." (Temporal Anomaly)', () => {
