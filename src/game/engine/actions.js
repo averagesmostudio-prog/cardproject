@@ -7499,11 +7499,16 @@ const totalProphecyTimeCountersControlledBy = (state, playerId) =>
 // single gameReducer action below — a mid-turn effect that grants or
 // removes a Time Counter (Freeze Frame, Moment of Doubt, an Engage cost
 // spending Crossing/Forge Counters, etc.) must be reflected immediately,
-// not just at the next turn's start. A change in the live total simply
-// resets `currentLifespan` to the new value outright (no separate "damage
-// taken" tracking to preserve across a recompute — the same simplification
-// already used for a Lifespan-bonus Armament's own negative case, just
-// applied here to a bigger swing).
+// not just at the next turn's start. Confirmed with the user: real damage
+// taken (combat, or anything else) must persist across a recompute rather
+// than being wiped — so this only ever applies the DELTA between the live
+// total's value at the LAST recompute (banked on `strengthOverride`,
+// which otherwise only ever mirrors the live total 1:1) and its current
+// value, as a real heal (total went up) or real damage (total went down)
+// on top of whatever `currentLifespan` already was — never a hard reset
+// to the new total outright. Skipped entirely whenever the live total
+// hasn't actually changed since the last recompute, regardless of how far
+// `currentLifespan` has since drifted from it via ordinary combat.
 //
 // Singularity: "has -X/-X where X equals the number of Time Counters that
 // you control" — the same live total, but applied as a subtractive
@@ -7549,15 +7554,24 @@ export const recomputeXBeings = (state) => {
       // instant it lands.
       if (occupant.lifespanSetUntilEndOfTurn != null) return;
       const total = isAbsolute ? getTotal(occupant.ownerId) : 0;
-      if (occupant.strengthOverride === total && occupant.currentLifespan === total) return;
+      // `strengthOverride` doubles as "the live total as of the last
+      // recompute" — falls back to `total` itself (a no-op skip) the very
+      // first time this runs for a given occupant, since placeBeingOnBoard
+      // already snapshots both `currentLifespan` and `strengthOverride` to
+      // the same initial xValue at summon (see its own comment).
+      const previousTotal = occupant.strengthOverride ?? total;
+      if (previousTotal === total) return; // the live total itself hasn't changed — leave currentLifespan exactly as combat/etc. already left it
       // A live X of (0) — or losing the ability that defines it — is a
       // real death (RULES.md: a Being's Lifespan hitting 0 kills it), not
       // just a stat that happens to read 0; routed through the normal
       // death pipeline (Depart, owner Lifespan loss, Purgatory, the
       // death-count trigger) via dealDamageToBeing's own signed-damage
-      // handling, which also correctly HEALS when the live total rises (a
-      // negative `damage`) instead of only ever being able to subtract.
-      const damage = occupant.currentLifespan - total;
+      // handling, which also correctly HEALS when the live total rises.
+      // Only the CHANGE in the live total (`previousTotal` -> `total`) is
+      // ever applied here — not a hard reset to `total` outright — so real
+      // damage already taken (combat, or anything else) stays applied on
+      // top rather than being wiped the moment anything else recomputes.
+      const damage = previousTotal - total;
       next = { ...next, board: { ...next.board, [cell]: { ...occupant, strengthOverride: total } } };
       next = dealDamageToBeing(next, cell, damage);
       return;
@@ -8309,11 +8323,12 @@ const placeBeingOnBoard = (state, playerId, cellId, card) => {
   // attached onto, not destroyed.
   const attachingDryad = dryadAttachTargetOk(waiting, playerId, card);
   // Horological Horror: "(X) is equal to the total number of Time Counters
-  // you control" — a characteristic-defining Strength/Lifespan, snapshotted
-  // once here (same "computed once at summon, not tracked live afterward"
-  // precedent as Thespian's own stat-copy — see combat.js's
-  // strengthOverride) rather than continuously recomputed for the rest of
-  // its life.
+  // you control" — a characteristic-defining Strength/Lifespan. This is
+  // only the INITIAL snapshot (both fields start equal, matching a fresh
+  // Being's usual "no damage taken yet" state) — recomputeXBeings above
+  // keeps it live for the rest of this Being's time on the board, applying
+  // only the CHANGE in the live total on each future recompute rather than
+  // re-snapshotting outright, so real damage taken persists across it.
   const xValue = card.keywords?.xEqualsTimeCountersControlled ? totalTimeCountersControlledBy(state, playerId) : null;
   let next = {
     ...state,

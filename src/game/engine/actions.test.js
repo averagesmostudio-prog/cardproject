@@ -7640,6 +7640,41 @@ describe('Horological Horror: "(X) is equal to the total number of Time Counters
     // Depart ability is still live and fires normally.
     expect(next.players.A.lifespan).toBe(50);
   });
+
+  // Regression: the live recompute used to hard-reset currentLifespan to
+  // the live total outright on every single dispatch, wiping out any real
+  // damage taken the moment anything else happened — even within the same
+  // dispatch that dealt it. The user's own exact scenario: 5 Time
+  // Counters, take 3 damage (2 remaining), THEN Time Counters shrink to 3
+  // — the earlier 3 damage must still apply on top of the new, smaller
+  // total, killing it (3 - 3 = 0), not just resetting to 3.
+  it('real damage taken persists across a later recompute — the live total shrinking further stacks on top of it, rather than resetting to it', () => {
+    const horror = {
+      type: 'being', ownerId: 'A', card: horrorCard(),
+      currentLifespan: 5, engaged: false, strengthOverride: 5,
+    };
+    const attacker = { type: 'being', ownerId: 'B', card: beingCard({ strength: 3, lifespan: 10 }), currentLifespan: 10, engaged: false };
+    const state = baseState({
+      turnPlayer: 'B',
+      board: {
+        r2c1: horror, r4c1: attacker,
+        r3c1: { type: 'prophecy', ownerId: 'A', card: { name: 'P1' }, timer: 5, faceDown: false },
+      },
+    });
+    // B attacks Horror for 3 — Time Counters are untouched by this, so the
+    // live total (5) hasn't changed; the damage must stick.
+    let next = gameReducer(state, { type: 'MOVE_OR_ATTACK', fromCellId: 'r4c1', toCellId: 'r2c1', isAttack: true });
+    expect(next.board.r2c1.currentLifespan).toBe(2); // 5 - 3, not reset back to 5
+    expect(effectiveStrength(next.board.r2c1)).toBe(5); // Strength still mirrors the live total directly — untouched by combat damage
+
+    // Now the Time Counters shrink from 5 to 3 (a direct Modulate) — the
+    // live total drops by 2, applied on TOP of the already-reduced 2, not
+    // as a reset to 3.
+    next = { ...next, pendingChoice: { kind: 'modulate', playerId: 'A', cardName: 'Test', delta: -2 } };
+    next = gameReducer(next, { type: 'RESOLVE_MODULATE', cellId: 'r3c1', delta: -2 });
+    expect(next.board.r2c1).toBeUndefined(); // 2 - 2 = 0 — real death, not left sitting at 3
+    expect(next.players.A.purgatory.some(c => c.name === 'Horological Horror')).toBe(true);
+  });
 });
 
 describe('"You may pay (N) Lifespan to Summon (2) Vassal tokens." (Vassal Matriach) — generic optional-Lifespan-cost wrapper', () => {
