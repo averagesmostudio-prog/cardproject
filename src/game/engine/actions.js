@@ -301,10 +301,13 @@ const hasOwnTyping = (board, playerId, typing) =>
 // casually target at all. Hourglass-style relics (keywords.
 // collectsRemovedProphecyTimeCounters) are the one documented exception —
 // they can still be Modulated UP from 0, since that's how they receive
-// their very first collected counter.
+// their very first collected counter. Confirmed with the user: this same
+// "must already hold a Time Counter" rule applies to a Prophecy's own
+// `timer` too — merely being CAPABLE of holding Time Counters (i.e. being
+// a Prophecy at all) isn't enough on its own.
 const isModulateTarget = (occupant) =>
   !!occupant && (
-    occupant.type === 'prophecy'
+    (occupant.type === 'prophecy' && (occupant.timer || 0) > 0)
     || occupant.card?.keywords?.collectsRemovedProphecyTimeCounters
     || (occupant.counters?.time !== undefined && occupant.counters.time > 0)
   );
@@ -14011,7 +14014,12 @@ const gameReducerCore = (state, action) => {
       const sign = action.delta > 0 ? '+' : '';
 
       if (occupant.type === 'prophecy') {
-        const timer = occupant.timer + action.delta;
+        // Floored at 0 — same as the Altar/generic-occupant branches below
+        // — since a large enough negative delta (a printed "Modulate (±2)"
+        // or similar) could otherwise still drive a Prophecy sitting at a
+        // small positive timer below 0, even with isModulateTarget's own
+        // "must already be above 0 to be targeted at all" gate.
+        const timer = Math.max(0, occupant.timer + action.delta);
         let next = {
           ...state,
           pendingChoice: null,

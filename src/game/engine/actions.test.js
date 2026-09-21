@@ -12939,5 +12939,21 @@ describe('Nineteenth wave: user-reported bug sweep', () => {
       const legal = getLegalActions(state, 'A').filter(a => a.type === 'RESOLVE_MODULATE');
       expect(legal.some(a => a.cellId === 'r2c2')).toBe(true);
     });
+
+    // Regression: merely being a Prophecy (capable of holding Time
+    // Counters) isn't enough on its own — isModulateTarget's own
+    // `occupant.type === 'prophecy'` clause used to skip the `timer > 0`
+    // check the Altar/generic-occupant branches already had, so a
+    // Prophecy genuinely sitting at 0 (an edge case, but reachable) was
+    // still offered as a target.
+    it('excludes a Prophecy sitting at 0 Time Counters — same rule as an Altar', () => {
+      const emptyProphecy = { type: 'prophecy', ownerId: 'A', card: { name: 'P' }, timer: 0, faceDown: true };
+      let state = baseState({ board: { r2c1: dialOfMetatoris, r3c1: emptyProphecy }, altars: { A: [], B: [] } });
+      state = gameReducer(state, { type: 'ACTIVATE_ENGAGE', cellId: 'r2c1' });
+      expect(state.pendingChoice).toBeNull(); // no legal target at all — Engage fizzles
+      expect(state.board.r2c1.engaged).toBe(true);
+      const legal = getLegalActions(state, 'A').filter(a => a.type === 'RESOLVE_MODULATE');
+      expect(legal.some(a => a.cellId === 'r3c1')).toBe(false);
+    });
   });
 });
