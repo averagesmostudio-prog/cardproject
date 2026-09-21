@@ -543,6 +543,13 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
     return () => clearInterval(id);
   }, [state.phase]);
 
+  // Always mirrors the latest applied boardScale, read fresh inside
+  // recompute() below without needing boardScale in that effect's own
+  // dependency array (which would tear down/rebuild the ResizeObserver on
+  // every scale change it itself produces).
+  const boardScaleRef = useRef(1);
+  useEffect(() => { boardScaleRef.current = boardScale; }, [boardScale]);
+
   // Keeps the board + side-panel group's uniform scale in sync with
   // whatever space is actually available for it (boardAreaRef) versus its
   // own natural, unscaled footprint (boardContentRef) — recomputed on
@@ -552,6 +559,21 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
   // the same ratio. Uniform (one scalar, both axes) so the board's own
   // aspect ratio never distorts — only ever shrinks it (capped at 1), per
   // boardScale's own comment above.
+  //
+  // Natural size is read via getBoundingClientRect (divided back out by
+  // the currently applied scale), NOT scrollWidth/scrollHeight — the
+  // onboard hover preview portals into #onboard-hover-anchor, a descendant
+  // of contentEl, as an absolutely positioned overlay (CardTile.jsx); an
+  // out-of-flow descendant like that never affects an ancestor's own
+  // rendered box (what getBoundingClientRect reports), but scrollWidth/
+  // scrollHeight are spec'd to include exactly this kind of overflow
+  // regardless of the ancestor's own `overflow` value. Reading scrollWidth/
+  // scrollHeight here made the board's own "natural size" balloon by the
+  // hover preview's own footprint for as long as ANY card was hovered
+  // (Hand.jsx cards use this same onboard preview) — self-play found this
+  // visibly resizing the whole board on hover once maximized/fullscreen
+  // left little slack (boardScale sitting near 1, so the false-positive
+  // shrink was no longer absorbed by scale already being well under 1).
   useEffect(() => {
     const areaEl = boardAreaRef.current;
     const contentEl = boardContentRef.current;
@@ -559,8 +581,10 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
     const recompute = () => {
       const availableWidth = areaEl.clientWidth;
       const availableHeight = areaEl.clientHeight;
-      const naturalWidth = contentEl.scrollWidth;
-      const naturalHeight = contentEl.scrollHeight;
+      const currentScale = boardScaleRef.current || 1;
+      const contentRect = contentEl.getBoundingClientRect();
+      const naturalWidth = contentRect.width / currentScale;
+      const naturalHeight = contentRect.height / currentScale;
       if (!naturalWidth || !naturalHeight) return;
       const next = Math.min(1, availableWidth / naturalWidth, availableHeight / naturalHeight);
       setBoardScale(prev => (Math.abs(prev - next) > 0.005 ? next : prev));
