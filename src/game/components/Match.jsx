@@ -3113,6 +3113,20 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
               <span className="text-xs text-stone-300">
                 {state.pendingChoice.cardName}: choose a highlighted Time Counter to Modulate.
               </span>
+              {/* Orbital Acceleration: "You may Modulate (-1)." — a genuinely
+                  optional Modulate (pendingChoice.optional, same generic flag
+                  every other optional choice uses) had no way to skip it here,
+                  unlike its sibling banners just above (summon-hand-being-
+                  pointed, the toggle-choice kinds), which both already check
+                  this and render their own Decline/Cancel button. */}
+              {state.pendingChoice.optional && (
+                <button
+                  onClick={() => dispatch({ type: 'RESOLVE_DECLINE' })}
+                  className="ml-auto shrink-0 text-xs text-stone-400 hover:text-stone-200 transition"
+                >
+                  Decline
+                </button>
+              )}
               {cellCandidates && (
                 <div className="flex gap-1 shrink-0 ml-auto">
                   <span className="text-xs text-stone-400 self-center">{cellCandidates.card?.name || modulateDeltaCell}:</span>
