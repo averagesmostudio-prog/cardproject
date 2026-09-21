@@ -6038,19 +6038,22 @@ const triggerOnOwnBeingShiftReactions = (state, playerId, duringEndStep = false)
 // trigger-point/generic-resolver treatment as every other reaction here.
 // The Boundless Hunger bounce loop (Immen Gorta's own quoted Shift decay
 // + Mouth of Madness + Terranean Gates — confirmed intentional with the
-// user, meant to drain the opponent's Lifespan via Immen Gorta's own
-// "deal (1) damage to any target" firing every return trip): while Mouth
-// of Madness is actually on the board (so the loop WILL keep re-firing
-// right after this, with no "a choice is already pending" guard on that
-// re-trigger check), a real player choice for "any target" has nowhere
-// safe to pause, so `autoTargetOpponentId` short-circuits DAMAGE_ANY_
-// TARGET_RE straight to the shifted Being's owner's opponent instead of
-// opening the normal pendingChoice — see resolveOrLogEffect's own
-// damageAnyMatch branch. Scoped to only that genuinely-unpausable case
-// (see `activeBounceLoop` below) — Immen Gorta's OWN Shift also ties its
-// ordinary, non-looping return to end-of-turn processing (its "loses (2)
-// Time Counters" decay), and that single return gets a real choice, per
-// the user's own ruling.
+// user, meant to illustrate the loop via Immen Gorta's own "deal (1)
+// damage to any target" firing on each of its first 3 return trips before
+// its controller wins outright): while Mouth of Madness is actually on
+// the board the loop will keep re-firing right after this, so forcing the
+// next Shift immediately (rather than waiting on a still-open target
+// choice) would silently clobber whatever the player just picked — see
+// the `next.pendingChoice` check below, which instead stashes a
+// `boundlessHunger` continuation onto the choice itself
+// (continueBoundlessHungerBounce, just below this function) so
+// RESOLVE_DAMAGE_TARGET(_PLAYER) can pick the bounce back up once the
+// player actually resolves it. This real-choice treatment is scoped to
+// Immen Gorta BY NAME (`isBoundlessHungerCard` below) — no other real
+// card shares this shape, and one that hypothetically did would still
+// have nowhere safe to pause across up to 100 bounces, so it keeps the
+// old `autoTargetOpponentId` bypass (see resolveOrLogEffect's own
+// damageAnyMatch branch) unchanged.
 // `disengageOnReturn` is Údarik Hunger's own "...if it moves into the
 // Mortal Realm this turn Disengage it" — lands Engaged as normal (per
 // Shift's own default ending) and is THEN explicitly Disengaged as a
@@ -6084,50 +6087,28 @@ const placeReturnedFromShift = (state, cellId, toCellId, duringEndStep = false, 
   let next = addLog({ ...state, board }, `${card.name} moves into the Mortal Realm at ${toCellId}, Engaged.`);
   const reaction = card.keywords?.onMovedIntoMortalRealm;
   if (reaction) {
-    // Only bypass the real "any target" choice when a forced re-Shift
-    // (Mouth of Madness's own duringEndStepForceShift, checked the exact
-    // same way the bounce check just below this does) is actually
-    // possible right now — that check runs unconditionally right after
-    // this with no "a choice is already pending" guard, so letting a real
-    // pendingChoice open here when Mouth of Madness IS present would just
-    // get silently clobbered a moment later by the loop's own next
-    // iteration, losing the player's pick with nothing to show for it —
-    // worse than not offering one at all. With no Mouth of Madness on the
-    // board, this is Immen Gorta's own single, ordinary end-of-turn
-    // return (its Shift's own "loses (2) Time Counters" decay always ties
-    // its return to duringEndStep, even with no bounce loop ever
-    // involved) — nothing will re-trigger the loop afterward, so a real
-    // player choice is both safe and what the user asked for. Confirmed
-    // with the user: scope the auto-target bypass to only the genuinely
-    // unpausable case, not every end-of-turn return.
+    // Bypass the real "any target" choice only for a card OTHER than Immen
+    // Gorta sharing this forced-bounce shape (no real card does today —
+    // see the 100-bounce-cap test) — it has nowhere safe to pause across
+    // up to 100 automatic bounces. Immen Gorta itself now always gets a
+    // real choice (see isBoundlessHungerCard below), deferring the forced
+    // re-Shift via a `boundlessHunger` continuation instead of bypassing.
     const activeBounceLoop = duringEndStep && !!relicWithKeywordAnywhere(state.board, 'duringEndStepForceShift');
-    // Boundless Hunger loop declaration (confirmed with the user): rather
-    // than actually grinding out up to 100 real damage iterations, the
-    // named 3-piece combo (Mouth of Madness + Terranean Gates + Immen
-    // Gorta) is declared an automatic win for its controller the moment
-    // Immen Gorta returns to the Mortal Realm for the 3rd time with both
-    // Relics still in play — `bounceCount` is 0 on the very first
-    // (non-forced) return, so its 3rd occurrence is bounceCount === 2.
-    // Named specifically to this one combo (not a generic "any Shift-decay
-    // Being + any forced-re-Shift Relic" mechanism) — nothing else in the
-    // real CSV shares this shape, and a future card that happens to
-    // wouldn't automatically inherit an instant-win/loss the user never
-    // asked for it to have.
-    if (activeBounceLoop && bounceCount === 2 && card.name === 'Immen Gorta, the Boundless Hunger') {
-      const mouthOfMadness = Object.values(state.board).find(o => o?.type === 'relic' && o.card.keywords?.duringEndStepForceShift)?.card;
-      const terraneanGates = Object.values(state.board).find(o => o?.type === 'relic' && o.card.keywords?.duringEndStepLoseTimeCounters)?.card;
-      let loopNext = addLog(next, `${occupant.ownerId} has assembled the Boundless Hunger loop (Mouth of Madness + Terranean Gates + Immen Gorta) — ${opponentOf(occupant.ownerId)} concedes.`);
-      return {
-        ...loopNext,
-        phase: 'gameover',
-        winner: occupant.ownerId,
-        loopWin: { winnerId: occupant.ownerId, cards: [mouthOfMadness, terraneanGates, card].filter(Boolean) },
-      };
-    }
+    const isBoundlessHungerCard = card.name === 'Immen Gorta, the Boundless Hunger';
     next = resolveOrLogEffect(next, occupant.ownerId, card.name, reaction, 'Reaction', {
       selfCellId: toCellId,
-      ...(activeBounceLoop ? { autoTargetOpponentId: opponentOf(occupant.ownerId) } : {}),
+      ...(activeBounceLoop && !isBoundlessHungerCard ? { autoTargetOpponentId: opponentOf(occupant.ownerId) } : {}),
     });
+    // The player just chose (or is about to choose) where Immen Gorta's
+    // damage goes for this iteration — forcing the next Shift, or
+    // declaring the loop win, has to wait for that choice to actually
+    // resolve (RESOLVE_DAMAGE_TARGET / RESOLVE_DAMAGE_TARGET_PLAYER below
+    // call continueBoundlessHungerBounce once it does), so bail out here
+    // rather than falling through to the forced-reshift/disengage/legend-
+    // rule tail below.
+    if (next.pendingChoice && activeBounceLoop && isBoundlessHungerCard) {
+      return { ...next, pendingChoice: { ...next.pendingChoice, boundlessHunger: { toCellId, ownerId: occupant.ownerId, card, bounceCount } } };
+    }
   }
   // Mouth of Madness: "If a Being moves into the Mortal Realm during End
   // Phase it Shifts (X)." — the other half of the bounce loop, forcing
@@ -6173,6 +6154,37 @@ const placeReturnedFromShift = (state, cellId, toCellId, duringEndStep = false, 
   // the legend-rule check just above), rather than leaving it stuck until
   // the owner's next turn ticks it again.
   return retryStuckShiftReturns(next, landDisengaged);
+};
+
+// Picks the Boundless Hunger bounce loop back up once Immen Gorta's own
+// per-iteration "any target" damage choice (stashed as `boundlessHunger`
+// on the pendingChoice by placeReturnedFromShift above) actually resolves.
+// Called from RESOLVE_DAMAGE_TARGET / RESOLVE_DAMAGE_TARGET_PLAYER below,
+// after the damage itself has already been applied. `bounceCount` is 0 on
+// Immen Gorta's first (non-forced) return, so the 3rd illustrated choice
+// (the loop's 3rd return) is bounceCount === 2 — per the user's own
+// ruling, the controller gets a real target choice for all 3 (unlike the
+// old auto-bypass, which silently skipped the first 2 and skipped dealing
+// any damage at all for the 3rd), and only once that 3rd choice resolves
+// does the loop get declared and the game move to the loop screen.
+const continueBoundlessHungerBounce = (state, { toCellId, ownerId, card, bounceCount }) => {
+  if (bounceCount === 2) {
+    const mouthOfMadness = Object.values(state.board).find(o => o?.type === 'relic' && o.card.keywords?.duringEndStepForceShift)?.card;
+    const terraneanGates = Object.values(state.board).find(o => o?.type === 'relic' && o.card.keywords?.duringEndStepLoseTimeCounters)?.card;
+    const loopNext = addLog(state, `${ownerId} has assembled the Boundless Hunger loop (Mouth of Madness + Terranean Gates + ${card.name}) — ${opponentOf(ownerId)} concedes.`);
+    return {
+      ...loopNext,
+      phase: 'gameover',
+      winner: ownerId,
+      loopWin: { winnerId: ownerId, cards: [mouthOfMadness, terraneanGates, card].filter(Boolean) },
+    };
+  }
+  const forceAmount = relicWithKeywordAnywhere(state.board, 'duringEndStepForceShift');
+  if (forceAmount && state.board[toCellId]?.type === 'being') {
+    const next = addLog(state, `${card.name} is forced to Shift again (Mouth of Madness).`);
+    return offerOrPerformShift(next, ownerId, toCellId, { amount: forceAmount, effect: null }, true, bounceCount + 1);
+  }
+  return state;
 };
 
 // Shift's own return trip, fired from resolveProphecyModulateHitZero below
@@ -11193,7 +11205,7 @@ const gameReducerCore = (state, action) => {
 
     case 'RESOLVE_DAMAGE_TARGET': {
       if (!state.pendingChoice || state.pendingChoice.kind !== 'damage-target') return state;
-      const { playerId, cardName, damage, typing, ownerFilter, thenMoveArmament } = state.pendingChoice;
+      const { playerId, cardName, damage, typing, ownerFilter, thenMoveArmament, boundlessHunger } = state.pendingChoice;
       const occupant = state.board[action.cellId];
       // A typed target must be a real Being (an Armament's own typing is
       // never a creature typing, so it could never match anyway); the
@@ -11215,6 +11227,11 @@ const gameReducerCore = (state, action) => {
       // Brick: "...then move Brick to the tile occupied by the targeted
       // Being." — the move follows the choice, same as the damage does.
       if (thenMoveArmament) next = moveNamedArmamentToTile(next, thenMoveArmament, action.cellId);
+      // Immen Gorta's own Boundless Hunger bounce loop (see
+      // continueBoundlessHungerBounce) — this damage choice was one of the
+      // loop's 3 illustrated iterations, so pick the bounce back up now
+      // that it's actually resolved.
+      if (boundlessHunger) next = continueBoundlessHungerBounce(next, boundlessHunger);
       return next;
     }
 
@@ -11223,7 +11240,7 @@ const gameReducerCore = (state, action) => {
     // no death pipeline involved since there's no occupant to kill.
     case 'RESOLVE_DAMAGE_TARGET_PLAYER': {
       if (!state.pendingChoice || state.pendingChoice.kind !== 'damage-target' || !state.pendingChoice.includesPlayers) return state;
-      const { playerId, cardName, damage } = state.pendingChoice;
+      const { playerId, cardName, damage, boundlessHunger } = state.pendingChoice;
       const targetPlayerId = action.targetPlayerId;
       if (targetPlayerId !== 'A' && targetPlayerId !== 'B') return state;
       const target = state.players[targetPlayerId];
@@ -11233,6 +11250,8 @@ const gameReducerCore = (state, action) => {
         players: { ...state.players, [targetPlayerId]: { ...target, lifespan: target.lifespan - damage } },
       };
       next = addLog(next, `${playerId} chooses ${targetPlayerId}'s Lifespan to take ${cardName}'s ${damage} damage.`);
+      // See the matching comment in RESOLVE_DAMAGE_TARGET above.
+      if (boundlessHunger) next = continueBoundlessHungerBounce(next, boundlessHunger);
       return checkWin(next);
     }
 

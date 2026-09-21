@@ -766,25 +766,59 @@ describe('endTurn', () => {
     const mouthOfMadness = { type: 'relic', ownerId: 'A', card: { id: 'mouth', instanceId: 'mouth#0', name: 'Mouth of Madness', kind: 'relic', keywords: { duringEndStepForceShift: 1 } } };
     const terraneanGates = { type: 'relic', ownerId: 'A', card: { id: 'gates', instanceId: 'gates#0', name: 'Terranean Gates', kind: 'relic', keywords: { duringEndStepLoseTimeCounters: 2 } } };
 
-    // Regression: per the user's own ruling, this named 3-piece combo
-    // doesn't grind out repeated real damage instances at all anymore —
-    // the moment Immen Gorta returns to the Mortal Realm for the 3RD time
-    // with both Relics still in play, the loop is declared and its
-    // controller wins outright (win-by-loop, not by Lifespan exhaustion).
-    // `bounceCount` is 0 on the first (non-forced) return, so the 3rd
-    // occurrence is bounceCount === 2 — the first two returns still deal
-    // their own real 1 damage each beforehand (2 damage total), then the
-    // 3rd short-circuits before dealing any more.
-    it('declares the loop and ends the game after the 3rd return, rather than draining Lifespan indefinitely', () => {
+    // Regression: per the user's own later ruling, the controller now gets
+    // a REAL target choice for Immen Gorta's "any target" damage on all 3
+    // illustrated returns (not just the ordinary no-Mouth-of-Madness case
+    // below) — forcing the next Shift waits for that choice to actually
+    // resolve (continueBoundlessHungerBounce), rather than auto-hitting
+    // the opponent the instant it fires. `bounceCount` is 0 on the first
+    // (non-forced) return, so the 3rd occurrence is bounceCount === 2 —
+    // only once THAT choice resolves does the loop get declared and its
+    // controller win outright (win-by-loop, not by Lifespan exhaustion).
+    it('lets the controller choose Immen Gorta\'s target for all 3 illustrated returns, then declares the loop and ends the game', () => {
+      // B needs a real mainDeck card here: unlike the original (fully
+      // synchronous, no-pendingChoice) version of this loop, endTurn now
+      // finishes its own turn-switch/beginTurn sequence for B (a real
+      // pendingChoice partway through end-of-turn processing doesn't pause
+      // endTurn itself — a separate, pre-existing quirk, not something this
+      // change touches) before the loop's first choice is even resolved, so
+      // an empty deck would otherwise contaminate B's Lifespan via the
+      // unrelated draw-from-empty penalty.
       const state = baseState({
         turnPlayer: 'A',
         board: { r3c1: shiftedImmenGorta(1), r2c1: mouthOfMadness, r2c2: terraneanGates },
-        players: { A: player(), B: player({ lifespan: 1000 }) },
+        players: { A: player(), B: player({ lifespan: 1000, mainDeck: [{ instanceId: 'd1' }] }) },
       });
-      const next = endTurn(state);
+      let next = endTurn(state);
+      // 1st return: a real choice, not auto-resolved.
+      expect(next.phase).toBe('playing');
+      expect(next.players.B.lifespan).toBe(1000);
+      expect(next.pendingChoice).toEqual(expect.objectContaining({
+        kind: 'damage-target', damage: 1, includesPlayers: true,
+        boundlessHunger: expect.objectContaining({ bounceCount: 0 }),
+      }));
+
+      next = gameReducer(next, { type: 'RESOLVE_DAMAGE_TARGET_PLAYER', targetPlayerId: 'B' });
+      // 2nd return: another real choice, opened by the forced re-Shift.
+      expect(next.phase).toBe('playing');
+      expect(next.players.B.lifespan).toBe(999);
+      expect(next.pendingChoice).toEqual(expect.objectContaining({
+        kind: 'damage-target', boundlessHunger: expect.objectContaining({ bounceCount: 1 }),
+      }));
+
+      next = gameReducer(next, { type: 'RESOLVE_DAMAGE_TARGET_PLAYER', targetPlayerId: 'B' });
+      // 3rd (final illustrated) return: still a real choice, unlike the
+      // old short-circuit which skipped dealing any damage on this one.
+      expect(next.phase).toBe('playing');
+      expect(next.players.B.lifespan).toBe(998);
+      expect(next.pendingChoice).toEqual(expect.objectContaining({
+        kind: 'damage-target', boundlessHunger: expect.objectContaining({ bounceCount: 2 }),
+      }));
+
+      next = gameReducer(next, { type: 'RESOLVE_DAMAGE_TARGET_PLAYER', targetPlayerId: 'B' });
       expect(next.phase).toBe('gameover');
       expect(next.winner).toBe('A');
-      expect(next.players.B.lifespan).toBe(998); // only the first 2 returns dealt real damage
+      expect(next.players.B.lifespan).toBe(997); // all 3 illustrated returns dealt real, player-chosen damage
       expect(next.pendingChoice).toBeFalsy();
       expect(next.loopWin).toEqual({
         winnerId: 'A',
@@ -801,9 +835,12 @@ describe('endTurn', () => {
       const state = baseState({
         turnPlayer: 'A',
         board: { r3c1: shiftedImmenGorta(1), r2c1: mouthOfMadness, r2c2: terraneanGates },
-        players: { A: player(), B: player({ lifespan: 1_000_000 }) },
+        players: { A: player(), B: player({ lifespan: 1_000_000, mainDeck: [{ instanceId: 'd1' }] }) },
       });
-      const next = endTurn(state);
+      let next = endTurn(state);
+      next = gameReducer(next, { type: 'RESOLVE_DAMAGE_TARGET_PLAYER', targetPlayerId: 'B' });
+      next = gameReducer(next, { type: 'RESOLVE_DAMAGE_TARGET_PLAYER', targetPlayerId: 'B' });
+      next = gameReducer(next, { type: 'RESOLVE_DAMAGE_TARGET_PLAYER', targetPlayerId: 'B' });
       expect(next.phase).toBe('gameover');
       expect(next.winner).toBe('A');
     });
