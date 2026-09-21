@@ -6413,6 +6413,22 @@ describe('"When Summoned" mechanics on Beings', () => {
     expect(effectiveStrength(resolved.board.r1c2)).toBe(7);
   });
 
+  it('Thespian: damage taken after copying stats actually applies and persists across an unrelated later dispatch', () => {
+    const card = whenSummonedCard({ name: 'Thespian', strength: 0, lifespan: 1, keywords: { whenSummoned: 'this Being\'s Strength and Lifespan becomes equal to target Being you control.' } });
+    const ally = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'ally', strength: 7, lifespan: 9 }), currentLifespan: 6, engaged: false };
+    const summoned = summon(card, { r2c1: ally });
+    const afterCopy = gameReducer(summoned, { type: 'RESOLVE_COPY_STATS', cellId: 'r2c1' });
+    expect(afterCopy.board.r1c2.currentLifespan).toBe(6); // baseline (copied from ally)
+    expect(afterCopy.board.r1c2.strengthOverride).toBe(7);
+    const damaged = dealDamageToBeing(afterCopy, 'r1c2', 3);
+    expect(damaged.board.r1c2.currentLifespan).toBe(3); // 6 - 3, actually applied
+    expect(damaged.board.r1c2.strengthOverride).toBe(7); // copied Strength untouched
+    // Dispatch an unrelated action and confirm the damage isn't silently reset
+    // by some other live recompute running afterward.
+    const afterUnrelated = gameReducer(damaged, { type: 'PASS_PRIORITY' });
+    expect(afterUnrelated.board.r1c2.currentLifespan).toBe(3);
+  });
+
   it('gates the optional Lifespan-cost buff on affordability and a legal target (Lamtukka Gentleman)', () => {
     const card = whenSummonedCard({
       name: 'Lamtukka Gentleman', typing: 'Demon, Being',
