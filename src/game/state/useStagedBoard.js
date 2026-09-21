@@ -374,6 +374,17 @@ const OPEN_LANE_STRIKE_MS = 500;
 // bigger, more dramatic flourish reserved for just that.
 const OPEN_LANE_HIT_RE = /attacks into (?:an open lane|past .+?), dealing \d+ damage to ([AB])\.$/;
 
+// Planchette: "At the end of your turn lose Lifespan equal to the
+// Lifespan of the Being on this tile." (applyEndOfTurnGroundRelicCoLocatedLifespanLoss,
+// turn.js) — confirmed with the user: this should read as a real hit too,
+// the same strike flourish as an undefended attack, not just the generic
+// damage-burst-pop every Lifespan drop already gets. Matches that
+// function's own exact log line: "<Relic> costs <player> <N> Lifespan
+// (equal to <Being>'s Lifespan)." — narrow to this one shape rather than
+// every Lifespan-cost message (an Effigy-pay cost, the flat end-of-turn
+// -1, etc. should NOT get this).
+const GROUND_RELIC_COST_HIT_RE = /^.+? costs ([AB]) \d+ Lifespan \(equal to .+?'s Lifespan\)\.$/;
+
 export const useOpenLaneStrike = (log) => {
   const prevLogLenRef = useRef(log.length);
   const [strikes, setStrikes] = useState({});
@@ -387,7 +398,7 @@ export const useOpenLaneStrike = (log) => {
     const newMessages = log.slice(prevLogLen).map(entry => entry.message);
     const hitPlayers = [];
     newMessages.forEach(m => {
-      const match = OPEN_LANE_HIT_RE.exec(m);
+      const match = OPEN_LANE_HIT_RE.exec(m) || GROUND_RELIC_COST_HIT_RE.exec(m);
       if (match) hitPlayers.push(match[1]);
     });
     if (hitPlayers.length === 0) return undefined;
