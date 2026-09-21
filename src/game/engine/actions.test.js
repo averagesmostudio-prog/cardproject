@@ -11950,7 +11950,7 @@ describe('Twelfth wave: Legion\'s Onset — "Pay (X) Lifespan, then Summon a Vas
     expect(next.players.A.lifespan).toBe(10);
     expect(next.pendingChoice).toEqual({
       kind: 'summon-vine-tokens-toggle', playerId: 'A', cardName: "Legion's Onset", label: 'Prophecy',
-      maxCount: 2, selected: [], tokenKey: 'vassal', tokenName: 'Vassal',
+      maxCount: 2, selected: [], tokenKey: 'vassal', tokenName: 'Vassal', landDisengaged: true,
     });
     expect(Object.values(next.board).filter(o => o?.type === 'being')).toHaveLength(0); // nothing placed yet
   });
@@ -11966,6 +11966,21 @@ describe('Twelfth wave: Legion\'s Onset — "Pay (X) Lifespan, then Summon a Vas
     expect(resolved.board.r2c5?.card.name).toBe('Vassal');
     expect(Object.values(resolved.board).filter(o => o?.type === 'being')).toHaveLength(2);
     expect(resolved.pendingChoice).toBeNull();
+  });
+
+  // Regression: Legion's Onset's own trigger point (a Prophecy's flip,
+  // during the Modulate step) runs strictly before that turn's Disengage
+  // step — but the Vassals themselves only ever land later still, behind
+  // this multi-step pendingChoice, so no Disengage step that turn could
+  // ever actually reach them. They used to enter Engaged like any other
+  // freshly-summoned Being and sit that way a full extra turn.
+  it('lands its own Vassal tokens already Disengaged, since no Disengage step this turn could ever reach them', () => {
+    const state = baseState({ board: {}, players: { A: player({ lifespan: 20 }), B: player() } });
+    const opened = resolveOrLogEffect(state, 'A', "Legion's Onset", text, 'Prophecy', {});
+    const counted = gameReducer(opened, { type: 'RESOLVE_LEGION_ONSET_CHOOSE_COUNT', value: 1 });
+    const toggled = gameReducer(counted, { type: 'RESOLVE_SUMMON_VINE_TOKENS_TOGGLE', cellId: 'r2c4' });
+    const resolved = gameReducer(toggled, { type: 'RESOLVE_SUMMON_VINE_TOKENS_CONFIRM' });
+    expect(resolved.board.r2c4.engaged).toBe(false);
   });
 
   it('choosing a count of 0 summons nothing and pays no Lifespan', () => {

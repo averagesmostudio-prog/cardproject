@@ -12236,7 +12236,17 @@ const gameReducerCore = (state, action) => {
       if (next.phase === 'gameover') return next;
       return {
         ...next,
-        pendingChoice: { kind: 'summon-vine-tokens-toggle', playerId, cardName, label, maxCount: value, selected: [], tokenKey: 'vassal', tokenName: 'Vassal' },
+        // `landDisengaged` (RESOLVE_SUMMON_VINE_TOKENS_CONFIRM's own
+        // comment) — these Vassals are summoned via this Prophecy's own
+        // flip-trigger during the Modulate step, strictly before this same
+        // turn's Disengage step even runs, but the actual placement always
+        // happens later still (behind this very pendingChoice the player
+        // still has to resolve) — so no Disengage step this turn could
+        // ever actually reach them regardless of step ordering. Confirmed
+        // with the user: land them already Disengaged instead of leaving
+        // them stuck an entire extra turn cycle for a step they could
+        // never have made it into in the first place.
+        pendingChoice: { kind: 'summon-vine-tokens-toggle', playerId, cardName, label, maxCount: value, selected: [], tokenKey: 'vassal', tokenName: 'Vassal', landDisengaged: true },
       };
     }
 
@@ -12827,14 +12837,20 @@ const gameReducerCore = (state, action) => {
       // tokenKey/tokenName default to Blooming Vine (Elderflower Ancient,
       // the original caller) — Legion's Onset's own count-choice step sets
       // both explicitly to summon Vassal tokens instead through this same
-      // generic multi-cell picker.
-      const { playerId, cardName, label, selected, tokenKey, tokenName } = state.pendingChoice;
+      // generic multi-cell picker. `landDisengaged` is Legion's Onset's own
+      // flag too (see its own comment) — every other caller leaves it
+      // unset, so its tokens keep entering Engaged (summoning sickness) as
+      // normal.
+      const { playerId, cardName, label, selected, tokenKey, tokenName, landDisengaged } = state.pendingChoice;
       const makeToken = TOKEN_REGISTRY[tokenKey || 'blooming vine'];
       const name = tokenName || 'Blooming Vine';
-      let next = selected.reduce(
-        (s, cell) => (s.board[cell] ? s : placeTokenOnBoard(s, playerId, makeToken(), cell)),
-        { ...state, pendingChoice: null },
-      );
+      let next = selected.reduce((s, cell) => {
+        if (s.board[cell]) return s;
+        const placed = placeTokenOnBoard(s, playerId, makeToken(), cell);
+        return landDisengaged && placed.board[cell]?.type === 'being'
+          ? { ...placed, board: { ...placed.board, [cell]: { ...placed.board[cell], engaged: false } } }
+          : placed;
+      }, { ...state, pendingChoice: null });
       return addLog(next, selected.length > 0
         ? `${cardName}'s ${label} summons ${selected.length} ${name} token(s).`
         : `${cardName}'s ${label} summons no ${name} tokens.`);
