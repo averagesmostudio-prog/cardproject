@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { pickAiAction, pickAiReaction } from './ai.js';
-import { getLegalActions } from './actions.js';
+import { pickAiAction, pickAiReaction, bestFirst, opponentReplyValue, evaluateState } from './ai.js';
+import { getLegalActions, gameReducer } from './actions.js';
 
 const player = (overrides = {}) => ({
   id: 'B', lifespan: 50, mainDeck: [], hand: [], purgatory: [],
@@ -345,7 +345,7 @@ describe('pickAiAction with aiDifficulty "hard" (the shallow search)', () => {
     expect(hardAction).toEqual({ type: 'MOVE_OR_ATTACK', fromCellId: 'r4c3', toCellId: 'r4c2', direction: 3, isAttack: false });
   });
 
-  it('does not throw on a moderately busy board (search stays bounded)', () => {
+  it('does not throw on a moderately busy board (search stays bounded), and finishes well within an interactive time budget', () => {
     const cheapBeing = { id: 'c', instanceId: 'c#0', name: 'Cheap', kind: 'being', strength: 2, lifespan: 2, timerMax: 0, arrows: [1], castingCost: { faithless: 0, colored: {} } };
     const state = baseState({
       board: {
@@ -357,7 +357,128 @@ describe('pickAiAction with aiDifficulty "hard" (the shallow search)', () => {
         B: player({ id: 'B', hand: [cheapBeing, { ...cheapBeing, instanceId: 'c#1' }] }),
       },
     });
+    const start = Date.now();
     expect(() => pickAiAction(state, 'B', 'hard')).not.toThrow();
+    // Regression guard against the node budget being set too high — a
+    // single Hard-mode pick should stay well under a "feels laggy"
+    // ceiling even on this moderately busy board.
+    expect(Date.now() - start).toBeLessThan(2000);
+  });
+
+  // bestFirst is the search's own move-ordering (see its comment in
+  // ai.js) — sorts candidates by the plain greedy heuristic, descending,
+  // so a bounded node budget is always spent on the most promising
+  // branches first rather than whatever order getLegalActions happened to
+  // produce them in.
+  it('bestFirst sorts candidate actions by scoreAction, descending', () => {
+    const state = baseState({ board: { r4c2: being('B', 60) }, players: { A: player({ id: 'A', lifespan: 5 }), B: player({ id: 'B' }) } });
+    const actions = getLegalActions(state, 'B');
+    const ordered = bestFirst(state, 'B', actions);
+    // A lethal open-lane attack (score 1000) must sort ahead of PASS_TURN
+    // (score -100, the file's own explicit "last resort").
+    expect(ordered[0]).toEqual({ type: 'MOVE_OR_ATTACK', fromCellId: 'r4c2', toCellId: 'r2c2', isAttack: true });
+    expect(ordered[ordered.length - 1]).toEqual({ type: 'PASS_TURN' });
+  });
+
+  // opponentReplyValue is what searchValue folds in once the turn/priority
+  // passes to the opponent (see its own comment in ai.js) — the direct
+  // regression test for "defend against the worst of the opponent's
+  // CLOSE-scoring replies, not just their literal single best move."
+  describe('opponentReplyValue', () => {
+    // A has two attackers that can each cleanly kill (without dying) one
+    // of B's two Beings — X (strength 4, lifespan 15 — big board material:
+    // 4+15=19) and Y (strength 5, lifespan 2 — small material: 5+2=7).
+    // Y is A's own nominal top pick under the plain greedy heuristic
+    // (scoreAction: 80+5=85 for Y vs 80+4=84 for X — X is a CLOSE second,
+    // not the top), but losing X is far worse for B than losing Y. Old
+    // single-best-reply modeling would only ever have looked at attacking
+    // Y (mild); this confirms the search now also considers X.
+    const beingX = { type: 'being', ownerId: 'B', card: { name: 'X', kind: 'being', strength: 4, lifespan: 15, arrows: [1] }, currentLifespan: 15, engaged: true };
+    const beingY = { type: 'being', ownerId: 'B', card: { name: 'Y', kind: 'being', strength: 5, lifespan: 2, arrows: [1] }, currentLifespan: 2, engaged: true };
+    const attacker1 = { type: 'being', ownerId: 'A', card: { name: 'A1', kind: 'being', strength: 15, lifespan: 10, arrows: [1] }, currentLifespan: 10, engaged: false };
+    const attacker2 = { type: 'being', ownerId: 'A', card: { name: 'A2', kind: 'being', strength: 5, lifespan: 10, arrows: [1] }, currentLifespan: 10, engaged: false };
+    const state = baseState({
+      turnPlayer: 'A',
+      board: { r4c1: beingX, r4c2: beingY, r2c1: attacker1, r2c2: attacker2 },
+      players: { A: player({ id: 'A' }), B: player({ id: 'B', lifespan: 30 }) },
+    });
+
+    it('picks the worse-for-B outcome (losing X) over the opponent\'s own literal top-scored reply (attacking Y)', () => {
+      const afterAttackingX = evaluateState(gameReducer(state, { type: 'MOVE_OR_ATTACK', fromCellId: 'r2c1', toCellId: 'r4c1', isAttack: true }), 'B');
+      const afterAttackingY = evaluateState(gameReducer(state, { type: 'MOVE_OR_ATTACK', fromCellId: 'r2c2', toCellId: 'r4c2', isAttack: true }), 'B');
+      expect(afterAttackingX).toBeLessThan(afterAttackingY); // losing X really is worse for B, confirming the scenario is set up as intended
+
+      const budget = { remaining: 100 };
+      const value = opponentReplyValue(state, 'B', budget);
+      expect(value).toBe(afterAttackingX); // the worse outcome won, not just A's own top-ranked pick
+    });
+
+    it('degrades to the plain static eval instead of throwing when the node budget is already exhausted', () => {
+      const budget = { remaining: 0 };
+      const value = opponentReplyValue(state, 'B', budget);
+      expect(value).toBe(evaluateState(state, 'B')); // no candidate could be simulated — falls back cleanly
+    });
+  });
+
+  // Regression coverage for a real, reachable infinite loop found via
+  // self-play: a "toggle candidates in, then confirm" pendingChoice
+  // (sacrifice-x-toggle, shuffle-purgatory-toggle, etc.) doesn't change
+  // any board material at all until CONFIRM commits, so the generic
+  // recursive search has no signal that re-toggling is a no-progress
+  // round trip — it can end up scoring "undo the toggle I just made"
+  // HIGHER than actually confirming, even when confirming is clearly
+  // correct, causing the AI to flip-flop the same toggle forever (see
+  // valueOfCandidate's own comment for the exact captured numbers: a real
+  // sacrifice-x-toggle with CONFIRM legal scored 47.5 by search vs. 51 for
+  // undoing the very candidate it had just added).
+  describe('toggle-then-confirm pendingChoices never loop (valueOfCandidate\'s scoreAction bypass)', () => {
+    // Cemetery Physician: "sacrifice (X) Bag o' Bones: Summon a Being
+    // from your Purgatory with cost (X)." One Bag o' Bones already
+    // toggled in, and a real cost-1 Being sitting in Purgatory — CONFIRM
+    // is legal and correct.
+    const fodder = { type: 'relic', ownerId: 'A', card: { name: "Bag o' Bones", kind: 'relic', keywords: { martyr: '' } } };
+    const purgatoryMatch = { instanceId: 'pb#0', name: 'Cheap Being', kind: 'being', castingCost: { faithless: 1, colored: {} } };
+    const stateWithMatch = baseState({
+      turnPlayer: 'A',
+      board: { r1c2: fodder },
+      players: { A: player({ id: 'A', purgatory: [purgatoryMatch] }), B: player({ id: 'B' }) },
+      pendingChoice: { kind: 'sacrifice-x-toggle', playerId: 'A', cardName: 'Cemetery Physician', cellId: 'r1c1', fodderName: "Bag o' Bones", selected: ['r1c2'], optional: true },
+    });
+
+    it('confirms instead of undoing the toggle it just made, once CONFIRM is legal and correct', () => {
+      const legal = getLegalActions(stateWithMatch, 'A').map((a) => a.type);
+      expect(legal).toContain('RESOLVE_SACRIFICE_X_CONFIRM'); // sanity: this is really the "confirm is legal" shape, not the dead-end one
+      const action = pickAiAction(stateWithMatch, 'A', 'hard');
+      expect(action).toEqual({ type: 'RESOLVE_SACRIFICE_X_CONFIRM' });
+    });
+
+    it('still declines cleanly (does not loop) when no selection could ever match a real Purgatory cost', () => {
+      const stateNoMatch = baseState({
+        turnPlayer: 'A',
+        board: { r1c2: fodder },
+        players: { A: player({ id: 'A', purgatory: [] }), B: player({ id: 'B' }) },
+        pendingChoice: { kind: 'sacrifice-x-toggle', playerId: 'A', cardName: 'Cemetery Physician', cellId: 'r1c1', fodderName: "Bag o' Bones", selected: ['r1c2'], optional: true },
+      });
+      const action = pickAiAction(stateNoMatch, 'A', 'hard');
+      expect(action).toEqual({ type: 'RESOLVE_DECLINE' });
+    });
+
+    it('does not short-circuit RESOLVE_DECLINE on an unrelated, non-toggle optional pendingChoice', () => {
+      // An optional Modulate (kind: 'modulate', not '*-toggle') — RESOLVE_DECLINE
+      // here should still be judged through the normal recursive search,
+      // not scoreAction's toggle-specific bypass, since this pendingChoice
+      // kind was never part of the loop this fix targets.
+      const prophecy = { type: 'prophecy', ownerId: 'A', card: { name: 'Some Prophecy' }, timer: 1, faceDown: true };
+      const state = baseState({
+        turnPlayer: 'A',
+        board: { r3c1: prophecy },
+        players: { A: player({ id: 'A' }), B: player({ id: 'B' }) },
+        pendingChoice: { kind: 'modulate', playerId: 'A', cardName: 'Test', delta: 'choose', optional: true, anyOwner: true },
+      });
+      expect(() => pickAiAction(state, 'A', 'hard')).not.toThrow();
+      const legal = getLegalActions(state, 'A').map((a) => a.type);
+      expect(legal).toContain('RESOLVE_DECLINE'); // confirms this scenario genuinely offers Decline as an alternative
+    });
   });
 });
 

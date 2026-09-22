@@ -279,9 +279,21 @@ const scoreAction = (state, action, playerId) => {
   return 0;
 };
 
-// The plain flat-heuristic picker (Easy/Standard, and also reused by
-// pickHardAction below to model the OPPONENT's own reply — see its
-// comment for why that's greedy rather than another hard search).
+// Sorts legal actions by the plain greedy heuristic (scoreAction), best
+// first — reused as the search's own move-ordering wherever a node
+// budget might run out partway through a candidate list, so the leftover
+// budget is always spent on the most promising branches first rather than
+// whatever order getLegalActions happened to produce them in. scoreAction
+// already has a safe default (0) for any action type it doesn't
+// explicitly recognize, so this is safe to use over the full
+// heterogeneous action list (RESOLVE_* pendingChoice actions,
+// PASS_PRIORITY, etc. included), not just plain turn actions.
+// Exported for direct testing (ai.test.js) — otherwise only used
+// internally below.
+export const bestFirst = (state, playerId, actions) =>
+  [...actions].sort((a, b) => scoreAction(state, b, playerId) - scoreAction(state, a, playerId));
+
+// The plain flat-heuristic picker (Easy/Standard).
 const pickGreedyAction = (state, playerId) => {
   const actions = getLegalActions(state, playerId);
   if (actions.length === 0) return null;
@@ -308,24 +320,50 @@ const pickGreedyAction = (state, playerId) => {
 // actions deep (so a move that only pays off — or only gets punished — a
 // couple of actions later is actually foreseen, not just the immediate
 // one), and the moment the turn or priority would actually pass to the
-// opponent, fold in ONE ply of their own best GREEDY reply (reusing
-// pickGreedyAction, not another hard search — modeling the opponent as a
-// reasonable-but-not-searching player is what keeps this bounded instead
-// of mutually recursive) before evaluating the resulting board. A shared
-// node budget across the whole search caps worst-case latency regardless
-// of how bushy any one branch turns out to be (a "choose up to N
-// candidates" toggle choice, say), degrading gracefully to a shallower
-// effective search there rather than blowing up.
-const MAX_OWN_PLY = 3;
-const MAX_SEARCH_NODES = 600;
+// opponent, fold in a few plies of their own best GREEDY replies (see
+// OPPONENT_REPLY_BREADTH/opponentReplyValue, below — reusing scoreAction,
+// not another hard search — modeling the opponent as a reasonable-but-
+// not-searching player is what keeps this bounded instead of mutually
+// recursive) before evaluating the resulting board. A shared node budget
+// across the whole search caps worst-case latency regardless of how bushy
+// any one branch turns out to be (a "choose up to N candidates" toggle
+// choice, say), degrading gracefully to a shallower effective search
+// there rather than blowing up — candidates are explored in bestFirst
+// order (above) precisely so that degradation spends whatever budget is
+// left on the most promising branches, not an arbitrary one.
+//
+// Both constants below are sized off a real measurement, not a guess:
+// benchmarked across 300 full AI-vs-AI games (getLegalActions' own
+// branching factor was mean ~6 / median 4 / p90 14 per decision), a
+// single (dispatch + getLegalActions) "node" costs ~0.1ms. 6000 nodes is
+// therefore ≈600ms worst case — a perfectly reasonable "AI is thinking"
+// pause for a turn-based game — with real headroom over the old 600-node
+// (≈60ms) budget, and MAX_OWN_PLY=4 comfortably fits within it on a
+// typical (non-busy) board (6+36+216+1296 ≈ 1554 of the 6000 budget,
+// leaving the rest for wider boards and opponent-reply modeling). Both
+// are empirically-chosen starting points, not exact science — worth
+// tuning further after live play-testing.
+const MAX_OWN_PLY = 4;
+const MAX_SEARCH_NODES = 6000;
+
+// How many of the opponent's own top-scoring (by THEIR greedy heuristic)
+// replies to consider when folding in their turn, rather than just their
+// single best — the AI then defends against the WORST of those for
+// itself, instead of assuming the opponent always plays their literal
+// single greediest option. Kept small: this cost multiplies the "turn
+// just passed" leaf case, and the opponent's own turn is still never
+// searched further beyond these replies (see this file's own note above
+// on why not — hidden information about their hand/deck).
+const OPPONENT_REPLY_BREADTH = 3;
 
 // Static board evaluation — the search's leaf value function. Kept
 // intentionally compact (life totals, board material, hand size) rather
 // than a deep per-card evaluator, matching this file's own established
 // "greedy/shallow, not a full effect simulator" philosophy elsewhere — the
 // search gets its power from looking a step ahead with this, not from a
-// heavier evaluation function.
-const evaluateState = (state, playerId) => {
+// heavier evaluation function. Exported for direct testing (ai.test.js) —
+// otherwise only used internally below.
+export const evaluateState = (state, playerId) => {
   const opponentId = opponentIdOf(playerId);
   if (state.phase === 'gameover') {
     if (state.winner === playerId) return 1_000_000;
@@ -373,7 +411,83 @@ const valueOfCandidate = (state, playerId, action, plyBudget, budget) => {
   if (action.type === 'RESOLVE_MODULATE' && action.cellId && state.board[action.cellId]?.type === 'prophecy') {
     return modulateProphecyLookaheadValue(gameReducer(state, action), playerId, action.cellId);
   }
+  // A "toggle candidates in, then confirm" pendingChoice (kind always ends
+  // in '-toggle' by convention — sacrifice-x-toggle, shuffle-purgatory-
+  // toggle, etc.; Match.jsx's own TOGGLE_CHOICE_KINDS enumerates the exact
+  // set) doesn't change any board material/lifespan/hand size at all until
+  // CONFIRM finally commits — a toggle is "free" to the generic recursive
+  // searchValue below, which has no notion that probing further here is a
+  // no-progress round trip. Found via self-play: that made the search
+  // prefer flip-flopping a toggle forever over ever committing, since
+  // "keep exploring, don't commit yet" always looked at least marginally
+  // as good as confirming/declining in a myopic per-node comparison — a
+  // genuine, reachable infinite loop (a real `sacrifice-x-toggle` with
+  // CONFIRM legal and clearly correct scored only 47.5 by search vs. 51
+  // for un-toggling the very candidate it had just added). scoreAction
+  // already has the correct, deliberate anti-loop ranking for exactly this
+  // shape (toggle-new-candidate > confirm > toggle-existing-candidate >
+  // pass) — reused directly here for EVERY sibling option at this same
+  // decision point (toggle, confirm, AND decline alike, so they stay on
+  // one consistent scale and remain comparable against each other) instead
+  // of letting the generic recursion re-discover, and sometimes get wrong,
+  // the same thing. Gated on the pendingChoice's own kind specifically
+  // (not just the action's own '_TOGGLE'/'_CONFIRM'/RESOLVE_DECLINE
+  // suffix) so an unrelated RESOLVE_DECLINE on a completely different,
+  // non-toggle optional choice (e.g. an optional Modulate) still gets the
+  // full recursive search it deserves — this only short-circuits the
+  // specific toggle-then-confirm shape that's actually vulnerable to the
+  // loop. Does give up search-driven insight for the toggle sequence
+  // itself (Easy/Standard already resolve these the same way, one
+  // scoreAction-ranked step at a time), a deliberate, low-risk trade for a
+  // class of decision that was outright broken otherwise.
+  if (state.pendingChoice?.kind?.endsWith('-toggle')
+    && (action.type.endsWith('_TOGGLE') || action.type.endsWith('_CONFIRM') || action.type === 'RESOLVE_DECLINE')) {
+    return scoreAction(state, action, playerId);
+  }
   return searchValue(gameReducer(state, action), playerId, plyBudget, budget);
+};
+
+// The worst outcome (for `playerId`) among the opponent's own top
+// OPPONENT_REPLY_BREADTH greedy replies — replaces assuming they always
+// play their single most greedy-by-their-own-metric move. Each simulated
+// reply spends one more of the shared node budget; degrades gracefully to
+// fewer replies (down to the old single-best behavior, or the plain
+// static eval with zero) once the budget runs low, same as every other
+// budget-limited loop in this file. Exported for direct testing
+// (ai.test.js) — otherwise only used internally below.
+export const opponentReplyValue = (state, playerId, budget) => {
+  const opponentId = opponentIdOf(playerId);
+  const opponentActions = getLegalActions(state, opponentId);
+  if (opponentActions.length === 0) return evaluateState(state, playerId);
+  const sorted = bestFirst(state, opponentId, opponentActions);
+  // Only defend against replies genuinely close to the opponent's own
+  // best-scoring option, not just literally top-N by rank — without this,
+  // a much-lower-scored "last resort" option (PASS_TURN, scored -100, see
+  // scoreAction) can still get pulled into the worst-case check purely
+  // because it's one of only 2-3 legal actions, and its simulated outcome
+  // can be catastrophic for reasons that have nothing to do with the
+  // opponent making a good choice (e.g. it simply lets a later turn
+  // boundary happen sooner, tripping over some other, unrelated mid-game
+  // event) — that's not a real threat to defend against, it's noise from
+  // treating an option the opponent would never actually take as if it
+  // were a live possibility. A positive top score is halved for the
+  // cutoff (a real relative-closeness bar); a non-positive top score
+  // means every legal option already looks bad to the opponent, so
+  // there's nothing meaningfully "close" to widen into — just use their
+  // single best.
+  const topScore = scoreAction(state, sorted[0], opponentId);
+  const threshold = topScore > 0 ? topScore / 2 : topScore;
+  const candidates = sorted
+    .filter(action => scoreAction(state, action, opponentId) >= threshold)
+    .slice(0, OPPONENT_REPLY_BREADTH);
+  let worst = Infinity;
+  candidates.forEach(action => {
+    if (budget.remaining <= 0) return;
+    budget.remaining -= 1;
+    const value = evaluateState(gameReducer(state, action), playerId);
+    if (value < worst) worst = value;
+  });
+  return worst === Infinity ? evaluateState(state, playerId) : worst;
 };
 
 // The value of `state` from `playerId`'s own perspective, `plyBudget` of
@@ -387,7 +501,7 @@ const searchValue = (state, playerId, plyBudget, budget) => {
   if (state.phase === 'gameover' || budget.remaining <= 0) return evaluateState(state, playerId);
   if (stillToAct(state, playerId)) {
     if (plyBudget <= 0) return evaluateState(state, playerId);
-    const actions = getLegalActions(state, playerId);
+    const actions = bestFirst(state, playerId, getLegalActions(state, playerId));
     if (actions.length === 0) return evaluateState(state, playerId);
     let best = -Infinity;
     actions.forEach(action => {
@@ -398,18 +512,14 @@ const searchValue = (state, playerId, plyBudget, budget) => {
     });
     return best === -Infinity ? evaluateState(state, playerId) : best;
   }
-  // Turn or priority actually passed to the opponent — one ply of their
-  // own best greedy reply (falling back to the plain static eval if they
-  // genuinely have no legal response at all), then evaluate from my own
-  // perspective.
-  const opponentId = opponentIdOf(playerId);
-  const opponentAction = pickGreedyAction(state, opponentId);
-  const afterOpponent = opponentAction ? gameReducer(state, opponentAction) : state;
-  return evaluateState(afterOpponent, playerId);
+  // Turn or priority actually passed to the opponent — fold in their own
+  // top few greedy replies and defend against the worst of them (see
+  // opponentReplyValue, above), then evaluate from my own perspective.
+  return opponentReplyValue(state, playerId, budget);
 };
 
 const pickHardAction = (state, playerId) => {
-  const actions = getLegalActions(state, playerId);
+  const actions = bestFirst(state, playerId, getLegalActions(state, playerId));
   if (actions.length === 0) return null;
   const budget = { remaining: MAX_SEARCH_NODES };
   let best = actions[0];
