@@ -248,18 +248,20 @@ const singleCellChoiceLabel = (pendingChoice) => {
       return `${cardName}: choose a highlighted target (or a player below) to restore ${pendingChoice.amount} Lifespan to.`;
     case 'damage-target':
       // Immen Gorta's own Boundless Hunger bounce loop (placeReturnedFromShift/
-      // continueBoundlessHungerBounce, actions.js) pauses on a real target
-      // choice for each of its first 3 illustrated returns before the loop is
-      // declared — bounceCount is 0/1/2, so step (bounceCount + 1) of 3.
-      // Without this, all 3 identical-looking prompts in a row (then a sudden
-      // game-over) gave no indication anything beyond an ordinary damage
-      // choice was happening.
+      // resolvePendingResolution's 'boundless-hunger-*' kinds, actions.js)
+      // pauses on a real target choice for each of its first 5 illustrated
+      // returns before the loop is declared — bounceCount is 0-4, so step
+      // (bounceCount + 1) of 5. Without this, all 5 identical-looking
+      // prompts in a row (then a sudden game-over) gave no indication
+      // anything beyond an ordinary damage choice was happening.
       return pendingChoice.boundlessHunger
-        ? `Boundless Hunger loop — step ${pendingChoice.boundlessHunger.bounceCount + 1} of 3: choose a highlighted target for ${cardName}'s ${pendingChoice.damage} damage.`
-          + (pendingChoice.boundlessHunger.bounceCount === 2 ? ' Resolving this completes the loop and wins the game.' : '')
+        ? `Boundless Hunger loop — step ${pendingChoice.boundlessHunger.bounceCount + 1} of 5: choose a highlighted target for ${cardName}'s ${pendingChoice.damage} damage.`
+          + (pendingChoice.boundlessHunger.bounceCount === 4 ? ' Resolving this completes the loop and wins the game.' : '')
         : `${cardName}: choose a highlighted ${pendingChoice.typing || 'Being'} to take ${pendingChoice.damage} damage.`;
     case 'destroy-permanent':
       return `${cardName}: choose a highlighted permanent to destroy.`;
+    case 'target-prophecy':
+      return `${cardName}: choose a highlighted Prophecy to negate.`;
     case 'strength-set-eot':
       return `${cardName}: choose a highlighted Being to set its Strength to ${pendingChoice.amount} until end of turn.`;
     case 'reveal-prophecy':
@@ -355,6 +357,28 @@ const singleCellChoiceLabel = (pendingChoice) => {
     default:
       return `${cardName}: choose a highlighted tile.`;
   }
+};
+
+// The Boundless Hunger loop's own reactive windows (actions.js >
+// manageReactiveWindow's re-arm block, one of the 3 'boundless-hunger-*'
+// pendingResolution kinds) all fall back to the generic last-log-line
+// triggerDescription like any other window — accurate, but reads as 4
+// unrelated-looking prompts per bounce rather than one legible, paced
+// sequence. This overrides that fallback with a stage-specific label
+// whenever the currently-open window is one of these three, so "slow down
+// and show each step" (the user's own framing) is visible at every pause,
+// not just inferable from the log.
+const BOUNDLESS_HUNGER_STAGE_LABELS = {
+  'boundless-hunger-return': 'Immen Gorta returns to the Mortal Realm',
+  'boundless-hunger-reshift': 'Mouth of Madness reshifts it to the Ethereal Realm',
+  'boundless-hunger-terranean-gates': "Terranean Gates strips its Time Counters",
+};
+const reactiveWindowBannerText = (state) => {
+  const kind = state.pendingResolution?.kind;
+  const stageLabel = BOUNDLESS_HUNGER_STAGE_LABELS[kind];
+  if (!stageLabel) return state.reactiveWindow?.triggerDescription;
+  const bounceCount = state.pendingResolution.bounceCount ?? 0;
+  return `Boundless Hunger loop — step ${bounceCount + 1} of 5 (${stageLabel})…`;
 };
 
 function formatDuration(ms) {
@@ -3032,9 +3056,9 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
                 above (PASS_TURN, isHumanTurn-gated). */}
             {state.reactiveWindow?.openFor === HUMAN && (
               <div className={`${ROW_H} flex flex-col justify-center gap-1`}>
-                {state.reactiveWindow.triggerDescription && (
+                {reactiveWindowBannerText(state) && (
                   <p className="text-lg font-semibold leading-snug text-stone-200 line-clamp-3">
-                    {state.reactiveWindow.triggerDescription}
+                    {reactiveWindowBannerText(state)}
                   </p>
                 )}
                 <div className="flex items-center justify-start gap-1.5 flex-wrap">

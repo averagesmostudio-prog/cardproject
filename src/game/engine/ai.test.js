@@ -515,4 +515,39 @@ describe('pickAiReaction', () => {
     const action = pickAiReaction(state, 'B');
     expect(action).toEqual({ type: 'ACTIVATE_ENGAGE', cellId: 'r4c1' });
   });
+
+  // The Boundless Hunger loop's own reactive windows (actions.js >
+  // manageReactiveWindow's 'boundless-hunger-*' re-arm block) are ordinary
+  // reactiveWindow objects — pickAiReaction needs no special-casing for
+  // them, but this confirms the AI actually doesn't stall on one (passing
+  // cleanly with nothing to respond with) and that doing so lets the loop's
+  // own chain keep advancing rather than getting stuck waiting forever.
+  it('does not stall on a Boundless Hunger reactive window — passes, and the loop keeps advancing', () => {
+    const state = baseState({
+      reactiveWindow: { openFor: 'B', triggerDescription: 'test', everResponded: false, passedOnce: false },
+      pendingResolution: {
+        kind: 'boundless-hunger-return', ownerId: 'A', cellId: 'r2c1',
+        cardName: 'Immen Gorta, the Boundless Hunger', instanceId: 'immen#0', bounceCount: 0,
+      },
+      board: {
+        r2c1: {
+          type: 'being', ownerId: 'A', engaged: true, currentLifespan: 4,
+          card: {
+            id: 'immen', instanceId: 'immen#0', name: 'Immen Gorta, the Boundless Hunger', lifespan: 4,
+            keywords: { onMovedIntoMortalRealm: 'deal (1) damage to any target.' },
+          },
+        },
+      },
+      players: { A: player({ id: 'A' }), B: player({ id: 'B' }) },
+    });
+    const action = pickAiReaction(state, 'B');
+    expect(action).toEqual({ type: 'PASS_PRIORITY' });
+    const next = gameReducer(state, action);
+    // The AI's pass closed the window and resolved the deferred reaction —
+    // the loop advanced to Immen Gorta's own real damage-target choice
+    // rather than stalling on the window it just passed.
+    expect(next.pendingChoice).toEqual(expect.objectContaining({
+      kind: 'damage-target', boundlessHunger: expect.objectContaining({ bounceCount: 0 }),
+    }));
+  });
 });

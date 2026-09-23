@@ -5945,7 +5945,7 @@ const relicWithKeywordAnywhere = (board, keywordField) => {
 // need it, so the "if it moves into the Mortal Realm this turn Disengage
 // it" half still applies even when the resulting return needs its own
 // real player choice along the way.
-const performShift = (state, playerId, fromCellId, toCellId, shiftOverride = null, duringEndStep = false, bounceCount = 0, postShiftLoseAmount = 0) => {
+const performShift = (state, playerId, fromCellId, toCellId, shiftOverride = null, duringEndStep = false, bounceCount = 0, postShiftLoseAmount = 0, deferTerraneanGates = false) => {
   const occupant = state.board[fromCellId];
   const shift = shiftOverride || occupant.card.keywords.shift;
   const board = { ...state.board };
@@ -5966,8 +5966,26 @@ const performShift = (state, playerId, fromCellId, toCellId, shiftOverride = nul
   // incremented again here — it only counts real activations (each return
   // trip, in placeReturnedFromShift below), not this purely mechanical
   // "immediately hits 0 again" continuation on the way back to the next one.
+  // `deferTerraneanGates` (Boundless Hunger only — set true by
+  // resolvePendingResolution's own 'boundless-hunger-reshift' branch below)
+  // opens a real reactive window here instead of applying this inline, so
+  // the opponent gets a genuine chance to destroy Terranean Gates before it
+  // strips the Time Counters that would otherwise immediately bounce Immen
+  // Gorta back again — see the 'boundless-hunger-terranean-gates'
+  // pendingResolution kind, which is what actually applies this once that
+  // window closes. Every other caller leaves this false and stays fully
+  // synchronous, unchanged.
   if (duringEndStep && bounceCount < 100) {
     const loseAmount = relicWithKeywordAnywhere(next.board, 'duringEndStepLoseTimeCounters');
+    if (loseAmount && deferTerraneanGates) {
+      return {
+        ...next,
+        pendingResolution: {
+          kind: 'boundless-hunger-terranean-gates', ownerId: playerId, cellId: toCellId,
+          cardInstanceId: occupant.card.instanceId, cardName: occupant.card.name, bounceCount,
+        },
+      };
+    }
     if (loseAmount) {
       const current = next.board[toCellId];
       const timer = Math.max(0, (current?.timer || 0) - loseAmount);
@@ -5999,14 +6017,14 @@ const performShift = (state, playerId, fromCellId, toCellId, shiftOverride = nul
 // always auto-picks the first empty tile instead of ever opening a
 // pendingChoice — a hundred-iteration automatic bounce cascade has no
 // natural pause point to ask the player anything.
-const offerOrPerformShift = (state, playerId, fromCellId, shiftOverride = null, duringEndStep = false, bounceCount = 0, postShiftLoseAmount = 0) => {
+const offerOrPerformShift = (state, playerId, fromCellId, shiftOverride = null, duringEndStep = false, bounceCount = 0, postShiftLoseAmount = 0, deferTerraneanGates = false) => {
   const occupant = state.board[fromCellId];
   const emptyEthereal = ETHEREAL_CELLS.filter(c => !state.board[c]);
   if (emptyEthereal.length === 0) {
     return addLog(state, `${occupant.card.name} has no empty tile in the Ethereal Realm to Shift onto.`);
   }
   if (emptyEthereal.length === 1 || duringEndStep) {
-    return performShift(state, playerId, fromCellId, emptyEthereal[0], shiftOverride, duringEndStep, bounceCount, postShiftLoseAmount);
+    return performShift(state, playerId, fromCellId, emptyEthereal[0], shiftOverride, duringEndStep, bounceCount, postShiftLoseAmount, deferTerraneanGates);
   }
   let next = addLog(state, `${playerId} Shifts ${occupant.card.name} and chooses an Ethereal Realm tile.`);
   return { ...next, pendingChoice: { kind: 'shift-destination', playerId, fromCellId, shiftOverride, postShiftLoseAmount, allowedCells: emptyEthereal } };
@@ -6022,7 +6040,7 @@ const offerOrPerformShift = (state, playerId, fromCellId, shiftOverride = null, 
 // genuine re-summon (returnAsSummon, below) instead of the ordinary
 // Shift-return's own "no cost, no When Summoned" treatment — see
 // resolveProphecyModulateHitZero's own fork.
-const shiftFromPurgatory = (state, playerId, card, toCellId, amount, returnsAsSummon = false) => {
+const shiftFromPurgatory = (state, playerId, card, toCellId, amount, returnsAsSummon = false, resolvesAsConjuring = false) => {
   const board = { ...state.board };
   board[toCellId] = {
     type: 'prophecy', ownerId: playerId,
@@ -6165,30 +6183,37 @@ const placeReturnedFromShift = (state, cellId, toCellId, duringEndStep = false, 
   delete board[cellId];
   board[toCellId] = { type: 'being', ownerId: occupant.ownerId, card, currentLifespan: card.lifespan, engaged: true };
   let next = addLog({ ...state, board }, `${card.name} moves into the Mortal Realm at ${toCellId}, Engaged.`);
+  // Bypass the real "any target" choice only for a card OTHER than Immen
+  // Gorta sharing this forced-bounce shape (no real card does today —
+  // see the 100-bounce-cap test) — it has nowhere safe to pause across
+  // up to 100 automatic bounces. Immen Gorta itself now always gets a
+  // real choice (see isBoundlessHungerCard below), and defers its own
+  // reaction (plus every remaining step of this bounce iteration — Mouth
+  // of Madness's forced re-Shift, Terranean Gates' Time Counter loss)
+  // behind a real reactive window instead of resolving them inline here.
+  const activeBounceLoop = duringEndStep && !!relicWithKeywordAnywhere(state.board, 'duringEndStepForceShift');
+  const isBoundlessHungerCard = card.name === 'Immen Gorta, the Boundless Hunger';
+  // Confirmed interruptible with the user: this whole iteration used to
+  // resolve synchronously in one call once the target was chosen. Now it
+  // only sets `pendingResolution` and returns — manageReactiveWindow's own
+  // 'boundless-hunger-*' re-arm block (below, near resolvePendingResolution)
+  // is what actually opens a window for it, letting the opponent respond
+  // (e.g. destroy Immen Gorta) before the reaction even fires.
+  if (activeBounceLoop && isBoundlessHungerCard) {
+    return {
+      ...next,
+      pendingResolution: {
+        kind: 'boundless-hunger-return', ownerId: occupant.ownerId, cellId: toCellId,
+        cardName: card.name, instanceId: card.instanceId, bounceCount,
+      },
+    };
+  }
   const reaction = card.keywords?.onMovedIntoMortalRealm;
   if (reaction) {
-    // Bypass the real "any target" choice only for a card OTHER than Immen
-    // Gorta sharing this forced-bounce shape (no real card does today —
-    // see the 100-bounce-cap test) — it has nowhere safe to pause across
-    // up to 100 automatic bounces. Immen Gorta itself now always gets a
-    // real choice (see isBoundlessHungerCard below), deferring the forced
-    // re-Shift via a `boundlessHunger` continuation instead of bypassing.
-    const activeBounceLoop = duringEndStep && !!relicWithKeywordAnywhere(state.board, 'duringEndStepForceShift');
-    const isBoundlessHungerCard = card.name === 'Immen Gorta, the Boundless Hunger';
     next = resolveOrLogEffect(next, occupant.ownerId, card.name, reaction, 'Reaction', {
       selfCellId: toCellId,
-      ...(activeBounceLoop && !isBoundlessHungerCard ? { autoTargetOpponentId: opponentOf(occupant.ownerId) } : {}),
+      ...(activeBounceLoop ? { autoTargetOpponentId: opponentOf(occupant.ownerId) } : {}),
     });
-    // The player just chose (or is about to choose) where Immen Gorta's
-    // damage goes for this iteration — forcing the next Shift, or
-    // declaring the loop win, has to wait for that choice to actually
-    // resolve (RESOLVE_DAMAGE_TARGET / RESOLVE_DAMAGE_TARGET_PLAYER below
-    // call continueBoundlessHungerBounce once it does), so bail out here
-    // rather than falling through to the forced-reshift/disengage/legend-
-    // rule tail below.
-    if (next.pendingChoice && activeBounceLoop && isBoundlessHungerCard) {
-      return { ...next, pendingChoice: { ...next.pendingChoice, boundlessHunger: { toCellId, ownerId: occupant.ownerId, card, bounceCount } } };
-    }
   }
   // Mouth of Madness: "If a Being moves into the Mortal Realm during End
   // Phase it Shifts (X)." — the other half of the bounce loop, forcing
@@ -6196,7 +6221,11 @@ const placeReturnedFromShift = (state, cellId, toCellId, duringEndStep = false, 
   // (not the Being's own Shift, if it even has one). `bounceCount + 1`
   // here is the one real increment in the whole cascade — it counts
   // completed activations (this return trip, which already dealt its own
-  // damage above), capped at 100 as the user's own hard safety stop.
+  // damage above), capped at 100 as the user's own hard safety stop. Only
+  // ever reached for a card OTHER than Immen Gorta (the
+  // `isBoundlessHungerCard` early return above always claims that path) —
+  // no real card shares this shape today (see the 100-bounce-cap test),
+  // so it stays fully synchronous/unpausable, same as always.
   if (duringEndStep && bounceCount < 100) {
     const forceAmount = relicWithKeywordAnywhere(next.board, 'duringEndStepForceShift');
     if (forceAmount && next.board[toCellId]?.type === 'being') {
@@ -6236,37 +6265,6 @@ const placeReturnedFromShift = (state, cellId, toCellId, duringEndStep = false, 
   return retryStuckShiftReturns(next, landDisengaged);
 };
 
-// Picks the Boundless Hunger bounce loop back up once Immen Gorta's own
-// per-iteration "any target" damage choice (stashed as `boundlessHunger`
-// on the pendingChoice by placeReturnedFromShift above) actually resolves.
-// Called from RESOLVE_DAMAGE_TARGET / RESOLVE_DAMAGE_TARGET_PLAYER below,
-// after the damage itself has already been applied. `bounceCount` is 0 on
-// Immen Gorta's first (non-forced) return, so the 3rd illustrated choice
-// (the loop's 3rd return) is bounceCount === 2 — per the user's own
-// ruling, the controller gets a real target choice for all 3 (unlike the
-// old auto-bypass, which silently skipped the first 2 and skipped dealing
-// any damage at all for the 3rd), and only once that 3rd choice resolves
-// does the loop get declared and the game move to the loop screen.
-const continueBoundlessHungerBounce = (state, { toCellId, ownerId, card, bounceCount }) => {
-  if (bounceCount === 2) {
-    const mouthOfMadness = Object.values(state.board).find(o => o?.type === 'relic' && o.card.keywords?.duringEndStepForceShift)?.card;
-    const terraneanGates = Object.values(state.board).find(o => o?.type === 'relic' && o.card.keywords?.duringEndStepLoseTimeCounters)?.card;
-    const loopNext = addLog(state, `${ownerId} has assembled the Boundless Hunger loop (Mouth of Madness + Terranean Gates + ${card.name}) — ${opponentOf(ownerId)} concedes.`);
-    return {
-      ...loopNext,
-      phase: 'gameover',
-      winner: ownerId,
-      loopWin: { winnerId: ownerId, cards: [mouthOfMadness, terraneanGates, card].filter(Boolean) },
-    };
-  }
-  const forceAmount = relicWithKeywordAnywhere(state.board, 'duringEndStepForceShift');
-  if (forceAmount && state.board[toCellId]?.type === 'being') {
-    const next = addLog(state, `${card.name} is forced to Shift again (Mouth of Madness).`);
-    return offerOrPerformShift(next, ownerId, toCellId, { amount: forceAmount, effect: null }, true, bounceCount + 1);
-  }
-  return state;
-};
-
 // Shift's own return trip, fired from resolveProphecyModulateHitZero below
 // once a shifted Prophecy's Time Counters reach 0 — same free-choice-
 // among-empty-tiles precedent as SUMMON_BEING/token placement (auto-place
@@ -6295,7 +6293,12 @@ const returnFromShift = (state, cellId, duringEndStep = false, bounceCount = 0, 
   if (emptyCells.length === 1 || duringEndStep) {
     return placeReturnedFromShift(state, cellId, emptyCells[0], duringEndStep, bounceCount, disengageOnReturn, landDisengaged);
   }
-  if (state.pendingChoice) {
+  // Also waits on an open `pendingResolution` now, not just `pendingChoice`
+  // — a Boundless Hunger iteration in progress elsewhere on the board (see
+  // placeReturnedFromShift's own 'boundless-hunger-return' pendingResolution)
+  // leaves one lying around across several dispatches, and a second,
+  // unrelated shifted Being returning here shouldn't clobber it.
+  if (state.pendingChoice || state.pendingResolution) {
     return addLog(state, `${card.name}'s return from the Ethereal Realm doesn't resolve yet — still waiting on an earlier choice.`);
   }
   let next = addLog(state, `${occupant.ownerId} chooses where ${card.name} returns to the Mortal Realm.`);
@@ -11473,11 +11476,21 @@ const gameReducerCore = (state, action) => {
       // Brick: "...then move Brick to the tile occupied by the targeted
       // Being." — the move follows the choice, same as the damage does.
       if (thenMoveArmament) next = moveNamedArmamentToTile(next, thenMoveArmament, action.cellId);
-      // Immen Gorta's own Boundless Hunger bounce loop (see
-      // continueBoundlessHungerBounce) — this damage choice was one of the
-      // loop's 3 illustrated iterations, so pick the bounce back up now
-      // that it's actually resolved.
-      if (boundlessHunger) next = continueBoundlessHungerBounce(next, boundlessHunger);
+      // Immen Gorta's own Boundless Hunger bounce loop — this damage choice
+      // was one of the loop's 5 illustrated iterations, so defer the rest of
+      // this iteration (Mouth of Madness's forced re-Shift, or the loop-win
+      // declaration on the 5th) behind its own reactive window instead of
+      // resolving it inline — see the 'boundless-hunger-reshift'
+      // pendingResolution kind in resolvePendingResolution below.
+      if (boundlessHunger) {
+        next = {
+          ...next,
+          pendingResolution: {
+            kind: 'boundless-hunger-reshift', ownerId: boundlessHunger.ownerId, cellId: boundlessHunger.toCellId,
+            cardInstanceId: boundlessHunger.cardInstanceId, cardName: boundlessHunger.cardName, bounceCount: boundlessHunger.bounceCount,
+          },
+        };
+      }
       return next;
     }
 
@@ -11497,7 +11510,15 @@ const gameReducerCore = (state, action) => {
       };
       next = addLog(next, `${playerId} chooses ${targetPlayerId}'s Lifespan to take ${cardName}'s ${damage} damage.`);
       // See the matching comment in RESOLVE_DAMAGE_TARGET above.
-      if (boundlessHunger) next = continueBoundlessHungerBounce(next, boundlessHunger);
+      if (boundlessHunger) {
+        next = {
+          ...next,
+          pendingResolution: {
+            kind: 'boundless-hunger-reshift', ownerId: boundlessHunger.ownerId, cellId: boundlessHunger.toCellId,
+            cardInstanceId: boundlessHunger.cardInstanceId, cardName: boundlessHunger.cardName, bounceCount: boundlessHunger.bounceCount,
+          },
+        };
+      }
       return checkWin(next);
     }
 
@@ -14489,6 +14510,100 @@ const resolvePendingResolution = (state) => {
     // one rather than opening its own.
     return resolveAttackFrom(cleared, declaringPlayer, fromCellId, !!noDamage);
   }
+  if (pendingResolution.kind === 'cast-conjuring') {
+    const { declaringPlayer, cardName, textBox, instanceId } = pendingResolution;
+    // Re-validated fresh: Waning Words' own resolution already pulled the
+    // card back out of purgatory (converting it into a face-up Prophecy
+    // instead), so this check fails and the effect fizzles here for free —
+    // the exact same "still there?" precedent the 'summon-being' branch
+    // above uses for Delay.
+    const stillThere = cleared.players[declaringPlayer]?.purgatory.some(c => c.instanceId === instanceId);
+    if (!stillThere) {
+      return addLog(cleared, `${cardName}'s effect fizzles — it's no longer in Purgatory.`);
+    }
+    return resolveOrLogEffect(cleared, declaringPlayer, cardName, textBox, 'effect');
+  }
+  // The Boundless Hunger loop (Immen Gorta + Mouth of Madness + Terranean
+  // Gates — confirmed intentional, and confirmed interruptible, with the
+  // user): one bounce iteration is four steps — return to the Mortal
+  // Realm, Immen Gorta's own damage trigger, Mouth of Madness's forced
+  // re-Shift, Terranean Gates' Time Counter loss — chained across these
+  // three kinds, each opening its own reactive window via
+  // manageReactiveWindow's own 'boundless-hunger-*' re-arm block below,
+  // instead of the old single synchronous call stack. Every branch
+  // re-validates its own piece of the combo is still on the battlefield
+  // before acting — a response during any of these windows (destroying
+  // Immen Gorta, Mouth of Madness, or Terranean Gates) simply stops the
+  // loop here rather than crashing on stale board data, same "never trust
+  // stale data across a window" discipline every kind above already
+  // follows.
+  if (pendingResolution.kind === 'boundless-hunger-return') {
+    const { ownerId, cellId, cardName, instanceId, bounceCount } = pendingResolution;
+    const occupant = cleared.board[cellId];
+    if (!occupant || occupant.type !== 'being' || occupant.card.instanceId !== instanceId) {
+      return addLog(cleared, `${cardName}'s Boundless Hunger loop fizzles — it's no longer on the battlefield.`);
+    }
+    let next = resolveOrLogEffect(cleared, ownerId, cardName, occupant.card.keywords?.onMovedIntoMortalRealm, 'Reaction', { selfCellId: cellId });
+    const boundlessHunger = { toCellId: cellId, ownerId, cardInstanceId: instanceId, cardName, bounceCount };
+    // The damage choice almost always opens (any-target damage always has
+    // at least both players' own Lifespan as legal targets) — the
+    // fallback below (continue straight to the reshift step) only matters
+    // for a hypothetical future card sharing this shape with no legal
+    // targets at all.
+    if (next.pendingChoice) {
+      return { ...next, pendingChoice: { ...next.pendingChoice, boundlessHunger } };
+    }
+    return { ...next, pendingResolution: { kind: 'boundless-hunger-reshift', ...boundlessHunger } };
+  }
+  if (pendingResolution.kind === 'boundless-hunger-reshift') {
+    const { ownerId, cellId, cardInstanceId, cardName, bounceCount } = pendingResolution;
+    const occupant = cleared.board[cellId];
+    if (!occupant || occupant.type !== 'being' || occupant.card.instanceId !== cardInstanceId) {
+      return addLog(cleared, `${cardName}'s Boundless Hunger loop fizzles — it's no longer on the battlefield.`);
+    }
+    const forceAmount = relicWithKeywordAnywhere(cleared.board, 'duringEndStepForceShift');
+    if (!forceAmount) {
+      return addLog(cleared, `${cardName}'s Boundless Hunger loop stops — Mouth of Madness is no longer on the battlefield.`);
+    }
+    // The controller gets a real target choice for all 5 illustrated
+    // returns (bounceCount 0-4) — only once the 5th (bounceCount === 4)
+    // actually resolves does the loop get declared, same "auto-win-at-5"
+    // ruling as before, just now re-validated against a response from
+    // this same trailing window before the win is locked in.
+    if (bounceCount === 4) {
+      const mouthOfMadness = Object.values(cleared.board).find(o => o?.type === 'relic' && o.card.keywords?.duringEndStepForceShift)?.card;
+      const terraneanGates = Object.values(cleared.board).find(o => o?.type === 'relic' && o.card.keywords?.duringEndStepLoseTimeCounters)?.card;
+      if (!terraneanGates) {
+        return addLog(cleared, `${cardName}'s Boundless Hunger loop stops — Terranean Gates is no longer on the battlefield.`);
+      }
+      const loopNext = addLog(cleared, `${ownerId} has assembled the Boundless Hunger loop (Mouth of Madness + Terranean Gates + ${cardName}) — ${opponentOf(ownerId)} concedes.`);
+      return {
+        ...loopNext,
+        phase: 'gameover',
+        winner: ownerId,
+        loopWin: { winnerId: ownerId, cards: [mouthOfMadness, terraneanGates, occupant.card].filter(Boolean) },
+      };
+    }
+    let next = addLog(cleared, `${cardName} is forced to Shift again (Mouth of Madness).`);
+    return offerOrPerformShift(next, ownerId, cellId, { amount: forceAmount, effect: null }, true, bounceCount + 1, 0, true);
+  }
+  if (pendingResolution.kind === 'boundless-hunger-terranean-gates') {
+    const { cellId, cardInstanceId, cardName, bounceCount } = pendingResolution;
+    const occupant = cleared.board[cellId];
+    if (!occupant || occupant.type !== 'prophecy' || occupant.shiftedFromCard?.instanceId !== cardInstanceId) {
+      return addLog(cleared, `${cardName}'s Boundless Hunger loop fizzles — it's no longer on the battlefield.`);
+    }
+    const loseAmount = relicWithKeywordAnywhere(cleared.board, 'duringEndStepLoseTimeCounters');
+    if (!loseAmount) {
+      return addLog(cleared, `${cardName}'s Boundless Hunger loop stops — Terranean Gates is no longer on the battlefield.`);
+    }
+    const timer = Math.max(0, (occupant.timer || 0) - loseAmount);
+    let next = addLog(
+      { ...cleared, board: { ...cleared.board, [cellId]: { ...occupant, timer } } },
+      `${cardName} loses ${loseAmount} Time Counter(s) (Terranean Gates).`
+    );
+    return resolveProphecyModulateHitZero(next, cellId, true, bounceCount);
+  }
   return cleared;
 };
 //
@@ -14565,6 +14680,12 @@ const manageReactiveWindow = (prevState, state, action) => {
   }
 
   const REACTIVE_RESPONSE_ACTION_TYPES = new Set(['CAST_CONJURING', 'ACTIVATE_ENGAGE', 'ACTIVATE_GROUND_RELIC_ENGAGE', 'ACTIVATE_ARMAMENT_ENGAGE']);
+  // The Boundless Hunger loop's own three pendingResolution kinds (see
+  // resolvePendingResolution above) are the only ones that ever produce a
+  // FRESH pendingResolution on their way out — every other kind is
+  // terminal. Scoped by name (not "any pendingResolution") since no other
+  // kind is designed to chain like this — see the two uses below.
+  const BOUNDLESS_HUNGER_PENDING_KINDS = new Set(['boundless-hunger-return', 'boundless-hunger-reshift', 'boundless-hunger-terranean-gates']);
   // The whole point of the window is "someone else just did something you
   // might want to respond to" — so it carries a human-readable description
   // of exactly what that was, shown above the Pass Priority button
@@ -14609,13 +14730,22 @@ const manageReactiveWindow = (prevState, state, action) => {
     // No window was open — did a real, complete action just happen that
     // the OTHER player might want to respond to? A no-op dispatch (state
     // unchanged) or one of a small set of action types never opens one:
-    // PASS_TURN (its own begin/endTurn pipeline stays atomic within this
-    // one dispatch — a deliberate, documented scope boundary, not an
-    // oversight), the test-only recompute sentinel, and the mulligan
-    // actions (redundant with the phase check above, kept explicit).
+    // the test-only recompute sentinel and the mulligan actions (redundant
+    // with the phase check above, kept explicit). PASS_TURN is the same
+    // deliberate scope boundary — its own begin/endTurn pipeline stays
+    // atomic within this one dispatch — EXCEPT when it just kicked off a
+    // Boundless Hunger iteration (applyEndOfTurnShiftDecay, deep inside
+    // endTurn, is what first sets a 'boundless-hunger-return'
+    // pendingResolution): that one case needs a window opened for it here,
+    // or the whole interruptible-loop mechanism never gets its first pause.
+    // endTurn's own remaining steps (turn switch, draw, etc.) still run to
+    // completion synchronously in this same dispatch either way — same
+    // precedent applyEndOfTurnDamageNamedFamily's own pendingChoice already
+    // establishes (turn.js).
     if (state === prevState) return next;
-    const NON_REACTIVE_ACTION_TYPES = new Set(['PASS_TURN', '__TEST_RECOMPUTE_ONLY__', 'MULLIGAN', 'KEEP_HAND']);
+    const NON_REACTIVE_ACTION_TYPES = new Set(['__TEST_RECOMPUTE_ONLY__', 'MULLIGAN', 'KEEP_HAND']);
     if (NON_REACTIVE_ACTION_TYPES.has(action.type)) return next;
+    if (action.type === 'PASS_TURN' && !BOUNDLESS_HUNGER_PENDING_KINDS.has(state.pendingResolution?.kind)) return next;
     // The real actor isn't always prevState.turnPlayer — a RESOLVE_*
     // finishing a multi-step pendingChoice chain can be dispatched by
     // EITHER player (getLegalActions' own pendingChoice branch already
@@ -14637,7 +14767,31 @@ const manageReactiveWindow = (prevState, state, action) => {
   // PASS_PRIORITY a player has to make once a genuine response chain
   // (`everResponded: true`) is already underway and they held a further
   // response they chose not to use.
-  while (next.reactiveWindow) {
+  //
+  // Re-arm, checked at the TOP of every iteration (not just once before
+  // this loop starts): closing a window below (passReactiveWindowPriority
+  // -> resolvePendingResolution) can itself leave a FRESH pendingResolution
+  // behind — today only the Boundless Hunger chain does this (one bounce
+  // iteration is up to 3 of these kinds in a row, each needing its own
+  // window). A one-time check before the loop would only catch the FIRST
+  // link of that chain; checking here too is what lets a whole run of
+  // auto-skipped links (nobody has anything to respond with) collapse in
+  // one dispatch, same as any other reactive window nobody can act on,
+  // while a real response at any link still stops the cascade right there.
+  // Every other pendingResolution kind is terminal, so this only ever
+  // fires for these three.
+  while (true) {
+    if (!next.reactiveWindow && next.pendingResolution && BOUNDLESS_HUNGER_PENDING_KINDS.has(next.pendingResolution.kind)) {
+      const chainedLogMessage = next.log.length > 0 ? next.log[next.log.length - 1].message : null;
+      next = {
+        ...next,
+        reactiveWindow: {
+          openFor: opponentOf(next.pendingResolution.ownerId),
+          triggerDescription: chainedLogMessage, everResponded: false, passedOnce: false,
+        },
+      };
+    }
+    if (!next.reactiveWindow) break;
     const { openFor } = next.reactiveWindow;
     const hasRealOption = getLegalActions(next, openFor).some(a => REACTIVE_RESPONSE_ACTION_TYPES.has(a.type));
     if (hasRealOption) break;

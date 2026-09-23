@@ -767,15 +767,21 @@ describe('endTurn', () => {
     const terraneanGates = { type: 'relic', ownerId: 'A', card: { id: 'gates', instanceId: 'gates#0', name: 'Terranean Gates', kind: 'relic', keywords: { duringEndStepLoseTimeCounters: 2 } } };
 
     // Regression: per the user's own later ruling, the controller now gets
-    // a REAL target choice for Immen Gorta's "any target" damage on all 3
+    // a REAL target choice for Immen Gorta's "any target" damage on all 5
     // illustrated returns (not just the ordinary no-Mouth-of-Madness case
     // below) — forcing the next Shift waits for that choice to actually
-    // resolve (continueBoundlessHungerBounce), rather than auto-hitting
-    // the opponent the instant it fires. `bounceCount` is 0 on the first
-    // (non-forced) return, so the 3rd occurrence is bounceCount === 2 —
-    // only once THAT choice resolves does the loop get declared and its
-    // controller win outright (win-by-loop, not by Lifespan exhaustion).
-    it('lets the controller choose Immen Gorta\'s target for all 3 illustrated returns, then declares the loop and ends the game', () => {
+    // resolve (resolvePendingResolution's own 'boundless-hunger-reshift'
+    // branch), rather than auto-hitting the opponent the instant it fires.
+    // `bounceCount` is 0 on the first (non-forced) return, so the 5th
+    // occurrence is bounceCount === 4 — only once THAT choice resolves does
+    // the loop get declared and its controller win outright (win-by-loop,
+    // not by Lifespan exhaustion). Interruptibility itself (a real response
+    // during one of the windows in between) is covered by its own tests
+    // below — this one exercises the plain "nobody has anything to respond
+    // with" path, where every reactive window auto-skips invisibly and only
+    // the 5 real damage-target choices are ever player-visible, same
+    // observable shape as the loop had before it became interruptible.
+    it('lets the controller choose Immen Gorta\'s target for all 5 illustrated returns, then declares the loop and ends the game', () => {
       // B needs a real mainDeck card here: unlike the original (fully
       // synchronous, no-pendingChoice) version of this loop, endTurn now
       // finishes its own turn-switch/beginTurn sequence for B (a real
@@ -789,8 +795,14 @@ describe('endTurn', () => {
         board: { r3c1: shiftedImmenGorta(1), r2c1: mouthOfMadness, r2c2: terraneanGates },
         players: { A: player(), B: player({ lifespan: 1000, mainDeck: [{ instanceId: 'd1' }] }) },
       });
-      let next = endTurn(state);
-      // 1st return: a real choice, not auto-resolved.
+      // Real (gameReducer, not bare endTurn) PASS_TURN — the loop's first
+      // pause only exists through manageReactiveWindow, which bare endTurn
+      // never runs. Neither player has anything to respond with in this
+      // fixture, so every reactive window auto-skips invisibly (same
+      // "nobody can act on it" behavior every other reactive window in this
+      // engine already has) straight through to the first real pause: the
+      // damage-target choice itself.
+      let next = gameReducer(state, { type: 'PASS_TURN' });
       expect(next.phase).toBe('playing');
       expect(next.players.B.lifespan).toBe(1000);
       expect(next.pendingChoice).toEqual(expect.objectContaining({
@@ -798,28 +810,30 @@ describe('endTurn', () => {
         boundlessHunger: expect.objectContaining({ bounceCount: 0 }),
       }));
 
-      next = gameReducer(next, { type: 'RESOLVE_DAMAGE_TARGET_PLAYER', targetPlayerId: 'B' });
-      // 2nd return: another real choice, opened by the forced re-Shift.
-      expect(next.phase).toBe('playing');
-      expect(next.players.B.lifespan).toBe(999);
-      expect(next.pendingChoice).toEqual(expect.objectContaining({
-        kind: 'damage-target', boundlessHunger: expect.objectContaining({ bounceCount: 1 }),
-      }));
+      for (let bounceCount = 1; bounceCount <= 3; bounceCount += 1) {
+        next = gameReducer(next, { type: 'RESOLVE_DAMAGE_TARGET_PLAYER', targetPlayerId: 'B' });
+        expect(next.phase).toBe('playing');
+        expect(next.players.B.lifespan).toBe(1000 - bounceCount);
+        expect(next.pendingChoice).toEqual(expect.objectContaining({
+          kind: 'damage-target', boundlessHunger: expect.objectContaining({ bounceCount }),
+        }));
+      }
 
+      // 5th (final illustrated) return: still a real choice.
       next = gameReducer(next, { type: 'RESOLVE_DAMAGE_TARGET_PLAYER', targetPlayerId: 'B' });
-      // 3rd (final illustrated) return: still a real choice, unlike the
-      // old short-circuit which skipped dealing any damage on this one.
       expect(next.phase).toBe('playing');
-      expect(next.players.B.lifespan).toBe(998);
+      expect(next.players.B.lifespan).toBe(996);
       expect(next.pendingChoice).toEqual(expect.objectContaining({
-        kind: 'damage-target', boundlessHunger: expect.objectContaining({ bounceCount: 2 }),
+        kind: 'damage-target', boundlessHunger: expect.objectContaining({ bounceCount: 4 }),
       }));
 
       next = gameReducer(next, { type: 'RESOLVE_DAMAGE_TARGET_PLAYER', targetPlayerId: 'B' });
       expect(next.phase).toBe('gameover');
       expect(next.winner).toBe('A');
-      expect(next.players.B.lifespan).toBe(997); // all 3 illustrated returns dealt real, player-chosen damage
+      expect(next.players.B.lifespan).toBe(995); // all 5 illustrated returns dealt real, player-chosen damage
       expect(next.pendingChoice).toBeFalsy();
+      expect(next.pendingResolution).toBeFalsy();
+      expect(next.reactiveWindow).toBeFalsy();
       expect(next.loopWin).toEqual({
         winnerId: 'A',
         cards: expect.arrayContaining([
@@ -837,12 +851,103 @@ describe('endTurn', () => {
         board: { r3c1: shiftedImmenGorta(1), r2c1: mouthOfMadness, r2c2: terraneanGates },
         players: { A: player(), B: player({ lifespan: 1_000_000, mainDeck: [{ instanceId: 'd1' }] }) },
       });
-      let next = endTurn(state);
+      let next = gameReducer(state, { type: 'PASS_TURN' });
+      next = gameReducer(next, { type: 'RESOLVE_DAMAGE_TARGET_PLAYER', targetPlayerId: 'B' });
+      next = gameReducer(next, { type: 'RESOLVE_DAMAGE_TARGET_PLAYER', targetPlayerId: 'B' });
       next = gameReducer(next, { type: 'RESOLVE_DAMAGE_TARGET_PLAYER', targetPlayerId: 'B' });
       next = gameReducer(next, { type: 'RESOLVE_DAMAGE_TARGET_PLAYER', targetPlayerId: 'B' });
       next = gameReducer(next, { type: 'RESOLVE_DAMAGE_TARGET_PLAYER', targetPlayerId: 'B' });
       expect(next.phase).toBe('gameover');
       expect(next.winner).toBe('A');
+    });
+
+    it('lets the opponent interrupt the loop by destroying Immen Gorta during the return window', () => {
+      const state = baseState({
+        turnPlayer: 'A',
+        board: { r3c1: shiftedImmenGorta(1), r2c1: mouthOfMadness, r2c2: terraneanGates },
+        players: { A: player(), B: player({ lifespan: 1000, mainDeck: [{ instanceId: 'd1' }] }) },
+      });
+      let next = gameReducer(state, { type: 'PASS_TURN' });
+      const returnedCellId = Object.entries(next.board).find(([, o]) => o?.card?.name === 'Immen Gorta, the Boundless Hunger')?.[0];
+      expect(returnedCellId).toBeTruthy();
+      // Resolve the 1st damage choice, then simulate a response destroying
+      // Immen Gorta before the deferred reshift step re-validates it — the
+      // exact same "never trust stale data across a window" shape every
+      // other pendingResolution kind already handles.
+      next = gameReducer(next, { type: 'RESOLVE_DAMAGE_TARGET_PLAYER', targetPlayerId: 'B' });
+      // By now the whole rest of the chain (with nobody to respond) has
+      // already auto-resolved to the next damage-target choice — remove
+      // Immen Gorta directly and resolve THAT choice to reach the next
+      // 'boundless-hunger-reshift' pendingResolution's own re-validation.
+      const cellId = Object.entries(next.board).find(([, o]) => o?.card?.name === 'Immen Gorta, the Boundless Hunger')?.[0];
+      expect(cellId).toBeTruthy();
+      const withoutImmenGorta = { ...next, board: { ...next.board } };
+      delete withoutImmenGorta.board[cellId];
+      const resolved = gameReducer(withoutImmenGorta, { type: 'RESOLVE_DAMAGE_TARGET_PLAYER', targetPlayerId: 'B' });
+      expect(resolved.phase).toBe('playing');
+      expect(resolved.pendingChoice).toBeFalsy();
+      expect(resolved.pendingResolution).toBeFalsy();
+      expect(resolved.loopWin).toBeUndefined();
+      expect(resolved.log.some(e => e.message.includes("Boundless Hunger loop fizzles — it's no longer on the battlefield"))).toBe(true);
+    });
+
+    it('lets the opponent interrupt the loop by destroying Mouth of Madness before the forced re-Shift', () => {
+      const state = baseState({
+        turnPlayer: 'A',
+        board: { r3c1: shiftedImmenGorta(1), r2c1: mouthOfMadness, r2c2: terraneanGates },
+        players: { A: player(), B: player({ lifespan: 1000, mainDeck: [{ instanceId: 'd1' }] }) },
+      });
+      let next = gameReducer(state, { type: 'PASS_TURN' });
+      // Remove Mouth of Madness before resolving the 1st damage choice, so
+      // the resulting 'boundless-hunger-reshift' pendingResolution's own
+      // re-validation (not the earlier board.js check inside
+      // placeReturnedFromShift, which already ran) is what actually stops it.
+      const withoutMouthOfMadness = { ...next, board: { ...next.board } };
+      delete withoutMouthOfMadness.board.r2c1;
+      const resolved = gameReducer(withoutMouthOfMadness, { type: 'RESOLVE_DAMAGE_TARGET_PLAYER', targetPlayerId: 'B' });
+      expect(resolved.phase).toBe('playing');
+      expect(resolved.players.B.lifespan).toBe(999); // the damage that was already applied still counts
+      expect(resolved.pendingChoice).toBeFalsy();
+      expect(resolved.pendingResolution).toBeFalsy();
+      expect(resolved.loopWin).toBeUndefined();
+      const immenGorta = Object.values(resolved.board).find(o => o?.card?.name === 'Immen Gorta, the Boundless Hunger');
+      expect(immenGorta?.type).toBe('being'); // stays put in the Mortal Realm — no reshift happened
+      expect(resolved.log.some(e => e.message.includes('Boundless Hunger loop stops — Mouth of Madness is no longer on the battlefield'))).toBe(true);
+    });
+
+    // Synthesizes the exact mid-chain shape a real cascade produces right
+    // after Mouth of Madness's own reshift — Immen Gorta already Shifted
+    // into the Ethereal Realm, its own 'boundless-hunger-terranean-gates'
+    // pendingResolution already open and waiting behind a reactive window
+    // — since the ordinary cascade (nobody has anything to respond with)
+    // collapses this specific pause into the same single dispatch as every
+    // other step, same as the two interruption tests above; targeting the
+    // re-validation directly here is more precise than fighting that
+    // collapse with a fragile pre-dispatch board mutation.
+    it('lets the opponent interrupt the loop by destroying Terranean Gates before it strips Time Counters', () => {
+      const ethereal = {
+        type: 'prophecy', ownerId: 'A',
+        card: { ...immenGortaCard, textBox: 'At the end of your turn, this loses (2) Time Counters', typing: '', keywords: { endOfTurnRemoveOwnTimeCounters: 2 } },
+        timer: 1, faceDown: false, shiftedFromCard: immenGortaCard,
+      };
+      const state = baseState({
+        turnPlayer: 'A',
+        board: { r4c1: ethereal, r2c1: mouthOfMadness },
+        players: { A: player(), B: player({ lifespan: 1000 }) },
+        pendingResolution: {
+          kind: 'boundless-hunger-terranean-gates', ownerId: 'A', cellId: 'r4c1',
+          cardInstanceId: immenGortaCard.instanceId, cardName: immenGortaCard.name, bounceCount: 1,
+        },
+        reactiveWindow: { openFor: 'B', triggerDescription: 'test', everResponded: false, passedOnce: false },
+      });
+      const resolved = gameReducer(state, { type: 'PASS_PRIORITY' });
+      expect(resolved.phase).toBe('playing');
+      expect(resolved.pendingChoice).toBeFalsy();
+      expect(resolved.pendingResolution).toBeFalsy();
+      expect(resolved.loopWin).toBeUndefined();
+      expect(resolved.board.r4c1?.type).toBe('prophecy');
+      expect(resolved.board.r4c1?.timer).toBe(1); // unchanged — Terranean Gates never applied
+      expect(resolved.log.some(e => e.message.includes('Boundless Hunger loop stops — Terranean Gates is no longer on the battlefield'))).toBe(true);
     });
 
     // The general 100-bounce safety net (offerOrPerformShift/
