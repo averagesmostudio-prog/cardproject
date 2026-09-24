@@ -291,7 +291,7 @@ const hasOwnProphecy = (board, playerId) =>
 // "If you control a <Typing>, X" (Propagate) — a Being of the given typing
 // anywhere on the controller's own side, mirroring hasOwnProphecy's own
 // shape for a printed-typing condition instead of a card kind.
-const hasOwnTyping = (board, playerId, typing) =>
+export const hasOwnTyping = (board, playerId, typing) =>
   Object.values(board).some(o => o?.type === 'being' && o.ownerId === playerId && (o.card.typing || '').toLowerCase().includes(typing.toLowerCase()));
 
 // A card already sitting at 0 Time Counters isn't a legal Modulate target —
@@ -5925,7 +5925,7 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
 // Finds the first Relic anywhere on the board (either owner — neither
 // Mouth of Madness nor Terranean Gates says "you control") carrying the
 // given keyword, if any — used by the Boundless Hunger bounce loop below.
-const relicWithKeywordAnywhere = (board, keywordField) => {
+export const relicWithKeywordAnywhere = (board, keywordField) => {
   const found = Object.values(board).find(o => o?.type === 'relic' && o.card.keywords?.[keywordField]);
   return found ? found.card.keywords[keywordField] : null;
 };
@@ -6650,7 +6650,7 @@ const sacrificeOccupantAt = (state, cellId) => {
 // copies to spend by clicking tiles directly (see the 'sacrifice-x-toggle'
 // pendingChoice), not a fixed sacrifice-cost text pattern like
 // engageExtraCostSacrificeCell above.
-const ownedFodderCells = (board, playerId, name) => {
+export const ownedFodderCells = (board, playerId, name) => {
   const needle = name.toLowerCase();
   return Object.entries(board)
     .filter(([, o]) => o?.type === 'relic' && o.ownerId === playerId && o.card.name.toLowerCase() === needle)
@@ -7726,7 +7726,7 @@ export const recomputeXBeings = (state) => {
 // so that shared word isn't just "Being", which would trivially match
 // almost anything on the board.
 const TYPING_SUPERTYPE_WORDS = new Set(['being', 'deity', 'token', 'familiar']);
-const raceTypings = (card) => (card.typing || '')
+export const raceTypings = (card) => (card.typing || '')
   .split(',')
   .map(t => t.trim().toLowerCase())
   .filter(t => t && !TYPING_SUPERTYPE_WORDS.has(t));
@@ -9285,7 +9285,7 @@ const conjuringCastGateOk = (state, playerId, card) => {
 // nothing here hardcodes that). Altars live off-board entirely (see
 // createInitialState's own comment on `altars`) and no printed card
 // currently names one in this pattern, so this doesn't scan `state.altars`.
-const countControlledByName = (board, playerId, name) => {
+export const countControlledByName = (board, playerId, name) => {
   const needle = name.toLowerCase();
   let count = 0;
   Object.values(board).forEach(occupant => {
