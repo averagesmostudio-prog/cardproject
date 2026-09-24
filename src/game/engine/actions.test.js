@@ -933,6 +933,40 @@ describe('MOVE_OR_ATTACK', () => {
     expect(next.board.r4c1.currentLifespan).toBe(8); // defender still takes the attacker's Strength
     expect(next.log.some(e => e.message.includes('Favor Counter prevents'))).toBe(true);
   });
+
+  // Regression: a Favored Being attacking into (or being attacked by) a
+  // 0-Strength Being takes 0 damage either way — Favored only protects
+  // against damage that would actually be dealt, so 0 damage leaves
+  // nothing for it to prevent and the counter should survive untouched.
+  it('a Favor Counter is NOT consumed when the side it protects would take 0 damage', () => {
+    const favoredAttacker = {
+      type: 'being', ownerId: 'A', card: beingCard({ strength: 3, lifespan: 10 }),
+      currentLifespan: 10, engaged: false, favorCounter: true,
+    };
+    // A 0/10 defender: 0 Strength deals no damage back to the attacker
+    // regardless of Favored, and 10 Lifespan survives the attacker's own
+    // real 3 Strength — isolates the assertion to the attacker's own
+    // Favor Counter, matching the reported case (a Favored attacker into a
+    // 0-Strength Being).
+    const defender = { type: 'being', ownerId: 'B', card: beingCard({ instanceId: 'def', strength: 0, lifespan: 10 }), currentLifespan: 10, engaged: false };
+    const state = baseState({ board: { r2c1: favoredAttacker, r4c1: defender } });
+    const next = gameReducer(state, { type: 'MOVE_OR_ATTACK', fromCellId: 'r2c1', toCellId: 'r4c1', isAttack: true });
+    expect(next.board.r2c1.currentLifespan).toBe(10); // untouched — the 0-Strength defender never dealt any damage
+    expect(next.board.r2c1.favorCounter).toBe(true); // NOT consumed — there was nothing to prevent
+    expect(next.board.r4c1.currentLifespan).toBe(7); // defender still takes the attacker's real Strength
+    expect(next.log.some(e => e.message.includes('Favor Counter prevents'))).toBe(false);
+  });
+
+  // Same principle, generalized to dealDamageToBeing itself — the one
+  // choke point every generic "deal (N) damage" effect (Medium Mage, etc.)
+  // routes through, not just combat.
+  it('dealDamageToBeing does not consume a Favor Counter for a 0-damage instance', () => {
+    const favored = { type: 'being', ownerId: 'A', card: beingCard({ lifespan: 5 }), currentLifespan: 5, engaged: false, favorCounter: true };
+    const state = baseState({ board: { r2c1: favored } });
+    const next = dealDamageToBeing(state, 'r2c1', 0);
+    expect(next.board.r2c1.favorCounter).toBe(true); // NOT consumed
+    expect(next.board.r2c1.currentLifespan).toBe(5);
+  });
 });
 
 describe('"Gain (N) Lifespan" / "lose (N) Lifespan" as a resolvable effect', () => {

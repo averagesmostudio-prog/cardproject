@@ -7006,7 +7006,12 @@ export const dealDamageToBeing = (state, cellId, damage) => {
   // Counter in the first place (see resolveAttackFrom's own comment), so
   // no extra type check is needed here — `favorCounter` is simply never
   // set on one.
-  if (occupant.favorCounter) {
+  // Only genuinely "would take damage" (and so only consumes the counter)
+  // when `damage` is actually positive — a 0-damage instance (an
+  // effect that scales to 0, or an attack from a 0-Strength Being) has
+  // nothing for the counter to prevent, so it stays put. Same principle
+  // resolveAttackFrom's own attackerFavored/defenderFavored now apply.
+  if (occupant.favorCounter && damage > 0) {
     return addLog(
       { ...state, board: { ...state.board, [cellId]: { ...occupant, favorCounter: false } } },
       `${view.card.name}'s Favor Counter prevents ${damage} damage.`
@@ -10865,10 +10870,18 @@ const resolveAttackFrom = (state, playerId, fromCellId, noDamage = false) => {
   // Favored), consuming the counter instead of applying the damage —
   // an Animated Armament can never carry one (favorCounter only ever
   // lives on a real `being` occupant), so this naturally never applies
-  // to it without any special-casing.
-  const attackerFavored = !!occupant.favorCounter;
-  const defenderFavored = !!target.favorCounter;
+  // to it without any special-casing. Only counts as "prevented" (and so
+  // only consumes the counter) when this side would actually have taken
+  // damage otherwise — a Favored Being attacking into, say, a 0-Strength
+  // Being takes 0 damage regardless of Favored, so there's nothing for
+  // the counter to prevent and it stays put. `rawCombat` (computed before
+  // Favored is applied) is what tells us whether real damage was ever on
+  // the table for each side.
   const rawCombat = resolveMutualCombat(attackerView, defenderView);
+  const attackerWouldTakeDamage = rawCombat.attackerLifespanAfter < attackerView.currentLifespan;
+  const defenderWouldTakeDamage = rawCombat.defenderLifespanAfter < defenderView.currentLifespan;
+  const attackerFavored = !!occupant.favorCounter && attackerWouldTakeDamage;
+  const defenderFavored = !!target.favorCounter && defenderWouldTakeDamage;
   const attackerLifespanAfter = attackerFavored ? attackerView.currentLifespan : rawCombat.attackerLifespanAfter;
   const defenderLifespanAfter = defenderFavored ? defenderView.currentLifespan : rawCombat.defenderLifespanAfter;
 
@@ -10882,7 +10895,7 @@ const resolveAttackFrom = (state, playerId, fromCellId, noDamage = false) => {
 
   if (!attackerDies) {
     board[fromCellId] = writeActorState(occupant, {
-      currentLifespan: attackerLifespanAfter, engaged: true, ...(isBeing ? { favorCounter: false } : {}),
+      currentLifespan: attackerLifespanAfter, engaged: true, ...(attackerFavored ? { favorCounter: false } : {}),
     });
   } else {
     const dmg = deathDamageFor(attackerView);
@@ -10919,7 +10932,7 @@ const resolveAttackFrom = (state, playerId, fromCellId, noDamage = false) => {
 
   if (!defenderDies) {
     board[toCellId] = writeActorState(target, {
-      currentLifespan: defenderLifespanAfter, ...(target.type === 'being' ? { favorCounter: false } : {}),
+      currentLifespan: defenderLifespanAfter, ...(defenderFavored ? { favorCounter: false } : {}),
     });
   } else {
     const dmg = deathDamageFor(defenderView);
