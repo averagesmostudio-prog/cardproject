@@ -590,19 +590,22 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
   // boardScale's own comment above.
   //
   // Natural size is read via getBoundingClientRect (divided back out by
-  // the currently applied scale), NOT scrollWidth/scrollHeight — the
-  // onboard hover preview portals into #onboard-hover-anchor, a descendant
-  // of contentEl, as an absolutely positioned overlay (CardTile.jsx); an
-  // out-of-flow descendant like that never affects an ancestor's own
-  // rendered box (what getBoundingClientRect reports), but scrollWidth/
-  // scrollHeight are spec'd to include exactly this kind of overflow
-  // regardless of the ancestor's own `overflow` value. Reading scrollWidth/
-  // scrollHeight here made the board's own "natural size" balloon by the
-  // hover preview's own footprint for as long as ANY card was hovered
-  // (Hand.jsx cards use this same onboard preview) — self-play found this
-  // visibly resizing the whole board on hover once maximized/fullscreen
-  // left little slack (boardScale sitting near 1, so the false-positive
-  // shrink was no longer absorbed by scale already being well under 1).
+  // the currently applied scale), NOT scrollWidth/scrollHeight — an
+  // absolutely-positioned overlay descendant of contentEl never affects
+  // an ancestor's own rendered box (what getBoundingClientRect reports),
+  // but scrollWidth/scrollHeight are spec'd to include exactly this kind
+  // of overflow regardless of the ancestor's own `overflow` value. This
+  // was originally found via the onboard hover preview (CardTile.jsx),
+  // which portaled into a descendant of contentEl at the time and made
+  // the board's own "natural size" balloon by the preview's own footprint
+  // for as long as ANY card was hovered — self-play found this visibly
+  // resizing the whole board on hover once maximized/fullscreen left
+  // little slack (boardScale sitting near 1, so the false-positive shrink
+  // was no longer absorbed by scale already being well under 1). The
+  // preview now portals straight to document.body instead (so it can
+  // escape this same area's own overflow-auto clipping — CardTile.jsx),
+  // but getBoundingClientRect stays the right general-purpose choice here
+  // regardless of what any other out-of-flow descendant does.
   useEffect(() => {
     const areaEl = boardAreaRef.current;
     const contentEl = boardContentRef.current;
@@ -2956,14 +2959,6 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
               <div className="w-14 shrink-0" />
               <LifeBadge value={displayLifespans[AI]} flash={lifeFlashes[AI]} strike={openLaneStrikes[AI]} targetAction={playerTargetActionFor(AI)} onSelectTarget={dispatch} />
             </div>
-            {/* Portal target for CardTile.jsx's onboard hover preview — this
-                column is naturally shorter than the board it sits beside,
-                leaving blank space here below the opponent's Life Total.
-                `relative` so the portaled preview (`absolute`) positions
-                against this div's own top-left corner rather than some
-                farther-out ancestor; no height of its own is needed since
-                the preview itself is what fills the space. */}
-            <div id="onboard-hover-anchor" className="w-full relative" />
           </div>
 
           <Board

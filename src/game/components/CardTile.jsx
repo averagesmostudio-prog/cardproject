@@ -21,22 +21,21 @@ const HOVER_WIDTH = 260;
 // exactly when the player wants to actually read the card, so it always
 // shows "the original card" in full, text box included.
 const HOVER_HEIGHT = Math.round(HOVER_WIDTH * 7 / 5);
-// An onboard tile's own hover preview is bigger and anchored to a single
-// fixed spot (the empty space in the opponent's left-hand panel, below
-// their Life Total — #onboard-hover-anchor in Match.jsx, which is
-// naturally shorter than the board it sits beside) instead of popping up
-// beside whichever tile is hovered — see showPreview/the render below.
-// Rendered via a React portal INTO that anchor (a `position: relative`
-// div) rather than `position: fixed` + computed viewport coordinates —
-// the whole board sits inside its own `transform: scale(...)` wrapper
-// (Match.jsx's responsive board-scale), which becomes the containing
-// block for any `fixed` descendant too, so raw getBoundingClientRect()
-// math would drift out of sync with that scale. Portaling into the
-// anchor and positioning `absolute` within it instead inherits the same
-// transform automatically, so no scale math is needed at all.
+// An onboard tile's own hover preview is bigger than the off-board one —
+// popped up beside whichever tile is hovered, same as off-board, but
+// portaled to document.body (see the render below) rather than rendered
+// in place: an onboard tile sits inside the board's own scrollable
+// `overflow-auto` area (Match.jsx) AND its `transform: scale(...)`
+// responsive-board wrapper, either of which would otherwise clip a
+// preview this tall (confirmed with the user — it was getting cut off by
+// the Hand row below the board). getBoundingClientRect() already returns
+// real, scale-adjusted viewport coordinates regardless of where the
+// element sits in the DOM, so positioning a `position: fixed` preview
+// from it — same computation showPreview already uses for the off-board
+// case below — needs no extra scale math; portaling to document.body is
+// what actually lets it escape the board area's own clipping.
 const ONBOARD_HOVER_WIDTH = 340;
 const ONBOARD_HOVER_HEIGHT = Math.round(ONBOARD_HOVER_WIDTH * 7 / 5);
-const ONBOARD_HOVER_ANCHOR_ID = 'onboard-hover-anchor';
 
 export default function CardTile({
   card, currentLifespan, strength, engaged, faceDown, isOwn, horizontal, selected, dimmed, onClick, size = 'md',
@@ -48,18 +47,19 @@ export default function CardTile({
   const hoverTimerRef = useRef(null);
 
   const showPreview = () => {
-    if (onboard) {
-      // No coordinates to compute — see ONBOARD_HOVER_WIDTH's own comment;
-      // the portal target below handles positioning entirely via CSS.
-      setHoverPos(true);
-      return;
-    }
     const rect = wrapRef.current?.getBoundingClientRect();
     if (!rect) return;
-    let top = rect.top - HOVER_HEIGHT - 12;
+    const width = onboard ? ONBOARD_HOVER_WIDTH : HOVER_WIDTH;
+    const height = onboard ? ONBOARD_HOVER_HEIGHT : HOVER_HEIGHT;
+    let top = rect.top - height - 12;
     if (top < 8) top = rect.bottom + 12; // not enough room above — show below instead
-    let left = rect.left + rect.width / 2 - HOVER_WIDTH / 2;
-    left = Math.max(8, Math.min(left, window.innerWidth - HOVER_WIDTH - 8));
+    // Clamp to the real viewport on both axes — the flip-up-or-down above
+    // already handles the common case, but the onboard preview is tall
+    // enough (ONBOARD_HOVER_HEIGHT) that a tile near the top or bottom
+    // edge of the board can still overflow either direction otherwise.
+    top = Math.max(8, Math.min(top, window.innerHeight - height - 8));
+    let left = rect.left + rect.width / 2 - width / 2;
+    left = Math.max(8, Math.min(left, window.innerWidth - width - 8));
     setHoverPos({ left, top });
   };
   const handleMouseEnter = () => {
@@ -215,17 +215,7 @@ export default function CardTile({
             )}
           </>
         );
-        if (onboard) {
-          const anchor = document.getElementById(ONBOARD_HOVER_ANCHOR_ID);
-          if (!anchor) return null;
-          return createPortal(
-            <div className="absolute z-[70] pointer-events-none drop-shadow-2xl" style={{ left: 0, top: 8, width: previewWidth }}>
-              {previewInner}
-            </div>,
-            anchor
-          );
-        }
-        return (
+        const preview = (
           <div
             className="fixed z-[70] pointer-events-none drop-shadow-2xl"
             style={{ left: hoverPos.left, top: hoverPos.top, width: previewWidth }}
@@ -233,6 +223,10 @@ export default function CardTile({
             {previewInner}
           </div>
         );
+        // Portaled straight to document.body — see ONBOARD_HOVER_WIDTH's
+        // own comment above for why an onboard tile specifically needs to
+        // escape the board's own scroll/scale wrapper this way.
+        return onboard ? createPortal(preview, document.body) : preview;
       })()}
     </div>
   );
