@@ -118,6 +118,7 @@ const SINGLE_CELL_CHOICE_KINDS = {
   'token-location': { actionType: 'RESOLVE_TOKEN_LOCATION', cellField: 'cellId' },
   'damage-target': { actionType: 'RESOLVE_DAMAGE_TARGET', cellField: 'cellId' },
   'destroy-permanent': { actionType: 'RESOLVE_DESTROY_PERMANENT', cellField: 'cellId' },
+  'target-prophecy': { actionType: 'RESOLVE_TARGET_PROPHECY', cellField: 'cellId' },
   'strength-set-eot': { actionType: 'RESOLVE_STRENGTH_SET_EOT', cellField: 'cellId' },
   'reveal-prophecy': { actionType: 'RESOLVE_REVEAL_PROPHECY', cellField: 'cellId' },
   'sacrifice': { actionType: 'RESOLVE_SACRIFICE', cellField: 'cellId' },

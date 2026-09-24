@@ -434,7 +434,7 @@ The Fountain,Relic,2 Timeless,3,You take (1) less Lifespan Damage during the Dow
 The Persistence of Memory,Prophecy,3 Timeless,4,"Gain (2) Time Counters. 
 Beings do not enter the Mortal Realm engaged. 
 
-Memory for some, Motivation for others",XXX,XXX,3,XXX,1,Timeless,R,0
+""Memory for some, Motivation for others""",XXX,XXX,3,XXX,1,Timeless,R,0
 Time Capsule,Relic,"1 Faithless, 2 Timeless",3,"Whenever you Modulate (-1) except due to the Modulate Step, add (1) Time Counter to this.
 Martyr: Modulate (+1), then repeat for each Time Counter on this.",XXX,XXX,XXX,XXX,1,Timeless,U,0
 Time Keeper,"Human, Being","1 Faithless, 1 Timeless",2,Engage: Modulate (±1) a target this points to.,1,3,XXX,"1, 2, 8",1,Timeless,C,0

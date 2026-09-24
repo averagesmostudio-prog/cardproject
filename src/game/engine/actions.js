@@ -1033,6 +1033,21 @@ const pendingSummonTarget = (state) => {
   return { cellId: pr.cellId, occupant };
 };
 
+// The Conjuring a real, currently-open cast-declaration window is
+// resolving — Waning Words' own analog of pendingSummonTarget just above.
+// Unlike a summoned Being, a cast Conjuring has no board representation at
+// all: the instant it's cast (even on the deferred path — see
+// CAST_CONJURING's own isReactiveResponse fork) it already moves from hand
+// into purgatory, so "is it still there?" is checked by instanceId against
+// purgatory, not board.
+const pendingConjuringTarget = (state) => {
+  const pr = state.pendingResolution;
+  if (pr?.kind !== 'cast-conjuring') return null;
+  const card = state.players[pr.declaringPlayer]?.purgatory.find(c => c.instanceId === pr.instanceId);
+  if (!card) return null;
+  return { card, declaringPlayer: pr.declaringPlayer, cardName: pr.cardName, textBox: pr.textBox };
+};
+
 // "The next Being you summon is conjured as a face up Prophecy with (N)
 // Time Counters..." (Prophesize) — same end state as Delay, just set up in
 // advance rather than cast as a response: a one-shot flag on state itself,
@@ -1042,6 +1057,17 @@ const pendingSummonTarget = (state) => {
 // like skipNextModulate (Pause) does, until the caster's own next real
 // SUMMON_BEING consumes it.
 const PROPHESIZE_NEXT_SUMMON_RE = /^The next Being you summon is conjured as a face up Prophecy with\s*\(?(\d+)\)?\s+Time Counters?/i;
+
+// "Target Conjuring becomes a Prophecy and gains: (2) Time Counters, 'If
+// this has at least (1) Time Counter its effects are negated'" (Waning
+// Words) — the CAST_CONJURING-side sibling of Delay: legal specifically
+// during a real, currently-open cast-declaration window with the named
+// Conjuring still there to negate (pendingConjuringTarget, below — the
+// Purgatory-by-instanceId analog of pendingSummonTarget). Ruled: once the
+// converted Prophecy's Time Counters hit 0, the negation lifts and the
+// original effect gets a fresh reactive window before resolving — see
+// resolveProphecyModulateHitZero's own resolvesAsConjuring fork.
+const WANING_WORDS_RE = /^Target Conjuring becomes a Prophecy and gains:?\s*\(?2\)?\s+Time Counters?,?\s*["“]If this has at least\s*\(?1\)?\s+Time Counters?\s+its effects are negated["”]\.?$/i;
 
 // Desperate Finale: "As an additonal cost to conjure: Pay Lifespan equal
 // to the Lifespan of target engaged Being you control." — the SAME target
@@ -1639,6 +1665,22 @@ const REVEAL_PROPHECY_RE = /you may target a Prophecy and reveal it/i;
 // (see destroyPermanentAt, below) even though the two look similar.
 const DESTROY_OCCUPANT_RE = /Destroy an? (Prophecy|Relic)\b/i;
 
+// "Negate a Prophecy and flip it face down, then add (2) Time Counters to
+// it." (Rewrite the Past) — same "any Prophecy on the board, either
+// player's, face-up or face-down" candidate pool as DESTROY_OCCUPANT_RE's
+// own Prophecy branch just above (no owner/face-state filter). Unlike
+// Delay's own "Negate" (a mid-declare-window interrupt on a still-
+// summoning Being — a completely different mechanism), there's no open
+// window to interrupt here: the target is already fully resolved and on
+// the board. "Negate" for an already-on-board Prophecy just means flipping
+// it face-down — any live keyword check (skipsControllerDraw,
+// beingsEnterDisengaged) already requires `!faceDown` to apply, so this
+// needs zero extra bookkeeping, same "nothing to unset" precedent Daylight
+// Savings established. A face-down target has nothing active to negate —
+// the flip is a no-op re-affirmation, and the Time Counters are still
+// added regardless.
+const REWRITE_THE_PAST_RE = /^Negate a Prophecy and flip it face down,?\s*then add\s*\(?2\)?\s+Time Counters? to it\.?$/i;
+
 // "Destroy an Armament" (Convenient Corrosion) — targets one specific
 // Armament entry anywhere on the board (attached to a Being, or sitting in
 // a freestanding pile), not a whole occupant.
@@ -1979,7 +2021,7 @@ const placeTokenOnBoard = (state, playerId, tokenCard, cellId) => {
         ownerId: playerId,
         card: tokenCard,
         currentLifespan: tokenCard.lifespan,
-        engaged: !tokenCard.keywords?.persist,
+        engaged: !tokenCard.keywords?.persist && !beingsEnterDisengagedActive(state),
         favorCounter: !!tokenCard.keywords?.favored,
         ...(waiting ? { armaments: waiting.armaments } : {}),
       },
@@ -2225,7 +2267,13 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
     // a real pendingChoice (2+ cards in hand), and the Purgatory return
     // must wait for that choice to actually resolve, not fire immediately
     // regardless of whether anything was discarded.
-    && !DISCARD_ONE_CARD_THEN_RETURN_PURGATORY_RE.test(text)) {
+    && !DISCARD_ONE_CARD_THEN_RETURN_PURGATORY_RE.test(text)
+    // REWRITE_THE_PAST_RE joins the same list — its own "then" separates
+    // the flip-face-down negation from the Time Counter add, both of which
+    // apply to the SAME targeted Prophecy chosen once, not two
+    // independently-resolved clauses (and splitting would also lose the
+    // target choice itself, opened only once by the unsplit match).
+    && !REWRITE_THE_PAST_RE.test(text)) {
     const clauses = text.split(/\s*,?\s+then\s+/i);
     if (clauses.length > 1) {
       return clauses.reduce((acc, clause) => resolveOrLogEffect(acc, playerId, cardName, clause, label, context), state);
@@ -3819,6 +3867,28 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
     return { ...next, nextBeingSummonedAsProphecy: { ownerId: playerId, timeCounters: parseInt(prophesizeMatch[1], 10) } };
   }
 
+  const waningWordsMatch = text.match(WANING_WORDS_RE);
+  if (waningWordsMatch) {
+    // conjuringCastGateOk already refused to offer this cast at all
+    // without a real target, but re-checked fresh here in case something
+    // changed between offer and resolution — same discipline Delay's own
+    // resolution above follows.
+    const target = pendingConjuringTarget(state);
+    if (!target) {
+      return addLog(state, `${cardName}'s ${label} has no Conjuring currently being cast to target.`);
+    }
+    const { card: targetCard, declaringPlayer, cardName: targetCardName } = target;
+    // Pull it back out of Purgatory — unlike Delay's target Being (never
+    // added to Purgatory at all), a targeted Conjuring is already sitting
+    // there by now, since CAST_CONJURING's own declare step moves it there
+    // unconditionally, deferred effect or not.
+    const owner = state.players[declaringPlayer];
+    const purgatory = owner.purgatory.filter(c => c.instanceId !== targetCard.instanceId);
+    let next = { ...state, players: { ...state.players, [declaringPlayer]: { ...owner, purgatory } } };
+    next = addLog(next, `${cardName}'s ${label} negates ${targetCardName} — it becomes a face up Prophecy instead.`);
+    return offerOrShiftFromPurgatory(next, declaringPlayer, targetCard, 2, false, true);
+  }
+
   if (DROWN_OUT_THE_SCREAMS_RE.test(text)) {
     const candidates = Object.entries(state.board).filter(([, o]) => o?.type === 'being' && !o.card.isDeity);
     if (candidates.length === 0) {
@@ -4738,25 +4808,20 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
   }
 
   // Chronostasis: "Gain (2) Time Counters. \nBefore drawing a card(s) that
-  // player may reveal the top card of their deck, they may shuffle." — a
-  // Prophecy flip trigger with TWO clauses (GAIN_TIME_COUNTERS_RE below
-  // would match only the first line and silently drop the second, the same
-  // "additive bonus, ignored second line" precedent Growth Spurt's own
-  // board-wide aura relies on — except Chronostasis's second clause has no
-  // separate live-read mechanism to fall back on). Ruled as an immediate
-  // simplification: rather than tracking a standing "before your next draw"
-  // replacement effect, this resolves the reveal-and-maybe-shuffle right
-  // away, at the moment Chronostasis itself flips — the same real value as
-  // Foresight's own "look at the top card, may shuffle" (SHUFFLE_OR_KEEP_RE,
-  // reusing its exact 'shuffle-or-keep' pendingChoice), just triggered by a
-  // flip instead of a cast. Checked before the generic GAIN_TIME_COUNTERS_RE
-  // so it isn't the one that matches first.
-  const chronostasisMatch = /^Gain\s*\(?2\)?\s+Time Counters?\.\s*Before drawing a cards?\(?s?\)?,?\s*that player may reveal the top card of their deck,?\s*they may shuffle\.?$/i.test(text);
-  if (chronostasisMatch && context.selfCellId && state.board[context.selfCellId]?.type === 'prophecy') {
-    const occupant = state.board[context.selfCellId];
-    const gained = { ...state, board: { ...state.board, [context.selfCellId]: { ...occupant, timer: (occupant.timer || 0) + 2 } } };
-    let next = addLog(gained, `${cardName}'s ${label} gains 2 Time Counter(s).`);
-    next = addLog(next, `${cardName}'s ${label} lets ${playerId} reveal the top card of their deck and choose whether to shuffle.`);
+  // player may reveal the top card of their deck, they may shuffle." — the
+  // TWO printed clauses arrive on separate lines, and resolveProphecyModulateHitZero's
+  // own flip-resolution loop (below) calls resolveOrLogEffect once PER LINE,
+  // never with both combined — so this only ever needs to match the second
+  // clause on its own. (The first clause, "Gain (2) Time Counters.", already
+  // matches GAIN_TIME_COUNTERS_RE below independently, on its own separate
+  // call.) Reuses Foresight's own "look at the top card, may shuffle"
+  // mechanism (SHUFFLE_OR_KEEP_RE/'shuffle-or-keep' pendingChoice) verbatim,
+  // just triggered by a flip instead of a cast — third person "their deck"
+  // (not "your deck") is why this never accidentally collides with the
+  // unrelated REVEAL_TOP_RE below.
+  const CHRONOSTASIS_REVEAL_SHUFFLE_RE = /^Before drawing a cards?\(?s?\)?,?\s*that player may reveal the top card of their deck,?\s*they may shuffle\.?$/i;
+  if (CHRONOSTASIS_REVEAL_SHUFFLE_RE.test(text)) {
+    let next = addLog(state, `${cardName}'s ${label} lets ${playerId} reveal the top card of their deck and choose whether to shuffle.`);
     return { ...next, pendingChoice: { kind: 'shuffle-or-keep', playerId, cardName, deckOwner: playerId } };
   }
 
@@ -5180,6 +5245,19 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
     }
     let next = addLog(state, `${cardName}'s ${label} lets ${playerId} choose a ${targetKind} to destroy.`);
     return { ...next, pendingChoice: { kind: 'destroy-permanent', playerId, cardName, targetKind } };
+  }
+
+  const rewriteThePastMatch = text.match(REWRITE_THE_PAST_RE);
+  if (rewriteThePastMatch) {
+    const candidates = Object.entries(state.board).filter(([, o]) => o?.type === 'prophecy').map(([cell]) => cell);
+    if (candidates.length === 0) {
+      return addLog(state, `${cardName}'s ${label} has no Prophecy to negate.`);
+    }
+    if (candidates.length === 1) {
+      return negateAndFlipProphecy(state, candidates[0]);
+    }
+    let next = addLog(state, `${cardName}'s ${label} lets ${playerId} choose a Prophecy to negate.`);
+    return { ...next, pendingChoice: { kind: 'target-prophecy', playerId, cardName } };
   }
 
   if (DESTROY_ARMAMENT_RE.test(text)) {
@@ -6048,6 +6126,13 @@ const shiftFromPurgatory = (state, playerId, card, toCellId, amount, returnsAsSu
     timer: amount, faceDown: false,
     shiftedFromCard: card,
     ...(returnsAsSummon ? { returnsAsSummon: true } : {}),
+    // Waning Words: flags the eventual return trip to re-declare the
+    // original Conjuring's own effect (reopenConjuringResolution, see
+    // resolveProphecyModulateHitZero's own fork) instead of either an
+    // ordinary Shift-return or a genuine re-summon. Mutually exclusive
+    // with returnsAsSummon — a converted Conjuring is never also a
+    // returning Being.
+    ...(resolvesAsConjuring ? { resolvesAsConjuring: true } : {}),
   };
   let next = addLog({ ...state, board }, `${card.name} Shifts (${amount}) from Purgatory and becomes a Prophecy in the Ethereal Realm at ${toCellId}.`);
   return triggerOnOwnBeingShiftReactions(next, playerId);
@@ -6055,15 +6140,15 @@ const shiftFromPurgatory = (state, playerId, card, toCellId, amount, returnsAsSu
 
 // Same "offer a destination, or just place it" shape as offerOrPerformShift
 // above, for a card with no board `fromCellId` (Echoes of the Boundless,
-// Delay, Prophesize).
-const offerOrShiftFromPurgatory = (state, playerId, card, amount, returnsAsSummon = false) => {
+// Delay, Prophesize, Waning Words).
+const offerOrShiftFromPurgatory = (state, playerId, card, amount, returnsAsSummon = false, resolvesAsConjuring = false) => {
   const emptyEthereal = ETHEREAL_CELLS.filter(c => !state.board[c]);
   if (emptyEthereal.length === 0) {
     return addLog(state, `${card.name} has no empty tile in the Ethereal Realm to Shift onto.`);
   }
-  if (emptyEthereal.length === 1) return shiftFromPurgatory(state, playerId, card, emptyEthereal[0], amount, returnsAsSummon);
+  if (emptyEthereal.length === 1) return shiftFromPurgatory(state, playerId, card, emptyEthereal[0], amount, returnsAsSummon, resolvesAsConjuring);
   let next = addLog(state, `${playerId} Shifts ${card.name} from Purgatory and chooses an Ethereal Realm tile.`);
-  return { ...next, pendingChoice: { kind: 'shift-from-purgatory-destination', playerId, card, amount, allowedCells: emptyEthereal, ...(returnsAsSummon ? { returnsAsSummon: true } : {}) } };
+  return { ...next, pendingChoice: { kind: 'shift-from-purgatory-destination', playerId, card, amount, allowedCells: emptyEthereal, ...(returnsAsSummon ? { returnsAsSummon: true } : {}), ...(resolvesAsConjuring ? { resolvesAsConjuring: true } : {}) } };
 };
 
 // The Roots Remember: "conjure a (Living) Prophecy from your Purgatory." —
@@ -6341,6 +6426,34 @@ const returnAsSummon = (state, cellId, duringEndStep = false) => {
   return { ...next, pendingChoice: { kind: 'delay-return-summon', playerId: ownerId, cardName: card.name, cellId, allowedCells: emptyCells } };
 };
 
+// Waning Words' own return trip — per the ruling, once the negated
+// Conjuring's converted Prophecy's Time Counters hit 0, its original
+// effect gets a FRESH reactive window before resolving, symmetric with
+// returnAsSummon's own "eventually let it through, with a real chance to
+// interrupt again" shape just above. Re-enters the SAME pendingResolution
+// declare step a fresh CAST_CONJURING uses — puts the card back into
+// Purgatory and re-declares it exactly like a brand new cast would, so all
+// of Waning Words' existing gate/resolution plumbing (WANING_WORDS_RE,
+// pendingConjuringTarget, resolvePendingResolution's 'cast-conjuring'
+// branch) works completely unchanged for a second interruption attempt —
+// no new resolution-path code required. `manageReactiveWindow`'s own
+// generic "did a real action just happen" branch opens the actual window
+// automatically once this return value flows back up through gameReducer,
+// the same mechanism that already opens one after placeBeingOnBoard sets
+// pendingResolution for a fresh Being summon.
+const reopenConjuringResolution = (state, cellId) => {
+  const occupant = state.board[cellId];
+  const targetCard = occupant.shiftedFromCard;
+  const declaringPlayer = occupant.ownerId;
+  const board = { ...state.board };
+  delete board[cellId];
+  const owner = state.players[declaringPlayer];
+  const purgatory = [...owner.purgatory, targetCard];
+  let next = { ...state, board, players: { ...state.players, [declaringPlayer]: { ...owner, purgatory } } };
+  next = addLog(next, `${targetCard.name}'s negated effect is ready to resolve — a new priority window opens.`);
+  return { ...next, pendingResolution: { kind: 'cast-conjuring', declaringPlayer, cardName: targetCard.name, textBox: targetCard.textBox, instanceId: targetCard.instanceId } };
+};
+
 // Scans for any OTHER shifted Being still sitting at 0-or-fewer Time
 // Counters (stuck behind an earlier multi-tile shift-return choice, per
 // returnFromShift's own one-choice-at-a-time comment) and retries it
@@ -6414,6 +6527,7 @@ export const resolveProphecyModulateHitZero = (state, cellId, duringEndStep = fa
     // Madness's bounce loop, Údarik Hunger, ordinary printed Shift) is
     // completely unaffected — the flag is never set for any of them.
     if (occupant.shiftedFromCard) {
+      if (occupant.resolvesAsConjuring) return reopenConjuringResolution(state, cellId);
       return occupant.returnsAsSummon
         ? returnAsSummon(state, cellId, duringEndStep)
         : returnFromShift(state, cellId, duringEndStep, bounceCount, disengageOnReturn, landDisengaged);
@@ -6425,6 +6539,9 @@ export const resolveProphecyModulateHitZero = (state, cellId, duringEndStep = fa
   const lines = stripFlavorText(occupant.card.textBox || '').split('\n').map(l => l.trim()).filter(Boolean);
   lines.forEach(line => {
     if (occupant.card.keywords?.skipsControllerDraw && /do not draw during the start of your turn/i.test(line)) return;
+    // Same "read live, not a one-time flip action" reasoning as
+    // skipsControllerDraw just above — see beingsEnterDisengagedActive.
+    if (occupant.card.keywords?.beingsEnterDisengaged && /Beings do not enter the Mortal Realm engaged/i.test(line)) return;
     // Blood Moon's own "Whenever a Being dies..." line is a live, ongoing
     // passive (read off the board by triggerAnyBeingDiedGiveDifferentBuff
     // whenever a death actually happens), not a one-time flip effect.
@@ -6725,6 +6842,19 @@ const destroyPermanentAt = (state, cellId) => {
     next = { ...next, players: { ...next.players, [occupant.ownerId]: { ...owner, purgatory: purgatoryAfterAdding(owner.purgatory, occupant.card) } } };
   }
   return addLog(next, `${occupant.card?.name || 'It'} is destroyed.`);
+};
+
+// Rewrite the Past's own mutation (REWRITE_THE_PAST_RE, above) — flips the
+// target face-down (the negation, per that regex's own comment) and adds 2
+// Time Counters. Spreads ...occupant first so any shiftedFromCard/
+// returnsAsSummon/resolvesAsConjuring already on the target (a Delay/
+// Prophesize/Waning Words Prophecy mid-return-trip) survives untouched.
+const negateAndFlipProphecy = (state, cellId) => {
+  const occupant = state.board[cellId];
+  if (!occupant) return state;
+  const timer = (occupant.timer || 0) + 2;
+  const next = { ...state, board: { ...state.board, [cellId]: { ...occupant, faceDown: true, timer } } };
+  return addLog(next, `${occupant.card.name} is negated and flips face down, gaining 2 Time Counter(s) (now ${timer}).`);
 };
 
 // Every Armament entry anywhere on the board, either player's, as
@@ -8434,6 +8564,20 @@ const triggerReturnTheFavorReaction = (state, ownerId, consumedCellId) => {
   return { ...next, pendingChoice: { kind: 'return-the-favor-target', playerId: ownerId, cardName: 'Return the Favor', excludeCell: consumedCellId } };
 };
 
+// The Persistence of Memory: "Beings do not enter the Mortal Realm
+// engaged." No "you control" qualifier printed, so per RULES.md's own
+// Pangs of Hunger convention this is symmetric — either player's face-up
+// Prophecy with this text (and at least 1 Time Counter left) suppresses
+// summoning sickness for BOTH players' Beings, not just its controller's.
+// Mirrors turn.js's own controllerSkipsDraw live-read shape exactly, just
+// without the ownerId === turnPlayer filter. Consulted by both
+// placeBeingOnBoard and placeTokenOnBoard below — any Being entering the
+// Mortal Realm, hand-cast or token, is covered.
+const beingsEnterDisengagedActive = (state) =>
+  Object.values(state.board).some(o =>
+    o?.type === 'prophecy' && !o.faceDown && (o.timer || 0) > 0 && o.card.keywords?.beingsEnterDisengaged
+  );
+
 const placeBeingOnBoard = (state, playerId, cellId, card) => {
   const waiting = state.board[cellId];
   // Lesser Summoning Circle: "...Summon a Demon, Imp or Null Being
@@ -8477,7 +8621,8 @@ const placeBeingOnBoard = (state, playerId, cellId, card) => {
         // plantsEnterDisengagedUntilEndOfTurn), since a ground Relic shares
         // its tile with whatever Being is summoned there.
         engaged: !card.isDeity && !card.keywords?.persist && !card.isRelicBeing
-          && !(state.groundRelics[cellId]?.plantsEnterDisengagedUntilEndOfTurn && (card.typing || '').toLowerCase().includes('plant')),
+          && !(state.groundRelics[cellId]?.plantsEnterDisengagedUntilEndOfTurn && (card.typing || '').toLowerCase().includes('plant'))
+          && !beingsEnterDisengagedActive(state),
         favorCounter: !!card.keywords?.favored,
         ...(xValue != null ? { strengthOverride: xValue } : {}),
         ...(pickingUpArmaments ? { armaments: waiting.armaments } : {}),
@@ -9268,6 +9413,9 @@ const conjuringCastGateOk = (state, playerId, card) => {
   // "the real window it was always waiting for" precedent Strike Down
   // establishes above, one level up (a summon instead of an attack).
   if (DELAY_NEGATE_SUMMON_RE.test(stripFlavorText(card.textBox) || '') && !pendingSummonTarget(state)) return false;
+  // Waning Words: same precedent, one level over — a real, currently-open
+  // Conjuring cast to negate instead of a Being summon.
+  if (WANING_WORDS_RE.test(stripFlavorText(card.textBox) || '') && !pendingConjuringTarget(state)) return false;
   if (card.keywords?.conjureCost && LIFESPAN_EQUAL_TARGET_ENGAGED_RE.test(card.keywords.conjureCost)
     && !hasAffordableEngagedTarget(state.board, state.players, playerId)) return false;
   if (card.keywords?.dejaVu && dejaVuCandidates(state, playerId, card).length === 0) return false;
@@ -9982,6 +10130,10 @@ export const getLegalActions = (state, playerId) => {
       Object.entries(state.board)
         .filter(([, o]) => o?.type === targetKind)
         .forEach(([cell]) => actions.push({ type: 'RESOLVE_DESTROY_PERMANENT', cellId: cell }));
+    } else if (state.pendingChoice.kind === 'target-prophecy') {
+      Object.entries(state.board)
+        .filter(([, o]) => o?.type === 'prophecy')
+        .forEach(([cell]) => actions.push({ type: 'RESOLVE_TARGET_PROPHECY', cellId: cell }));
     } else if (state.pendingChoice.kind === 'destroy-armament') {
       gatherArmamentEntries(state.board)
         .forEach(({ cellId, armamentInstanceId }) => actions.push({ type: 'RESOLVE_DESTROY_ARMAMENT', cellId, armamentInstanceId }));
@@ -11007,7 +11159,7 @@ const gameReducerCore = (state, action) => {
     'RESOLVE_SHUFFLE_OR_DRAW', 'RESOLVE_COPY_STATS', 'RESOLVE_DOESNT_DISENGAGE', 'RESOLVE_DECLINE',
     'RESOLVE_TOKEN_LOCATION', 'RESOLVE_SUMMON_FROM_PURGATORY', 'RESOLVE_MOVE_TARGET_BEING',
     'RESOLVE_SACRIFICE_X_TOGGLE', 'RESOLVE_SACRIFICE_X_CONFIRM', 'RESOLVE_SUMMON_FROM_PURGATORY_COST',
-    'RESOLVE_DESTROY_PERMANENT', 'RESOLVE_DESTROY_ARMAMENT', 'RESOLVE_DISCARD_KIND_DRAW', 'RESOLVE_STRENGTH_SET_EOT',
+    'RESOLVE_DESTROY_PERMANENT', 'RESOLVE_TARGET_PROPHECY', 'RESOLVE_DESTROY_ARMAMENT', 'RESOLVE_DISCARD_KIND_DRAW', 'RESOLVE_STRENGTH_SET_EOT',
     'RESOLVE_RETURN_TO_HAND', 'RESOLVE_CHOOSE_ESSENCE_COLOR', 'RESOLVE_SACRIFICE_BEING_COST', 'RESOLVE_SACRIFICE_TYPED_COST',
     'RESOLVE_ENGAGE_BEING_COST', 'RESOLVE_GRANT_MARTYR_TARGET', 'RESOLVE_SUMMON_HAND_BEING_POINTED', 'RESOLVE_CONJURE_PROPHECY_PURGATORY',
     'RESOLVE_CREATE_TOKEN_CHOICE', 'RESOLVE_ETHEREAL_TOKEN_LOCATION', 'RESOLVE_END_OF_TURN_DAMAGE_NAMED_FAMILY_TARGET',
@@ -12785,10 +12937,10 @@ const gameReducerCore = (state, action) => {
 
     case 'RESOLVE_SHIFT_FROM_PURGATORY_DESTINATION': {
       if (!state.pendingChoice || state.pendingChoice.kind !== 'shift-from-purgatory-destination') return state;
-      const { playerId, card, amount, allowedCells, returnsAsSummon } = state.pendingChoice;
+      const { playerId, card, amount, allowedCells, returnsAsSummon, resolvesAsConjuring } = state.pendingChoice;
       if (!allowedCells.includes(action.cellId)) return state;
       const next = { ...state, pendingChoice: null };
-      return shiftFromPurgatory(next, playerId, card, action.cellId, amount, !!returnsAsSummon);
+      return shiftFromPurgatory(next, playerId, card, action.cellId, amount, !!returnsAsSummon, !!resolvesAsConjuring);
     }
 
     case 'RESOLVE_UDARIK_SHIFT_TARGET': {
@@ -12880,6 +13032,13 @@ const gameReducerCore = (state, action) => {
       const occupant = state.board[action.cellId];
       if (!occupant || occupant.type !== targetKind) return { ...state, pendingChoice: null };
       return destroyPermanentAt({ ...state, pendingChoice: null }, action.cellId);
+    }
+
+    case 'RESOLVE_TARGET_PROPHECY': {
+      if (!state.pendingChoice || state.pendingChoice.kind !== 'target-prophecy') return state;
+      const occupant = state.board[action.cellId];
+      if (!occupant || occupant.type !== 'prophecy') return { ...state, pendingChoice: null };
+      return negateAndFlipProphecy({ ...state, pendingChoice: null }, action.cellId);
     }
 
     case 'RESOLVE_DESTROY_ARMAMENT': {
@@ -13733,6 +13892,20 @@ const gameReducerCore = (state, action) => {
       if (state.phase !== 'playing') return state;
       const card = player.hand.find(c => c.instanceId === action.instanceId);
       if (!card || (card.kind !== 'conjuring' && card.kind !== 'ethereal-conjuring')) return state;
+      // Waning Words: "Target Conjuring becomes a Prophecy..." needs a real,
+      // currently-mid-cast Conjuring to respond to — same "declare, then let
+      // the opponent respond, then resolve" shape SUMMON_BEING's own
+      // When-Summoned deferral already uses (see placeBeingOnBoard). Unlike
+      // SUMMON_BEING though, CAST_CONJURING is ALSO itself a valid reactive
+      // RESPONSE type (REACTIVE_RESPONSE_ACTION_TYPES, below) — Delay,
+      // Strike Down, Prophesize, and Waning Words itself are all cast this
+      // way — so deferring unconditionally would make a reactively-cast
+      // Conjuring incorrectly try to open a second, nested window on top of
+      // the one it's already inside. ACTIVATE_ENGAGE already solves exactly
+      // this with the identical isReactiveResponse fork: a genuine response
+      // (a window is already open) resolves atomically in place; a fresh,
+      // undeclared cast defers behind pendingResolution instead.
+      const isReactiveResponse = !!state.reactiveWindow;
 
       // Deja Vu: nothing is paid or resolved yet here — its combined cost
       // depends on whichever Being ends up targeted (RULES.md's ruling),
@@ -13850,7 +14023,13 @@ const gameReducerCore = (state, action) => {
         next = addLog(next, `${playerId} chooses which engaged Being to pay ${card.name}'s additional cost with.`);
         return { ...next, pendingChoice: { kind: 'desperate-finale-target', playerId, cardName: card.name } };
       }
-      return resolveOrLogEffect(next, playerId, card.name, card.textBox, 'effect');
+      if (isReactiveResponse) {
+        return resolveOrLogEffect(next, playerId, card.name, card.textBox, 'effect');
+      }
+      return {
+        ...next,
+        pendingResolution: { kind: 'cast-conjuring', declaringPlayer: playerId, cardName: card.name, textBox: card.textBox, instanceId: card.instanceId },
+      };
     }
 
     case 'ACTIVATE_REANIMATE_FROM_PURGATORY': {

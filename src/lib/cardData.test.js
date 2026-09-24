@@ -42,7 +42,7 @@ describe('parseKeywords', () => {
       cannotMove: false, neverAutoDisengages: false,
       onOwnMartyrTyped: null, onLifespanPaidGrowth: null, reanimateOnSacrificedTypedToken: null, onAllyFights: null,
       statBonusPerOwnDeathThisTurn: null, downTickLifespanReduction: null, onOwnBeingDiedGrowth: null,
-      skipsControllerDraw: false, xEqualsTimeCountersControlled: false, statPenaltyEqualsTimeCountersControlled: false,
+      skipsControllerDraw: false, beingsEnterDisengaged: false, xEqualsTimeCountersControlled: false, statPenaltyEqualsTimeCountersControlled: false,
       collectsRemovedProphecyTimeCounters: false, timesPerTurnAbility: null,
       otherSameTypingBonus: null, allTypingsBonus: null, perOtherTypingBonus: null, perNonArmamentRelicLifespan: null,
       combatOpponentStrengthPenaltyIfNotFaithless: null, onModulateGrowth: null, endOfTurnGrowthPerName: null,
@@ -383,6 +383,11 @@ describe('parseKeywords', () => {
   it('detects "You do not draw during the start of your turn" (Daylight Savings)', () => {
     const kw = parseKeywords('Gain (3) Time Counters. \nDraw three Cards.\nYou do not draw during the start of your turn.');
     expect(kw.skipsControllerDraw).toBe(true);
+  });
+
+  it('detects "Beings do not enter the Mortal Realm engaged" (The Persistence of Memory)', () => {
+    const kw = parseKeywords('Gain (2) Time Counters. \nBeings do not enter the Mortal Realm engaged.');
+    expect(kw.beingsEnterDisengaged).toBe(true);
   });
 
   it('captures "Twice per turn Modulate (±1)." (MetaToris)', () => {

@@ -1057,6 +1057,15 @@ export const parseKeywords = (textBox, cardName = null) => {
   // (turn.js > resolveProphecyModulateHitZero) so it doesn't also log an
   // honest-but-noisy "isn't automated yet" every time this flips.
   const skipsControllerDraw = /do not draw during the start of your turn/i.test(text);
+  // "Beings do not enter the Mortal Realm engaged" (The Persistence of
+  // Memory) — the same "ongoing effect read live off a face-up Prophecy
+  // with a Time Counter" shape as skipsControllerDraw just above, but with
+  // no "you control" qualifier printed, so per RULES.md's own Pangs of
+  // Hunger convention ("Deal (N) damage to all Beings" — a real board-wide
+  // hit, either side, no "you control" qualifier) this suppresses summoning
+  // sickness for BOTH players' Beings, not just its controller's — see
+  // beingsEnterDisengagedActive, actions.js.
+  const beingsEnterDisengaged = /Beings do not enter the Mortal Realm engaged/i.test(text);
   // "(X) is equal to the total number of Time Counters you control"
   // (Horological Horror) — a characteristic-defining Strength/Lifespan,
   // computed once at summon (same "snapshot, not continuously recomputed"
@@ -1341,6 +1350,7 @@ export const parseKeywords = (textBox, cardName = null) => {
       ? { times: TIMES_WORDS[timesPerTurnMatch[1].toLowerCase()], effect: timesPerTurnMatch[2].trim() }
       : null,
     skipsControllerDraw,
+    beingsEnterDisengaged,
     xEqualsTimeCountersControlled,
     statPenaltyEqualsTimeCountersControlled,
     otherSameTypingBonus: otherSameTypingMatch

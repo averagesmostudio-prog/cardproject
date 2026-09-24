@@ -4279,6 +4279,282 @@ describe('"Negate the Summoning of target Being, it conjures as a face up Prophe
   });
 });
 
+describe('"Beings do not enter the Mortal Realm engaged." (The Persistence of Memory)', () => {
+  const persistenceOfMemoryText = 'Gain (2) Time Counters. \nBeings do not enter the Mortal Realm engaged. \n\n"Memory for some, Motivation for others"';
+  const persistenceOfMemory = (overrides = {}) => ({
+    type: 'prophecy', ownerId: 'A', faceDown: false, timer: 1,
+    card: { name: 'The Persistence of Memory', textBox: persistenceOfMemoryText, keywords: { beingsEnterDisengaged: true } },
+    ...overrides,
+  });
+
+  it('a face-up copy owned by A lets A\'s own Beings enter disengaged', () => {
+    const being = beingCard({ instanceId: 'b1#0', castingCost: { faithless: 0, colored: {} } });
+    const state = baseState({ turnPlayer: 'A', board: { r3c1: persistenceOfMemory() }, players: { A: player({ hand: [being] }), B: player() } });
+    const next = gameReducer(state, { type: 'SUMMON_BEING', instanceId: 'b1#0', cellId: 'r1c2' });
+    expect(next.board.r1c2).toMatchObject({ type: 'being', engaged: false });
+  });
+
+  it('also lets B\'s Beings enter disengaged — no "you control" qualifier printed, so it\'s symmetric', () => {
+    const being = beingCard({ instanceId: 'b1#0', castingCost: { faithless: 0, colored: {} } });
+    const state = baseState({ turnPlayer: 'B', board: { r3c1: persistenceOfMemory() }, players: { A: player(), B: player({ hand: [being] }) } });
+    const next = gameReducer(state, { type: 'SUMMON_BEING', instanceId: 'b1#0', cellId: 'r5c2' });
+    expect(next.board.r5c2).toMatchObject({ type: 'being', engaged: false });
+  });
+
+  it('a face-down copy (not yet flipped) has no effect — Beings still enter engaged normally', () => {
+    const being = beingCard({ instanceId: 'b1#0', castingCost: { faithless: 0, colored: {} } });
+    const state = baseState({ turnPlayer: 'A', board: { r3c1: persistenceOfMemory({ faceDown: true }) }, players: { A: player({ hand: [being] }), B: player() } });
+    const next = gameReducer(state, { type: 'SUMMON_BEING', instanceId: 'b1#0', cellId: 'r1c2' });
+    expect(next.board.r1c2).toMatchObject({ type: 'being', engaged: true });
+  });
+
+  it('a spent copy (0 Time Counters) has no effect either — the live read requires timer > 0', () => {
+    const being = beingCard({ instanceId: 'b1#0', castingCost: { faithless: 0, colored: {} } });
+    const state = baseState({ turnPlayer: 'A', board: { r3c1: persistenceOfMemory({ timer: 0 }) }, players: { A: player({ hand: [being] }), B: player() } });
+    const next = gameReducer(state, { type: 'SUMMON_BEING', instanceId: 'b1#0', cellId: 'r1c2' });
+    expect(next.board.r1c2).toMatchObject({ type: 'being', engaged: true });
+  });
+
+  it('also applies to a token Being (placeTokenOnBoard, not just a hand-cast summon)', () => {
+    const being = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'sv#0', name: 'Scā-vuhk Hunger' }), currentLifespan: 2, engaged: false };
+    const state = baseState({ board: { r3c1: persistenceOfMemory(), r2c1: being }, players: { A: player(), B: player() } });
+    const opened = resolveOrLogEffect(state, 'A', 'Scā-vuhk Hunger', 'sacrifice this and create (1) Scā-vuhk Hunger tokens.', 'Reaction', { selfCellId: 'r2c1' });
+    expect(opened.pendingChoice).toMatchObject({ kind: 'token-location' });
+    const placed = gameReducer(opened, { type: 'RESOLVE_TOKEN_LOCATION', cellId: 'r1c2' });
+    expect(placed.board.r1c2).toMatchObject({ type: 'being', engaged: false });
+  });
+
+  it('flipping face up gains 2 Time Counters and does NOT spuriously log the quoted flavor line as unimplemented', () => {
+    const state = baseState({ board: { r3c1: { ...persistenceOfMemory({ faceDown: true, timer: 0 }), card: { name: 'The Persistence of Memory', textBox: persistenceOfMemoryText, keywords: { beingsEnterDisengaged: true } } } }, players: { A: player(), B: player() } });
+    const next = resolveProphecyModulateHitZero(state, 'r3c1');
+    expect(next.board.r3c1.faceDown).toBe(false);
+    expect(next.board.r3c1.timer).toBe(2);
+    expect(next.log.some(e => e.message.includes("isn't automated yet"))).toBe(false);
+  });
+});
+
+describe('"Negate a Prophecy and flip it face down, then add (2) Time Counters to it." (Rewrite the Past)', () => {
+  const rewriteThePast = (overrides = {}) => ({
+    id: 'rtp', instanceId: 'rtp#0', name: 'Rewrite the Past', kind: 'ethereal-conjuring',
+    castingCost: { faithless: 0, colored: {} },
+    textBox: 'Negate a Prophecy and flip it face down, then add (2) Time Counters to it.',
+    ...overrides,
+  });
+  const prophecy = (overrides = {}) => ({
+    type: 'prophecy', ownerId: 'A', faceDown: false, timer: 1, card: { name: 'Some Prophecy' },
+    ...overrides,
+  });
+
+  it('0 Prophecies on board: the card is still spent, with an honest log and no board mutation', () => {
+    const state = baseState({ turnPlayer: 'A', players: { A: player({ hand: [rewriteThePast()] }), B: player() } });
+    const next = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'rtp#0' });
+    expect(next.players.A.hand).toHaveLength(0);
+    expect(next.players.A.purgatory.some(c => c.name === 'Rewrite the Past')).toBe(true);
+    expect(next.log.some(e => e.message.includes('has no Prophecy to negate'))).toBe(true);
+  });
+
+  it('exactly 1 Prophecy on the board (either owner): auto-resolves, flips face down, +2 Time Counters', () => {
+    const state = baseState({
+      turnPlayer: 'A',
+      board: { r4c1: prophecy({ ownerId: 'B', faceDown: false, timer: 1 }) },
+      players: { A: player({ hand: [rewriteThePast()] }), B: player() },
+    });
+    const next = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'rtp#0' });
+    expect(next.board.r4c1).toMatchObject({ faceDown: true, timer: 3 });
+  });
+
+  it('2+ Prophecies (mixed ownership, mixed face state): opens a target-prophecy choice, offered for every one regardless of owner/faceDown', () => {
+    const state = baseState({
+      turnPlayer: 'A',
+      board: {
+        r1c1: prophecy({ ownerId: 'A', faceDown: false }),
+        r4c1: prophecy({ ownerId: 'B', faceDown: true }),
+      },
+      players: { A: player({ hand: [rewriteThePast()] }), B: player() },
+    });
+    const opened = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'rtp#0' });
+    expect(opened.pendingChoice).toEqual({ kind: 'target-prophecy', playerId: 'A', cardName: 'Rewrite the Past' });
+    const offered = getLegalActions(opened, 'A').filter(a => a.type === 'RESOLVE_TARGET_PROPHECY');
+    expect(offered.map(a => a.cellId).sort()).toEqual(['r1c1', 'r4c1']);
+    const resolved = gameReducer(opened, { type: 'RESOLVE_TARGET_PROPHECY', cellId: 'r4c1' });
+    expect(resolved.board.r4c1).toMatchObject({ faceDown: true, timer: 3 }); // 1 + 2
+    expect(resolved.board.r1c1).toMatchObject({ faceDown: false, timer: 1 }); // untouched
+    expect(resolved.pendingChoice).toBeNull();
+  });
+
+  it('targeting an already-face-down Prophecy still adds 2 Time Counters and stays face down (a no-op re-affirmation)', () => {
+    const state = baseState({
+      turnPlayer: 'A',
+      board: { r4c1: prophecy({ ownerId: 'B', faceDown: true, timer: 0 }) },
+      players: { A: player({ hand: [rewriteThePast()] }), B: player() },
+    });
+    const next = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'rtp#0' });
+    expect(next.board.r4c1).toMatchObject({ faceDown: true, timer: 2 });
+  });
+
+  it('flipping a face-up Prophecy face down really ends its live ongoing effect (skipsControllerDraw)', () => {
+    const daylightSavings = prophecy({
+      ownerId: 'B', faceDown: false, timer: 1,
+      card: { name: 'Daylight Savings', keywords: { skipsControllerDraw: true } },
+    });
+    const state = baseState({ board: { r4c1: daylightSavings }, players: { A: player(), B: player({ mainDeck: [{ instanceId: 'd1' }] }) } });
+    const negated = resolveOrLogEffect(state, 'A', 'Rewrite the Past', rewriteThePast().textBox, 'effect');
+    expect(negated.board.r4c1.faceDown).toBe(true);
+  });
+
+  it('preserves shiftedFromCard/returnsAsSummon on a Prophecy mid-Delay/Prophesize return trip', () => {
+    const shifted = prophecy({
+      ownerId: 'A', faceDown: false, timer: 1,
+      card: { name: 'Some Being', keywords: {} },
+      shiftedFromCard: { name: 'Some Being', instanceId: 'sb#0' },
+      returnsAsSummon: true,
+    });
+    const state = baseState({
+      turnPlayer: 'A',
+      board: { r3c1: shifted },
+      players: { A: player({ hand: [rewriteThePast()] }), B: player() },
+    });
+    const next = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'rtp#0' });
+    expect(next.board.r3c1).toMatchObject({ faceDown: true, timer: 3, returnsAsSummon: true });
+    expect(next.board.r3c1.shiftedFromCard).toEqual({ name: 'Some Being', instanceId: 'sb#0' });
+  });
+});
+
+describe('"Target Conjuring becomes a Prophecy and gains: (2) Time Counters, \'If this has at least (1) Time Counter its effects are negated\'" (Waning Words)', () => {
+  // r3c1-r3c4 filled so exactly one Ethereal Realm tile (r3c5) is empty —
+  // same single-candidate auto-place convention Delay/Prophesize's own
+  // tests use.
+  const fillFourEthereal = {
+    r3c1: { type: 'prophecy', ownerId: 'A', card: { name: 'Filler 1' }, timer: 1, faceDown: true },
+    r3c2: { type: 'prophecy', ownerId: 'A', card: { name: 'Filler 2' }, timer: 1, faceDown: true },
+    r3c3: { type: 'prophecy', ownerId: 'A', card: { name: 'Filler 3' }, timer: 1, faceDown: true },
+    r3c4: { type: 'prophecy', ownerId: 'A', card: { name: 'Filler 4' }, timer: 1, faceDown: true },
+  };
+  const waningWords = (overrides = {}) => ({
+    id: 'ww', instanceId: 'ww#0', name: 'Waning Words', kind: 'ethereal-conjuring',
+    castingCost: { faithless: 0, colored: {} },
+    textBox: 'Target Conjuring becomes a Prophecy and gains: (2) Time Counters, "If this has at least (1) Time Counter its effects are negated"',
+    ...overrides,
+  });
+  // "Gain (3) Lifespan." — a real, single-step-resolvable effect (no
+  // pendingChoice of its own), so its own resolution is trivial to assert.
+  const victim = (overrides = {}) => ({
+    id: 'victim', instanceId: 'victim#0', name: 'Victim Conjuring', kind: 'conjuring',
+    castingCost: { faithless: 0, colored: {} },
+    textBox: 'Gain (3) Lifespan.',
+    ...overrides,
+  });
+
+  it('is not offered without a real cast-declaration window open', () => {
+    const state = baseState({ players: { A: player(), B: player({ hand: [waningWords()] }) } });
+    expect(getLegalActions(state, 'B').some(a => a.type === 'CAST_CONJURING')).toBe(false);
+  });
+
+  it('a fresh cast defers its own effect behind pendingResolution, opening a window for the opponent', () => {
+    const state = baseState({
+      turnPlayer: 'A',
+      players: { A: player({ hand: [victim()], lifespan: 50 }), B: player({ hand: [waningWords()] }) },
+    });
+    const next = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'victim#0' });
+    expect(next.pendingResolution).toEqual({ kind: 'cast-conjuring', declaringPlayer: 'A', cardName: 'Victim Conjuring', textBox: 'Gain (3) Lifespan.', instanceId: 'victim#0' });
+    expect(next.players.A.purgatory.some(c => c.instanceId === 'victim#0')).toBe(true);
+    expect(next.players.A.lifespan).toBe(50); // not yet resolved
+    expect(next.reactiveWindow).toEqual(expect.objectContaining({ openFor: 'B' }));
+  });
+
+  it('cast reactively into that window: pulls the target out of Purgatory and converts it into a face up Prophecy', () => {
+    const state = baseState({
+      turnPlayer: 'A',
+      board: fillFourEthereal,
+      players: { A: player({ hand: [victim()], lifespan: 50 }), B: player({ hand: [waningWords()] }) },
+    });
+    const declared = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'victim#0' });
+    const negated = gameReducer(declared, { type: 'CAST_CONJURING', instanceId: 'ww#0' });
+    expect(negated.players.A.purgatory.some(c => c.instanceId === 'victim#0')).toBe(false); // pulled back out
+    const prophecy = negated.board.r3c5;
+    expect(prophecy).toMatchObject({ type: 'prophecy', ownerId: 'A', timer: 2, faceDown: false, resolvesAsConjuring: true });
+    expect(prophecy.card.name).toBe('Victim Conjuring');
+    expect(prophecy.shiftedFromCard.textBox).toBe('Gain (3) Lifespan.');
+    expect(negated.pendingResolution).toBeNull();
+    expect(negated.players.A.lifespan).toBe(50); // negated — never resolved
+  });
+
+  it('ticking that Prophecy to 0 re-declares the original effect and, with nobody to respond, resolves it for real within the same dispatch', () => {
+    const converted = {
+      type: 'prophecy', ownerId: 'A',
+      card: { ...victim(), textBox: '', typing: '', keywords: {} },
+      timer: 1, faceDown: false, shiftedFromCard: victim(), resolvesAsConjuring: true,
+    };
+    // Driven through the real RESOLVE_MODULATE dispatch (not a direct call
+    // to resolveProphecyModulateHitZero) so manageReactiveWindow's own
+    // auto-skip loop actually runs — with nobody able to respond, the
+    // re-declared pendingResolution resolves invisibly within this SAME
+    // dispatch, exactly like a fresh cast with no real opposition would.
+    const state = baseState({
+      board: { r3c1: converted },
+      players: { A: player({ lifespan: 50 }), B: player() },
+      pendingChoice: { kind: 'modulate', playerId: 'A', cardName: 'Test', delta: -1 },
+    });
+    const next = gameReducer(state, { type: 'RESOLVE_MODULATE', cellId: 'r3c1', delta: -1 });
+    expect(next.board.r3c1).toBeUndefined();
+    // Resolved for real, same end state as any normal Conjuring cast —
+    // spent Conjurings live in Purgatory permanently, same as the very
+    // first time this card was cast.
+    expect(next.players.A.purgatory.some(c => c.instanceId === 'victim#0')).toBe(true);
+    expect(next.pendingResolution).toBeNull();
+    expect(next.players.A.lifespan).toBe(53); // the original "Gain (3) Lifespan." really fired
+  });
+
+  it('a second Waning Words in that fresh window converts it into a Prophecy again instead of letting it resolve', () => {
+    const converted = {
+      type: 'prophecy', ownerId: 'A',
+      card: { ...victim(), textBox: '', typing: '', keywords: {} },
+      timer: 1, faceDown: false, shiftedFromCard: victim(), resolvesAsConjuring: true,
+    };
+    // fillFourEthereal leaves exactly one empty Ethereal tile (r3c5) so the
+    // second conversion auto-places instead of opening its own multi-tile
+    // pendingChoice (which would otherwise close the reactive window for
+    // an unrelated reason — a real, separate interaction this test isn't
+    // about).
+    const state = baseState({
+      board: { ...fillFourEthereal, r3c5: converted },
+      players: { A: player({ lifespan: 50 }), B: player({ hand: [waningWords()] }) },
+      pendingChoice: { kind: 'modulate', playerId: 'A', cardName: 'Test', delta: -1 },
+    });
+    const opened = gameReducer(state, { type: 'RESOLVE_MODULATE', cellId: 'r3c5', delta: -1 });
+    expect(opened.pendingResolution).toEqual(expect.objectContaining({ kind: 'cast-conjuring', declaringPlayer: 'A', instanceId: 'victim#0' }));
+    expect(opened.reactiveWindow).toEqual(expect.objectContaining({ openFor: 'B' }));
+    const negatedAgain = gameReducer(opened, { type: 'CAST_CONJURING', instanceId: 'ww#0' });
+    expect(negatedAgain.players.A.lifespan).toBe(50); // still never resolved
+    expect(negatedAgain.pendingResolution).toBeNull();
+    const prophecyAgain = Object.values(negatedAgain.board).find(o => o?.type === 'prophecy' && o?.card?.name === 'Victim Conjuring');
+    expect(prophecyAgain).toMatchObject({ timer: 2, resolvesAsConjuring: true });
+  });
+
+  it('with no cast currently pending, logs an honest fallback instead of crashing', () => {
+    const state = baseState({ players: { A: player(), B: player() } });
+    const next = resolveOrLogEffect(state, 'A', 'Waning Words', waningWords().textBox, 'effect');
+    expect(next.log.some(e => e.message.includes('has no Conjuring currently being cast to target'))).toBe(true);
+  });
+
+  it('Deja Vu-shaped casts are untouched by the fork — no pendingResolution is ever set for them', () => {
+    const dejaVu = {
+      id: 'dv', instanceId: 'dv#0', name: 'Deja Vu', kind: 'ethereal-conjuring',
+      castingCost: { faithless: 0, colored: { timeless: 2 }, xCostColor: '' },
+      keywords: { dejaVu: true },
+      textBox: 'Return target Being that you control with cost (X) to your hand, then Summon it without paying its summoning cost',
+    };
+    const ownBeing = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'own#0', castingCost: { faithless: 1, colored: {} } }), currentLifespan: 3, engaged: false };
+    const state = baseState({
+      turnPlayer: 'A', board: { r2c1: ownBeing },
+      players: { A: player({ hand: [dejaVu], effigyPool: [effigy('timeless'), effigy('timeless'), effigy('bleeding')] }), B: player() },
+    });
+    const next = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'dv#0' });
+    expect(next.pendingResolution).toBeNull();
+    expect(next.pendingChoice).toEqual(expect.objectContaining({ kind: 'deja-vu-target' }));
+  });
+});
+
 describe('"As an additonal cost to conjure: Pay Lifespan equal to the Lifespan of target engaged Being you control. That Being fights without engaging. Sacrifice it at the end of the turn." (Desperate Finale)', () => {
   const desperateFinale = {
     id: 'df-1', instanceId: 'df-1#0', name: 'Desperate Finale', kind: 'conjuring',
@@ -4439,7 +4715,14 @@ describe('"Target Non Deity Being loses all abilities until end of turn." (Drown
       currentLifespan: 5, engaged: false,
     };
     const state = baseState({ board: { r4c1: target }, players: { A: player({ hand: [drown] }), B: player() } });
-    const next = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'dr-1#0' });
+    // B's own targeted Being has an Engage ability, so B has a real
+    // reactive option (its own Engage) and the window stays open for B
+    // until it explicitly passes — CAST_CONJURING now defers its own
+    // effect behind pendingResolution (Waning Words needs a real target to
+    // respond to), same "declare, then let the opponent respond, then
+    // resolve" shape SUMMON_BEING's own When-Summoned deferral uses.
+    const declared = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'dr-1#0' });
+    const next = gameReducer(declared, { type: 'PASS_PRIORITY' });
     expect(next.board.r4c1.card.keywords).toEqual({});
     expect(next.board.r4c1.suppressedKeywords).toEqual({ engage: 'Deal (1) damage to target Being.' });
     expect(effectiveStrength(next.board.r4c1)).toBe(4); // Strength retained
@@ -4499,7 +4782,12 @@ describe('"Target Being loses all abilities and becomes a 0/5 TreeFolk Being unt
       currentLifespan: 3, engaged: false,
     };
     const state = baseState({ board: { r4c1: target }, players: { A: player({ hand: [dendrify] }), B: player() } });
-    const next = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'dn-1#0' });
+    // B's own targeted Being has an Engage ability, so B has a real
+    // reactive option and the window stays open until it explicitly
+    // passes — see the "Drown out the Screams" describe block above for
+    // the same shape.
+    const declared = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'dn-1#0' });
+    const next = gameReducer(declared, { type: 'PASS_PRIORITY' });
     expect(next.board.r4c1.card.keywords).toEqual({});
     expect(effectiveStrength(next.board.r4c1)).toBe(0);
     expect(deathDamageFor(next.board.r4c1)).toBe(5);
@@ -4520,10 +4808,20 @@ describe('"Target Being loses all abilities and becomes a 0/5 TreeFolk Being unt
     const horror = {
       type: 'being', ownerId: 'B',
       card: beingCard({ instanceId: 'horror', name: 'Horological Horror', strength: 0, lifespan: 0, keywords: { xEqualsTimeCountersControlled: true } }),
-      currentLifespan: 6, strengthOverride: 6, engaged: false, // a live X of 6 from some Time Counters in play
+      currentLifespan: 6, strengthOverride: 6, engaged: false, // a live X of 6, backed for real below
     };
-    const state = baseState({ board: { r4c1: horror }, players: { A: player({ hand: [dendrify] }), B: player() } });
-    const next = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'dn-1#0' });
+    // A real Prophecy backing the live X of 6 — CAST_CONJURING now defers
+    // its own effect behind pendingResolution (see the reducer's own
+    // isReactiveResponse fork), so an extra dispatch (the eventual
+    // PASS_PRIORITY below) happens BEFORE Dendrify's suppression applies,
+    // and recomputeXBeings runs its own live delta check on that
+    // intermediate state too — an unbacked strengthOverride (no real Time
+    // Counters behind it) would show a false delta there and deal
+    // spurious lethal damage before Dendrify ever gets a chance to act.
+    const backing = { type: 'prophecy', ownerId: 'B', card: { name: 'Backing Prophecy' }, timer: 6, faceDown: true };
+    const state = baseState({ board: { r4c1: horror, r3c1: backing }, players: { A: player({ hand: [dendrify] }), B: player() } });
+    const declared = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'dn-1#0' });
+    const next = gameReducer(declared, { type: 'PASS_PRIORITY' });
     expect(next.board.r4c1).toBeDefined(); // still alive, not routed through death
     expect(next.board.r4c1.card.name).toBe('Horological Horror');
     expect(effectiveStrength(next.board.r4c1)).toBe(0);
@@ -12061,13 +12359,22 @@ describe('Eighth wave: typed-group temporary buff (Delectable Deviant) and damag
 
 describe('Ninth wave: Chronostasis\'s two-clause flip trigger', () => {
   const chronostasisText = 'Gain (2) Time Counters. \nBefore drawing a card(s) that player may reveal the top card of their deck, they may shuffle.';
+  const clause2 = 'Before drawing a card(s) that player may reveal the top card of their deck, they may shuffle.';
 
-  it('gains 2 Time Counters AND opens the reveal-and-maybe-shuffle choice, instead of silently dropping the second clause', () => {
+  it('the second clause alone opens the reveal-and-maybe-shuffle choice (the real per-line invocation shape — the two clauses are never resolved together)', () => {
     const prophecy = { type: 'prophecy', ownerId: 'A', faceDown: false, timer: 1, card: { name: 'Chronostasis', textBox: chronostasisText } };
+    const state = baseState({ board: { r3c1: prophecy }, players: { A: player(), B: player() } });
+    const next = resolveOrLogEffect(state, 'A', 'Chronostasis', clause2, 'Prophecy', { selfCellId: 'r3c1' });
+    expect(next.pendingChoice).toEqual({ kind: 'shuffle-or-keep', playerId: 'A', cardName: 'Chronostasis', deckOwner: 'A' });
+  });
+
+  it('flipping face-down to face-up (the real trigger point) gains 2 Time Counters AND opens the choice, instead of silently dropping the second clause', () => {
+    const prophecy = { type: 'prophecy', ownerId: 'A', faceDown: true, timer: 0, card: { name: 'Chronostasis', textBox: chronostasisText } };
     const deckCard = { instanceId: 'top#0', name: 'Top Card' };
     const state = baseState({ board: { r3c1: prophecy }, players: { A: player({ mainDeck: [deckCard] }), B: player() } });
-    const next = resolveOrLogEffect(state, 'A', 'Chronostasis', chronostasisText, 'Prophecy', { selfCellId: 'r3c1' });
-    expect(next.board.r3c1.timer).toBe(3); // 1 + 2
+    const next = resolveProphecyModulateHitZero(state, 'r3c1');
+    expect(next.board.r3c1.faceDown).toBe(false);
+    expect(next.board.r3c1.timer).toBe(2);
     expect(next.pendingChoice).toEqual({ kind: 'shuffle-or-keep', playerId: 'A', cardName: 'Chronostasis', deckOwner: 'A' });
   });
 
@@ -12075,7 +12382,7 @@ describe('Ninth wave: Chronostasis\'s two-clause flip trigger', () => {
     const prophecy = { type: 'prophecy', ownerId: 'A', faceDown: false, timer: 1, card: { name: 'Chronostasis', textBox: chronostasisText } };
     const deck = [{ instanceId: 'c1#0', name: 'C1' }, { instanceId: 'c2#0', name: 'C2' }, { instanceId: 'c3#0', name: 'C3' }];
     const state = baseState({ board: { r3c1: prophecy }, players: { A: player({ mainDeck: deck }), B: player() } });
-    const opened = resolveOrLogEffect(state, 'A', 'Chronostasis', chronostasisText, 'Prophecy', { selfCellId: 'r3c1' });
+    const opened = resolveOrLogEffect(state, 'A', 'Chronostasis', clause2, 'Prophecy', { selfCellId: 'r3c1' });
     const next = gameReducer(opened, { type: 'RESOLVE_SHUFFLE_OR_KEEP', shuffle: true });
     expect(next.pendingChoice).toBe(null);
     expect(next.players.A.mainDeck).toHaveLength(3); // still all 3 cards, just reordered (or coincidentally same order)
@@ -12851,7 +13158,15 @@ describe('Eighteenth wave: Ethereal Conjuring reactive timing (priority window)'
         B: player({ hand: [etherealConjuring({ instanceId: 'ec-b#0' })] }),
       },
     });
-    const midChoice = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'sc#0' });
+    // CAST_CONJURING now defers its own effect behind pendingResolution
+    // (see its reducer's own isReactiveResponse fork) — B holds a real
+    // Ethereal Conjuring, a genuine reactive option, so this first dispatch
+    // only declares the cast; the search (and its own pendingChoice) only
+    // actually resolves once B passes on that window.
+    const declared = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'sc#0' });
+    expect(declared.pendingChoice).toBeNull();
+    expect(declared.reactiveWindow).toEqual(expect.objectContaining({ openFor: 'B' }));
+    const midChoice = gameReducer(declared, { type: 'PASS_PRIORITY' });
     expect(midChoice.pendingChoice).toEqual(expect.objectContaining({ kind: 'search' }));
     expect(midChoice.reactiveWindow).toBeNull(); // not yet — the choice hasn't finished
     const resolved = gameReducer(midChoice, { type: 'RESOLVE_CHOICE', instanceId: 'a0#0' });
