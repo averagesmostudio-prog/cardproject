@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { pickAiAction, pickAiReaction, bestFirst, opponentReplyValue, evaluateState } from './ai.js';
+import { pickAiAction, pickAiReaction, bestFirst, opponentReplyValue, evaluateState, synergyValue, knownComboValue } from './ai.js';
 import { getLegalActions, gameReducer } from './actions.js';
 
 const player = (overrides = {}) => ({
@@ -549,5 +549,153 @@ describe('pickAiReaction', () => {
     expect(next.pendingChoice).toEqual(expect.objectContaining({
       kind: 'damage-target', boundlessHunger: expect.objectContaining({ bounceCount: 0 }),
     }));
+  });
+});
+
+describe('synergy and combo awareness', () => {
+  const mouthOfMadness = (ownerId) => ({
+    type: 'relic', ownerId, card: { name: 'Mouth of Madness', kind: 'relic', keywords: { duringEndStepForceShift: 1 } },
+  });
+  const terraneanGates = (ownerId) => ({
+    type: 'relic', ownerId, card: { name: 'Terranean Gates', kind: 'relic', keywords: { duringEndStepLoseTimeCounters: 2 } },
+  });
+  const immenGortaOnBoard = (ownerId = 'B') => ({
+    type: 'being', ownerId,
+    card: { name: 'Immen Gorta, the Boundless Hunger', kind: 'being', strength: 0, lifespan: 8, arrows: [] },
+    currentLifespan: 8, engaged: false,
+  });
+
+  describe('synergyValue / evaluateState — generic keyword cross-referencing', () => {
+    const typedAlly = (typing) => ({
+      type: 'being', ownerId: 'B', card: { name: 'Ally', kind: 'being', strength: 2, lifespan: 3, typing, arrows: [1] },
+      currentLifespan: 3, engaged: false,
+    });
+    // otherSameTypingBonus's own hand-potential branch (synergyValue) —
+    // deliberately NOT tested via an on-board occupant: that value is
+    // already priced into effectiveStrength/currentLifespan once
+    // gameReducer's own recomputeLiveAuras chain has run, and synergyValue
+    // deliberately skips it there to avoid double-counting (see its own
+    // comment in ai.js) — testing the hand branch is what actually
+    // isolates the new code.
+    const synergyHandCard = {
+      id: 'oth', instanceId: 'oth#0', name: 'Kin', kind: 'being', strength: 2, lifespan: 3, typing: 'Cat, Being',
+      keywords: { otherSameTypingBonus: { strength: 2, lifespan: 2 } },
+    };
+
+    it('evaluateState values a hand card whose synergy condition is already met on board over an otherwise-identical board where it is not', () => {
+      const withAlly = baseState({
+        board: { r4c1: typedAlly('Cat, Being') },
+        players: { A: player({ id: 'A' }), B: player({ id: 'B', hand: [synergyHandCard] }) },
+      });
+      const withoutAlly = baseState({
+        board: { r4c1: typedAlly('Rat, Being') },
+        players: { A: player({ id: 'A' }), B: player({ id: 'B', hand: [synergyHandCard] }) },
+      });
+      expect(evaluateState(withAlly, 'B')).toBeGreaterThan(evaluateState(withoutAlly, 'B'));
+    });
+
+    it('synergyValue caps hand-potential credit rather than growing unbounded with hand size', () => {
+      const manyCopies = Array.from({ length: 6 }, (_, i) => ({ ...synergyHandCard, instanceId: `oth#${i}` }));
+      const state = baseState({
+        board: { r4c1: typedAlly('Cat, Being') },
+        players: { A: player({ id: 'A' }), B: player({ id: 'B', hand: manyCopies }) },
+      });
+      // 6 matching hand cards, capped at HAND_POTENTIAL_SYNERGY_CAP (3) —
+      // confirms the cap is real, not just a high-but-finite number.
+      expect(synergyValue(state, 'B')).toBe(3 * 2); // HAND_POTENTIAL_SYNERGY_BONUS × cap
+    });
+  });
+
+  describe('knownComboValue (Boundless Hunger loop)', () => {
+    // Regression: piece 1 (Immen Gorta alone) deliberately scores the SAME
+    // as 0 pieces, not just a smaller positive bump — self-play validation
+    // found that even a small bonus for "just Immen Gorta, assembled"
+    // made Hard-mode camp on re-Shifting it every turn to keep collecting
+    // that credit (it already has its own self-contained Shift/damage
+    // ping ability, independent of the other two pieces), losing every
+    // game in that pattern instead of developing the board or actually
+    // working toward the real combo. See KNOWN_COMBOS' own comment.
+    it('is flat across 0-1 assembled pieces, then increasing with a disproportionate jump on the final piece', () => {
+      const v0 = knownComboValue(baseState(), 'B');
+      const v1 = knownComboValue(baseState({ board: { r4c1: immenGortaOnBoard() } }), 'B');
+      const v2 = knownComboValue(baseState({ board: { r4c1: immenGortaOnBoard(), r2c1: mouthOfMadness('B') } }), 'B');
+      const v3 = knownComboValue(baseState({
+        board: { r4c1: immenGortaOnBoard(), r2c1: mouthOfMadness('B'), r2c2: terraneanGates('B') },
+      }), 'B');
+      expect(v0).toBe(0);
+      expect(v1).toBe(v0);
+      expect(v2).toBeGreaterThan(v1);
+      expect(v3).toBeGreaterThan(v2);
+      expect(v3 - v2).toBeGreaterThan(v2 - v1);
+    });
+
+    // Regression guard: RULES.md prints Mouth of Madness/Terranean Gates
+    // with no "you control" restriction, and this is easy to get backwards
+    // — a relic-keyword piece owned by the OPPONENT still counts.
+    it('counts a relic-keyword piece regardless of which player owns it', () => {
+      const ownedByOpponent = knownComboValue(baseState({
+        board: { r4c1: immenGortaOnBoard('B'), r2c1: mouthOfMadness('A'), r2c2: terraneanGates('A') },
+      }), 'B');
+      const ownedBySelf = knownComboValue(baseState({
+        board: { r4c1: immenGortaOnBoard('B'), r2c1: mouthOfMadness('B'), r2c2: terraneanGates('B') },
+      }), 'B');
+      expect(ownedByOpponent).toBe(ownedBySelf);
+    });
+  });
+
+  describe('scoreAction — SUMMON_BEING/PLACE_RELIC combo preference', () => {
+    const immenGortaCard = {
+      id: 'immen', instanceId: 'immen#0', name: 'Immen Gorta, the Boundless Hunger', kind: 'being',
+      strength: 0, lifespan: 8, timerMax: 0, arrows: [1], castingCost: { faithless: 0, colored: {} },
+    };
+    const vanillaCard = {
+      id: 'van', instanceId: 'van#0', name: 'Big Vanilla', kind: 'being',
+      strength: 8, lifespan: 8, timerMax: 0, arrows: [1], castingCost: { faithless: 0, colored: {} },
+    };
+
+    it('prefers summoning a low-strength card that completes the combo\'s final piece over a much higher-strength vanilla card', () => {
+      const state = baseState({
+        board: { r2c1: mouthOfMadness('B'), r2c2: terraneanGates('B') },
+        players: { A: player({ id: 'A' }), B: player({ id: 'B', hand: [vanillaCard, immenGortaCard] }) },
+      });
+      const action = pickAiAction(state, 'B');
+      expect(action).toEqual({ type: 'SUMMON_BEING', instanceId: 'immen#0', cellId: expect.any(String) });
+    });
+
+    it('a genuine lethal attack still outranks a combo-completing summon (the combo bonus can never override a real win)', () => {
+      const lethalAttacker = {
+        type: 'being', ownerId: 'B', card: { name: 'Lethal', kind: 'being', strength: 99, lifespan: 3, arrows: [1] },
+        currentLifespan: 3, engaged: false,
+      };
+      const state = baseState({
+        board: { r4c1: lethalAttacker, r2c1: mouthOfMadness('B'), r2c2: terraneanGates('B') },
+        players: { A: player({ id: 'A', lifespan: 1 }), B: player({ id: 'B', hand: [immenGortaCard] }) },
+      });
+      const action = pickAiAction(state, 'B');
+      expect(action).toEqual({ type: 'MOVE_OR_ATTACK', fromCellId: 'r4c1', toCellId: 'r2c1', isAttack: true });
+    });
+  });
+
+  it('does not throw on a board carrying several synergy-keyword cards, and finishes well within an interactive time budget', () => {
+    const costReductionCard = {
+      id: 'cr', instanceId: 'cr#0', name: 'Bag o\' Bones', kind: 'relic', strength: 0, lifespan: 0, timerMax: 0, arrows: [], castingCost: { faithless: 0, colored: {} },
+    };
+    const typedBeing = (name, typing, ownerId) => ({
+      type: 'being', ownerId, card: { name, kind: 'being', strength: 2, lifespan: 2, typing, arrows: [1] }, currentLifespan: 2, engaged: false,
+    });
+    const state = baseState({
+      board: {
+        r4c1: immenGortaOnBoard('B'), r4c2: mouthOfMadness('B'), r4c3: terraneanGates('B'),
+        r5c1: typedBeing('Skeletal Colossus', 'Undead, Being', 'B'),
+        r2c1: typedBeing('Opponent', 'Undead, Being', 'A'), r2c2: typedBeing('Opponent2', 'Rat, Being', 'A'),
+      },
+      players: {
+        A: player({ id: 'A' }),
+        B: player({ id: 'B', hand: [costReductionCard, { ...costReductionCard, instanceId: 'cr#1' }] }),
+      },
+    });
+    const start = Date.now();
+    expect(() => pickAiAction(state, 'B', 'hard')).not.toThrow();
+    expect(Date.now() - start).toBeLessThan(2000);
   });
 });

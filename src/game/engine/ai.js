@@ -3,11 +3,236 @@
 // shallow 2-ply search on top (pickHardAction, near the bottom) — see its
 // own comment for why a classical deep minimax doesn't fit this game's own
 // turn structure.
-import { getLegalActions, actorView, gameReducer, resolveProphecyModulateHitZero } from './actions.js';
+import {
+  getLegalActions, actorView, gameReducer, resolveProphecyModulateHitZero,
+  countControlledByName, ownedFodderCells, raceTypings, hasOwnTyping, relicWithKeywordAnywhere,
+} from './actions.js';
 import { effectiveStrength } from './combat.js';
 import { directionDelta } from './board.js';
 
 const opponentIdOf = (playerId) => (playerId === 'A' ? 'B' : 'A');
+
+// A small, deliberately curated table of multi-card designed interactions
+// that no structured `keywords` field links together (unlike
+// otherSameTypingBonus/costReduction/etc. below, which the real engine
+// already cross-references by typing/name on its own). The Boundless
+// Hunger loop (Immen Gorta + Mouth of Madness + Terranean Gates) is
+// hand-authored engine logic (actions.js's 'boundless-hunger-*'
+// pendingResolution chain), not a printed cross-reference, so the AI has
+// no other way to notice it's being assembled. Each piece is identified
+// the SAME way actions.js's own engine code already identifies it when
+// resolving the combo for real — by exact card name for a specific
+// singular card, or by the same relic keyword flag
+// relicWithKeywordAnywhere already keys off of — so this table can't
+// silently drift out of sync with a reprint/errata. `ownerScoped: false`
+// on the two relics matches RULES.md's own "either player's copy affects
+// any Being's Shift" (Mouth of Madness/Terranean Gates on the OPPONENT's
+// side enable my own Immen Gorta loop just as well as my own copy would).
+const KNOWN_COMBOS = [
+  {
+    id: 'boundless-hunger-loop',
+    pieces: [
+      { name: 'Immen Gorta, the Boundless Hunger', ownerScoped: true },
+      { relicKeyword: 'duringEndStepForceShift', ownerScoped: false }, // Mouth of Madness
+      { relicKeyword: 'duringEndStepLoseTimeCounters', ownerScoped: false }, // Terranean Gates
+    ],
+    // Indexed by assembled-piece count (0..pieces.length) — jumps hard on
+    // the final piece since completing it is close to an outright win
+    // (repeated free damage every End Phase), not linear partial credit.
+    // Stays two orders of magnitude under evaluateState's own ±1,000,000
+    // gameover sentinel, so it can never outrank an actual win/loss.
+    //
+    // Piece 1 (Immen Gorta alone) is deliberately worth NOTHING — self-play
+    // validation found a real regression from giving it even a small
+    // bonus: Immen Gorta already has its own printed Shift/damage ability
+    // (a self-contained "ping" loop with no Relics needed), and any credit
+    // for merely having it "assembled" made the Hard-mode search camp on
+    // re-Shifting it turn after turn to keep collecting that credit,
+    // instead of developing the board or actually working toward the
+    // other two pieces — it lost every single self-play game once it fell
+    // into that pattern (0/150 wins, down from a healthier baseline).
+    // Reverting to 0 here removed the camping behavior in the same traced
+    // games. Only 2+ pieces (a real step toward the actual combo, not just
+    // "the card that happens to anchor it") get real credit.
+    bonusByCount: [0, 0, 20, 150],
+  },
+];
+
+const comboPieceSatisfied = (state, playerId, piece) => {
+  if (piece.name) return countControlledByName(state.board, playerId, piece.name) > 0;
+  if (piece.relicKeyword) return !!relicWithKeywordAnywhere(state.board, piece.relicKeyword);
+  return false;
+};
+
+// Exported for direct testing, same convention as evaluateState/bestFirst/
+// opponentReplyValue below.
+export const knownComboValue = (state, playerId) => {
+  let total = 0;
+  KNOWN_COMBOS.forEach(combo => {
+    const assembled = combo.pieces.filter(p => comboPieceSatisfied(state, playerId, p)).length;
+    total += combo.bonusByCount[assembled] ?? combo.bonusByCount[combo.bonusByCount.length - 1];
+  });
+  return total;
+};
+
+// The marginal combo value of playing `card` from hand right now, given the
+// CURRENT board — scoreAction scores a candidate action BEFORE gameReducer
+// ever dispatches it, so it needs the delta between "as if this named piece
+// were already assembled" and the real current value, not knownComboValue's
+// own already-assembled read. Only meaningful for name-identified pieces (a
+// hand card can complete a piece by its own name landing; it can never
+// itself BE a relic-keyword piece it doesn't carry).
+const knownComboMarginalValue = (state, playerId, card) => {
+  let total = 0;
+  KNOWN_COMBOS.forEach(combo => {
+    const now = combo.pieces.filter(p => comboPieceSatisfied(state, playerId, p)).length;
+    const withCard = combo.pieces.filter(p =>
+      comboPieceSatisfied(state, playerId, p) || (p.name && card.name === p.name)
+    ).length;
+    total += (combo.bonusByCount[withCard] ?? combo.bonusByCount[combo.bonusByCount.length - 1])
+      - (combo.bonusByCount[now] ?? combo.bonusByCount[combo.bonusByCount.length - 1]);
+  });
+  return total;
+};
+
+// Weight scale for synergyValue/summonSynergyBonus below, calibrated
+// against evaluateState's existing terms: board material runs roughly
+// 3-15 per Being (effectiveStrength + currentLifespan), lifespan-diff runs
+// up to roughly ±100 (×2, up to ~50 Lifespan per side), hand-size runs
+// roughly 0-15 (×1.5). Every weight here is sized to tip a genuinely CLOSE
+// decision, not outweigh a real material/lifespan swing — KNOWN_COMBOS'
+// own final-piece bonus is the one deliberate exception (see its own
+// comment above).
+const COST_REDUCTION_SYNERGY_CAP = 6;
+const SACRIFICE_ENGINE_LIVE_BONUS = 4;
+const TYPED_REACTION_HAND_BONUS = 3;
+const TYPED_REACTION_BOARD_ONLY_BONUS = 1;
+const REANIMATE_REACTION_BONUS = 2;
+const END_OF_TURN_GROWTH_DISCOUNT = 0.75; // one End Step away from real material, not yet real
+const HAND_POTENTIAL_SYNERGY_BONUS = 2;
+const HAND_POTENTIAL_SYNERGY_CAP = 3;
+const AURA_EMISSION_BONUS_CAP = 12;
+
+// Synergy value ALREADY on board or in hand for `playerId` — feeds
+// evaluateState (the Hard-mode search's only leaf evaluator), so the
+// search itself values synergy-rich states higher at every leaf, not just
+// the top-level move choice. Deliberately does NOT re-score
+// otherSameTypingBonus/allTypingsBonus/perOtherTypingBonus/
+// boardWideAllyBonus for an occupant already ON board — those four are
+// already live-applied to effectiveStrength/currentLifespan by
+// gameReducer's own recomputeLiveAuras chain (actions.js), and Hard-mode
+// search always dispatches through gameReducer before calling
+// evaluateState, so evaluateState's own material sum already prices them
+// in once a card is actually on board. Re-adding them here would double-
+// count and skew close comparisons. What's left is real value that isn't
+// yet reflected as material: tempo/capability (costReduction,
+// sacrificeXSummon), reaction availability contingent on a future summon/
+// sacrifice (onTypedSummonedUnderControl, reanimateOnSacrificedTypedToken),
+// value one End Step away (endOfTurnGrowthPerName), small capped credit
+// for a HAND card whose condition is already met on board (potential, not
+// yet realized), and the curated combo table.
+export const synergyValue = (state, playerId) => {
+  const board = state.board;
+  let value = 0;
+  Object.values(board).forEach(occupant => {
+    if (occupant?.type !== 'being' || occupant.ownerId !== playerId) return;
+    const kw = occupant.card.keywords || {};
+    if (kw.costReduction) {
+      const count = countControlledByName(board, playerId, kw.costReduction.name);
+      value += Math.min(kw.costReduction.amount * count, COST_REDUCTION_SYNERGY_CAP);
+    }
+    if (kw.sacrificeXSummon && ownedFodderCells(board, playerId, kw.sacrificeXSummon.fodderName).length > 0) {
+      value += SACRIFICE_ENGINE_LIVE_BONUS;
+    }
+    if (kw.onTypedSummonedUnderControl) {
+      const typing = kw.onTypedSummonedUnderControl.typing;
+      const hasHandTarget = state.players[playerId].hand.some(c => (c.typing || '').toLowerCase().includes(typing.toLowerCase()));
+      if (hasHandTarget) value += TYPED_REACTION_HAND_BONUS;
+      else if (hasOwnTyping(board, playerId, typing)) value += TYPED_REACTION_BOARD_ONLY_BONUS;
+    }
+    if (kw.reanimateOnSacrificedTypedToken && hasOwnTyping(board, playerId, kw.reanimateOnSacrificedTypedToken.typing)) {
+      value += REANIMATE_REACTION_BONUS;
+    }
+    if (kw.endOfTurnGrowthPerName) {
+      const needle = kw.endOfTurnGrowthPerName.namePart.toLowerCase();
+      const count = Object.values(board).filter(o =>
+        o && o !== occupant && o.type === 'being' && o.ownerId === playerId && o.card.name.toLowerCase().includes(needle)
+      ).length;
+      value += END_OF_TURN_GROWTH_DISCOUNT * (kw.endOfTurnGrowthPerName.strength + kw.endOfTurnGrowthPerName.lifespan) * count;
+    }
+  });
+
+  let handSynergyCount = 0;
+  state.players[playerId].hand.forEach(card => {
+    if (handSynergyCount >= HAND_POTENTIAL_SYNERGY_CAP) return;
+    const kw = card.keywords || {};
+    let combos = false;
+    if (kw.costReduction && countControlledByName(board, playerId, kw.costReduction.name) > 0) combos = true;
+    if (!combos && kw.otherSameTypingBonus) {
+      const myTypings = raceTypings(card);
+      combos = myTypings.length > 0 && Object.values(board).some(o =>
+        o?.type === 'being' && o.ownerId === playerId && raceTypings(o.card).some(t => myTypings.includes(t))
+      );
+    }
+    if (!combos && kw.allTypingsBonus) combos = kw.allTypingsBonus.typings.every(t => hasOwnTyping(board, playerId, t));
+    if (!combos && kw.perOtherTypingBonus) combos = hasOwnTyping(board, playerId, kw.perOtherTypingBonus.typing);
+    if (combos) { value += HAND_POTENTIAL_SYNERGY_BONUS; handSynergyCount += 1; }
+  });
+
+  value += knownComboValue(state, playerId);
+  return value;
+};
+
+// What a not-yet-on-board `card` would gain in live conditional/aura
+// Strength+Lifespan the instant it lands, given playerId's CURRENT board —
+// mirrors recomputeConditionalBonuses'/recomputeBoardWideAuraBonuses' own
+// exact matching rules (actions.js) rather than reinventing them, so this
+// always agrees with what the real engine applies once summoned.
+// scoreAction has no other way to see this: it scores a candidate action
+// BEFORE gameReducer ever dispatches it.
+const summonSynergyBonus = (state, playerId, card) => {
+  const kw = card.keywords || {};
+  const board = state.board;
+  let bonus = 0;
+  if (kw.otherSameTypingBonus) {
+    const myTypings = raceTypings(card);
+    const hasOther = myTypings.length > 0 && Object.values(board).some(o =>
+      o?.type === 'being' && o.ownerId === playerId && raceTypings(o.card).some(t => myTypings.includes(t))
+    );
+    if (hasOther) bonus += kw.otherSameTypingBonus.strength + kw.otherSameTypingBonus.lifespan;
+  }
+  if (kw.allTypingsBonus && kw.allTypingsBonus.typings.every(t => hasOwnTyping(board, playerId, t))) {
+    bonus += kw.allTypingsBonus.strength + kw.allTypingsBonus.lifespan;
+  }
+  if (kw.perOtherTypingBonus) {
+    const word = kw.perOtherTypingBonus.typing.toLowerCase();
+    const count = Object.values(board).filter(o => o?.type === 'being' && o.ownerId === playerId && (o.card.typing || '').toLowerCase().includes(word)).length;
+    bonus += (kw.perOtherTypingBonus.strength + kw.perOtherTypingBonus.lifespan) * count;
+  }
+  // Aura THIS card would emit onto existing allies — approximated as a
+  // flat per-ally count (this file's own "cheap heuristic, not a
+  // simulator" philosophy) rather than re-deriving
+  // recomputeBoardWideAuraBonuses per ally. Capped so a wide board can't
+  // let this one term swamp everything else in scoreAction.
+  if (kw.boardWideAllyBonus) {
+    const allyCount = Object.values(board).filter(o => o?.type === 'being' && o.ownerId === playerId).length;
+    bonus += Math.min((kw.boardWideAllyBonus.strength + kw.boardWideAllyBonus.lifespan) * allyCount, AURA_EMISSION_BONUS_CAP);
+  }
+  return bonus;
+};
+
+// Same aura-emission case as summonSynergyBonus's own boardWideAllyBonus
+// branch, but for a Prophecy about to be played (PLAY_PROPHECY) —
+// recomputeBoardWideAuraBonuses (actions.js) reads boardWideAllyBonus off
+// ANY face-up Prophecy occupant, not just Beings, so a Prophecy carrying
+// this keyword is a real synergy signal scoreAction's flat baseline score
+// currently can't see at all.
+const prophecySynergyBonus = (state, playerId, card) => {
+  const kw = card.keywords || {};
+  if (!kw.boardWideAllyBonus) return 0;
+  const allyCount = Object.values(state.board).filter(o => o?.type === 'being' && o.ownerId === playerId).length;
+  return Math.min((kw.boardWideAllyBonus.strength + kw.boardWideAllyBonus.lifespan) * allyCount, AURA_EMISSION_BONUS_CAP);
+};
 
 // How many of a Prophecy's own future automatic decay ticks (the same
 // 1-per-turn countdown modulate()/turn.js already applies every real turn)
@@ -163,10 +388,36 @@ const scoreAction = (state, action, playerId) => {
     // one score — but not an outright ban: still summonable as a last
     // resort, same as everything else here degrading rather than vetoing.
     const selfDamageRisk = card ? whenSummonedSelfDamageRisk(state, playerId, card) * 15 : 0;
-    return 20 + (card?.strength || 0) - selfDamageRisk;
+    // What this card gains live the instant it lands (typing/aura synergy
+    // already on board) plus what it's worth toward a known combo — see
+    // summonSynergyBonus/knownComboMarginalValue's own comments above.
+    const synergyBonus = card
+      ? summonSynergyBonus(state, playerId, card) + knownComboMarginalValue(state, playerId, card)
+      : 0;
+    return 20 + (card?.strength || 0) - selfDamageRisk + synergyBonus;
   }
 
-  if (action.type === 'PLAY_PROPHECY') return 15;
+  if (action.type === 'PLAY_PROPHECY') {
+    const card = state.players[playerId].hand.find(c => c.instanceId === action.instanceId);
+    return 15 + (card ? prophecySynergyBonus(state, playerId, card) : 0);
+  }
+
+  // Previously unscored (fell through to the flat 0 default at the bottom
+  // of this function) — the real gap for the Boundless Hunger loop's own
+  // two Relic pieces (Mouth of Madness/Terranean Gates), which use THIS
+  // action type, not PLAY_PROPHECY. Baselined at 0, NOT 15 like
+  // PLAY_PROPHECY — self-play validation found 15 made the AI rush
+  // Relics out ahead of actual board development, since (unlike a
+  // Prophecy, which can become a real Being) a Relic never blocks an
+  // attack (RULES.md > Combat) and provides zero defensive value; losing
+  // games showed it eating full unblocked damage turn after turn while
+  // it had already "used" its priority placing a Relic instead. Real
+  // combo-completion value still comes through via knownComboMarginalValue.
+  if (action.type === 'PLACE_RELIC') {
+    const card = state.players[playerId].hand.find(c => c.instanceId === action.instanceId);
+    return card ? knownComboMarginalValue(state, playerId, card) : 0;
+  }
+
   if (action.type === 'KEEP_HAND') return 10;
   if (action.type === 'MULLIGAN') return 0;
   if (action.type === 'PASS_TURN') return -100; // last resort
@@ -383,6 +634,9 @@ export const evaluateState = (state, playerId) => {
     value += occupant.ownerId === playerId ? material : -material;
   });
   value += (state.players[playerId].hand.length - state.players[opponentId].hand.length) * 1.5;
+  // Synergy/combo awareness — see synergyValue's own comment above for why
+  // this deliberately skips value the material loop above already prices in.
+  value += synergyValue(state, playerId) - synergyValue(state, opponentId);
   return value;
 };
 
