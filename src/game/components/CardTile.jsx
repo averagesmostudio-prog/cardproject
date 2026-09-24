@@ -39,7 +39,16 @@ const ONBOARD_HOVER_HEIGHT = Math.round(ONBOARD_HOVER_WIDTH * 7 / 5);
 
 export default function CardTile({
   card, currentLifespan, strength, engaged, faceDown, isOwn, horizontal, selected, dimmed, onClick, size = 'md',
-  onboard = false, hoverDelayMs = HOVER_DELAY_MS, disableHoverPreview = false, borderImages, borderImagesLoaded, artImages, artBorderImages, artImagesLoaded, fontLoaded,
+  // `onboard` picks the compact On Board *shape* (short aspect ratio, the
+  // portal hover preview, opponent-side 180° rotation, ...) — used for a
+  // card in hand too, since the hand row wants that same compact footprint.
+  // `inPlay` is the separate, narrower flag for "this occupant is actually
+  // sitting on the board right now" (Board.jsx only — never Hand.jsx or the
+  // mulligan star layout, both onboard-shaped but not in play), which is
+  // what actually picks On Board Border's stat-forward layout over Digital
+  // Border's (CardThumbnail.jsx). A card in hand always stays Digital
+  // Border even though it shares the same onboard shape.
+  onboard = false, inPlay = false, hoverDelayMs = HOVER_DELAY_MS, disableHoverPreview = false, borderImages, borderImagesLoaded, artImages, artBorderImages, artImagesLoaded, fontLoaded,
 }) {
   const dims = SIZE_CLASSES[size] || SIZE_CLASSES.md;
   const wrapRef = useRef(null);
@@ -174,7 +183,7 @@ export default function CardTile({
         className={`transition-transform duration-200 ${dimmed ? 'opacity-40' : ''}`}
         style={{ transform: rotationDeg ? `rotate(${rotationDeg}deg)` : undefined }}
       >
-        <CardThumbnail card={card} onboard={onboard} borderImages={borderImages} borderImagesLoaded={borderImagesLoaded} artImages={artImages} artBorderImages={artBorderImages} artImagesLoaded={artImagesLoaded} fontLoaded={fontLoaded} />
+        <CardThumbnail card={card} onboard={onboard} inPlay={inPlay} borderImages={borderImages} borderImagesLoaded={borderImagesLoaded} artImages={artImages} artBorderImages={artBorderImages} artImagesLoaded={artImagesLoaded} fontLoaded={fontLoaded} />
       </div>
       {damaged && (
         <span className="absolute bottom-1 right-1 bg-red-700 text-white text-[10px] font-bold px-1 rounded shadow z-10">

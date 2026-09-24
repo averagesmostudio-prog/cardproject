@@ -25,9 +25,15 @@ export const BORDER_IMAGE_SRC = {
   onboardRelic: `${import.meta.env.BASE_URL}borders/onboard-relic.png`,
 };
 
+// User-selectable styles only (drives the Generator's own Border Style
+// picker) — 'onboardStats' (the On Board Border layout, see
+// getBorderTypeForCard and cardRender.js's appliesStatSwap) is deliberately
+// left out of this list. It only ever applies automatically, in the actual
+// game, to a Being/Armament actually sitting on the board (CardThumbnail.jsx)
+// — it's not something to browse/export from the Generator.
 export const BORDER_STYLES = {
   default: { label: 'Default', keys: ['beingProphecy', 'relicAltar', 'conjuring'] },
-  onboard: { label: 'On Board', keys: ['onboardBeing', 'onboardConjuring', 'onboardRelic'] },
+  onboard: { label: 'Digital Border', keys: ['onboardBeing', 'onboardConjuring', 'onboardRelic'] },
 };
 
 // Per-card illustration art. Card Name -> image src. Undecorated cards (the
@@ -91,7 +97,7 @@ export const getBorderTypeForCard = (card, style = 'default') => {
   // one — checked before the plain "relic" cases below, same precedence as
   // getCardKind.
   const isRelicBeing = typing.includes('relic') && typing.includes('being');
-  if (style === 'onboard') {
+  if (style === 'onboard' || style === 'onboardStats') {
     if (typing.includes('armament')) return 'onboardBeing';
     if (isRelicBeing) return 'onboardBeing';
     if (typing.includes('relic')) return 'onboardRelic';

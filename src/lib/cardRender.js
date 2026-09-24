@@ -180,7 +180,12 @@ export const renderCardOnCanvas = (canvas, card, img, positions, targetWidth = C
   // positions left them sitting too high, not settled into the curve the
   // way they are on the standard card. These are independent of `positions`
   // (which the Default style's Position Controls still fully own).
-  const isOnboard = borderStyle === 'onboard';
+  // 'onboardStats' (cardData.js > BORDER_STYLES) reuses every bit of the
+  // On Board shape/geometry below — only the two blocks guarded by
+  // `isOnboardStats` further down (the cost corner and the Strength/
+  // Lifespan corner) actually differ.
+  const isOnboard = borderStyle === 'onboard' || borderStyle === 'onboardStats';
+  const isOnboardStats = borderStyle === 'onboardStats';
   const effigyCostPos = isOnboard ? { x: 0.135, y: 0.13 } : positions.effigyCost;
   const onboardStrengthX = 0.825;
   const onboardStrengthY = 0.115;
@@ -195,6 +200,34 @@ export const renderCardOnCanvas = (canvas, card, img, positions, targetWidth = C
     ? { x: onboardStrengthX + onboardStatStep, y: onboardStrengthY + onboardStatStep * (w / h) }
     : positions.lifespan;
   const onboardMixedAnchor = { x: 0.135, y: 0.107 };
+  // On Board Border's Strength numeral starts from the exact spot a real
+  // single-pip Casting Cost (e.g. cost 1) already lands on — same formula as
+  // that pip's own final position further down (arcCounts loop, count===1
+  // case): stepped out from the corner ornament's own apex (w*0.0675,
+  // w*0.0675 — a true pixel offset, not a per-axis fraction, since it has to
+  // hold on the non-square On Board canvas) along the ornament's own 45deg
+  // axis by the same startOffset a pip clears its base by. A big bold
+  // numeral needs more clearance than that tiny pip even centered on its
+  // exact spot, though — its own ascender still reached into the border's
+  // decorative corner rays there — so `onboardStatsExtraPush` (scaled off
+  // the numeral's own font size, not a flat pixel value, so it still clears
+  // at any render size) steps it further down the same diagonal, deeper
+  // into the black curve. Lifespan mirrors it into the top-right corner,
+  // landing on the strength/lifespan side's own dividing line.
+  const onboardStatsFontSizeFraction = 0.09;
+  // Shared by Full Border and Digital Border's own Strength/Lifespan corner
+  // (and the same font's Timer-instead-of-stats branch, and an Armament's
+  // own +X/+Y bonus numbers — all draw through this same block) — bumped
+  // from the original 0.055 so both styles read at the same size as each
+  // other. On Board Border's own numerals are bigger still (see
+  // onboardStatsFontSizeFraction) since it only ever shows one at a time.
+  const regularStatFontFraction = 0.07;
+  const onboardStatsPipRadius = Math.max(4, w * 0.016);
+  const onboardStatsPipStartOffset = w * 0.036 + onboardStatsPipRadius;
+  const onboardStatsExtraPush = w * onboardStatsFontSizeFraction * 0.6;
+  const onboardStatsCornerStep = w * 0.0675 + Math.SQRT1_2 * (onboardStatsPipStartOffset + onboardStatsExtraPush);
+  const onboardStatsCostAnchor = { x: onboardStatsCornerStep / w, y: onboardStatsCornerStep / h };
+  const onboardStatsLifespanAnchor = { x: 1 - onboardStatsCornerStep / w, y: onboardStatsCornerStep / h };
 
   const effigyCost = card['effigy costs'] || card['Effigy Costs'] || card['Effigy Cost'] || card['C'] || card['Column C'] || '';
   const cardTyping = getColumnData(card, ['Card typing', 'Card Typing', 'B', 'Column B']);
@@ -219,6 +252,13 @@ export const renderCardOnCanvas = (canvas, card, img, positions, targetWidth = C
   }
   const effigyTypeColumn = getColumnData(card, ['Effigy type', 'Effigy Type', 'K', 'Column K']).toLowerCase();
 
+  // On Board Border only actually swaps stats for a Being or Armament (the
+  // only kinds with a real Strength/Lifespan to show) — a Relic/Prophecy/
+  // Conjuring styled 'onboardStats' renders exactly like Digital Border,
+  // same as cardData.js > BORDER_STYLES.onboardStats says it should.
+  const typingLower = cardTyping.toLowerCase();
+  const appliesStatSwap = isOnboardStats && (typingLower.includes('being') || typingLower.includes('armament'));
+
   const costParts = parseEffigyCost(effigyCost);
 
   const usesPips = (part) => {
@@ -226,7 +266,27 @@ export const renderCardOnCanvas = (canvas, card, img, positions, targetWidth = C
     return !isFaithless && /^\d+$/.test(part.number) && parseInt(part.number, 10) > 0;
   };
 
-  if (costParts.length > 0) {
+  if (appliesStatSwap) {
+    // On Board Border: the cost corner shows this card's Strength instead of
+    // its casting cost — once something is actually sitting on the board,
+    // what it cost to get there doesn't matter anymore, but Strength does,
+    // and giving it this corner's own room lets it read as a single big
+    // numeral instead of splitting the diagonal Strength/Lifespan corner
+    // (below) between two smaller ones.
+    ctx.save();
+    ctx.translate(w * onboardStatsCostAnchor.x, h * onboardStatsCostAnchor.y);
+    ctx.rotate(-45 * Math.PI / 180);
+    ctx.font = `bold ${Math.floor(w * onboardStatsFontSizeFraction)}px Cinzel`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = Math.max(1, Math.floor(w * 0.005));
+    ctx.strokeStyle = '#000000';
+    ctx.strokeText(strength, 0, 0);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillText(strength, 0, 0);
+    ctx.restore();
+  } else if (costParts.length > 0) {
     // A written number combined with pips needs more room than a number alone —
     // centering both together around the number's own anchor pushed the pips
     // into the border curve, so a mixed cost gets its own, more generous anchor.
@@ -243,7 +303,7 @@ export const renderCardOnCanvas = (canvas, card, img, positions, targetWidth = C
     ctx.lineJoin = 'round';
 
     const fontSize = Math.floor(w * 0.062);
-    ctx.font = `bold ${fontSize}px 'Rye', serif`;
+    ctx.font = `bold ${fontSize}px Cinzel, serif`;
     const spaceWidth = ctx.measureText(' ').width;
 
     const typeMap = EFFIGY_TYPE_COLORS;
@@ -557,21 +617,32 @@ export const renderCardOnCanvas = (canvas, card, img, positions, targetWidth = C
   // measured at ~0.856h-0.939h on the 750x720 On Board canvas — and centers
   // the name in it the same way regardless of which border is showing.
   const ONBOARD_NAME_BOX = { top: 0.856, bottom: 0.939 };
-  const cardNameY = isOnboard ? (ONBOARD_NAME_BOX.top + ONBOARD_NAME_BOX.bottom) / 2 : positions.cardName.y;
+  // Cinzel renders the name in all-caps with no true descenders, so
+  // textBaseline 'middle' (which centers on the font's full ascent/descent
+  // box) sits the visible glyphs a hair above true center. +0.008 nudges the
+  // draw point down to compensate, confirmed by measuring actual glyph ink
+  // against the tan bar's own border lines rather than trusting the metric.
+  const nameOpticalCenterFix = 0.008;
+  const cardNameY = (isOnboard ? (ONBOARD_NAME_BOX.top + ONBOARD_NAME_BOX.bottom) / 2 : positions.cardName.y) + nameOpticalCenterFix;
 
-  ctx.font = `600 ${Math.floor(w * 0.055)}px 'Rye', serif`;
+  ctx.font = `600 ${Math.floor(w * 0.06)}px Cinzel, serif`;
   ctx.fillStyle = '#000000';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 
-  const maxCardNameWidth = w * 0.7;
-  let cardNameFontSize = Math.floor(w * 0.055);
-  ctx.font = `600 ${cardNameFontSize}px 'Rye', serif`;
+  // Widened from 0.7 — an unusually long name (Immen Gorta, the Boundless
+  // Hunger) was shrinking all the way down near the floor just to fit one
+  // line, well past where the auto-shrink loop needs to kick in for a more
+  // typical name. Bar's own physical width is ~0.896 of the card (measured
+  // off the border art itself), so this still leaves real margin either side.
+  const maxCardNameWidth = w * 0.78;
+  let cardNameFontSize = Math.floor(w * 0.06);
+  ctx.font = `600 ${cardNameFontSize}px Cinzel, serif`;
   let textWidth = ctx.measureText(cardName).width;
 
-  while (textWidth > maxCardNameWidth && cardNameFontSize > Math.floor(w * 0.03)) {
+  while (textWidth > maxCardNameWidth && cardNameFontSize > Math.floor(w * 0.035)) {
     cardNameFontSize -= 2;
-    ctx.font = `600 ${cardNameFontSize}px 'Rye', serif`;
+    ctx.font = `600 ${cardNameFontSize}px Cinzel, serif`;
     textWidth = ctx.measureText(cardName).width;
   }
 
@@ -604,8 +675,8 @@ export const renderCardOnCanvas = (canvas, card, img, positions, targetWidth = C
   }
 
   if (!isOnboard) {
-  let textBoxFontSize = Math.floor(w * 0.046);
-  ctx.font = `${textBoxFontSize}px 'Rye', serif`;
+  let textBoxFontSize = Math.floor(w * 0.05);
+  ctx.font = `700 ${textBoxFontSize}px Cinzel, serif`;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   let textBoxX = w * positions.textBox.x;
@@ -669,7 +740,7 @@ export const renderCardOnCanvas = (canvas, card, img, positions, targetWidth = C
       while (newTextBoxY < upperBorder && textBoxFontSize > minFontSize) {
         textBoxFontSize -= 1;
         lineHeight = textBoxFontSize * 1.1;
-        ctx.font = `${textBoxFontSize}px 'Rye', serif`;
+        ctx.font = `700 ${textBoxFontSize}px Cinzel, serif`;
 
         lineCount = testLineCount(textBoxWidth);
         textEndY = textBoxY + (lineCount * lineHeight);
@@ -696,7 +767,7 @@ export const renderCardOnCanvas = (canvas, card, img, positions, targetWidth = C
     ctx.save();
     ctx.translate(w * strengthPos.x, h * strengthPos.y);
     ctx.rotate(45 * Math.PI / 180);
-    ctx.font = `bold ${Math.floor(w * 0.055)}px 'Rye', serif`;
+    ctx.font = `bold ${Math.floor(w * regularStatFontFraction)}px Cinzel, serif`;
     ctx.fillStyle = '#FFFFFF';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -706,29 +777,40 @@ export const renderCardOnCanvas = (canvas, card, img, positions, targetWidth = C
     ctx.save();
     ctx.translate(w * lifespanPos.x, h * lifespanPos.y);
     ctx.rotate(45 * Math.PI / 180);
-    ctx.font = `bold ${Math.floor(w * 0.055)}px Arial`;
+    ctx.font = `bold ${Math.floor(w * regularStatFontFraction)}px Cinzel`;
     ctx.fillStyle = '#FFFFFF';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('T', 0, 0);
     ctx.restore();
   } else {
-    ctx.save();
-    ctx.translate(w * strengthPos.x, h * strengthPos.y);
-    ctx.rotate(45 * Math.PI / 180);
-    ctx.font = `bold ${Math.floor(w * 0.055)}px Arial`;
-    ctx.fillStyle = '#FFFFFF';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(strength, 0, 0);
-    ctx.restore();
+    // On Board Border already drew Strength in the cost corner above — this
+    // corner shows Lifespan alone instead of the usual Strength/Lifespan
+    // pair, per BORDER_STYLES.onboardStats's own comment (cardData.js).
+    if (!appliesStatSwap) {
+      ctx.save();
+      ctx.translate(w * strengthPos.x, h * strengthPos.y);
+      ctx.rotate(45 * Math.PI / 180);
+      ctx.font = `bold ${Math.floor(w * regularStatFontFraction)}px Cinzel`;
+      ctx.fillStyle = '#FFFFFF';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(strength, 0, 0);
+      ctx.restore();
+    }
 
-    const lifespanColor = '#FF3B30';
+    // White (matching Strength) rather than red — red's own black outline
+    // barely showed up against the border art's own dark corner texture,
+    // making Lifespan hard to read across every style; confirmed by mocking
+    // up outline/shadow/alternate-color fixes side by side and preferred
+    // over all of them, including keeping red at all.
+    const lifespanColor = '#FFFFFF';
+    const lifespanDrawPos = appliesStatSwap ? onboardStatsLifespanAnchor : lifespanPos;
 
     ctx.save();
-    ctx.translate(w * lifespanPos.x, h * lifespanPos.y);
+    ctx.translate(w * lifespanDrawPos.x, h * lifespanDrawPos.y);
     ctx.rotate(45 * Math.PI / 180);
-    ctx.font = `bold ${Math.floor(w * 0.055)}px Arial`;
+    ctx.font = `bold ${Math.floor(w * (appliesStatSwap ? onboardStatsFontSizeFraction : regularStatFontFraction))}px Cinzel`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.lineJoin = 'round';
@@ -740,7 +822,7 @@ export const renderCardOnCanvas = (canvas, card, img, positions, targetWidth = C
     ctx.restore();
   }
 
-  if (!(strength === 'XXX' && lifespan === 'XXX')) {
+  if (!appliesStatSwap && !(strength === 'XXX' && lifespan === 'XXX')) {
     // A divider between strength and lifespan, drawn perpendicular to the line
     // connecting those two fixed positions and centered on their midpoint —
     // this only depends on positions.strength/positions.lifespan, not on which
@@ -770,14 +852,14 @@ export const renderCardOnCanvas = (canvas, card, img, positions, targetWidth = C
     ctx.lineTo(0, w * reach.face);
     ctx.lineCap = 'round';
     ctx.strokeStyle = '#FFFFFF';
-    ctx.lineWidth = Math.max(1, Math.floor(w * 0.006));
+    ctx.lineWidth = Math.max(1, Math.floor(w * 0.009));
     ctx.stroke();
     ctx.restore();
   }
 
   if (!isOnboard && cardTyping) {
     const displayTyping = cardTyping.replace(/,/g, ' -');
-    ctx.font = `bold ${Math.floor(w * 0.035)}px 'Rye', serif`;
+    ctx.font = `bold ${Math.floor(w * 0.035)}px Cinzel, serif`;
     ctx.fillStyle = '#000000';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
@@ -785,7 +867,7 @@ export const renderCardOnCanvas = (canvas, card, img, positions, targetWidth = C
   }
 
   if (!isOnboard) {
-    ctx.font = `bold ${Math.floor(w * 0.032)}px 'Rye', serif`;
+    ctx.font = `bold ${Math.floor(w * 0.032)}px Cinzel, serif`;
     ctx.fillStyle = '#000000';
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
@@ -795,7 +877,7 @@ export const renderCardOnCanvas = (canvas, card, img, positions, targetWidth = C
   if (!isOnboard) {
     // Small watermark in the bottom black border, between the center ornament and
     // the right corner ornament (border band measured at ~0.968h-0.995h on the reference card).
-    ctx.font = `bold ${Math.floor(h * 0.019)}px 'Rye', serif`;
+    ctx.font = `bold ${Math.floor(h * 0.019)}px Cinzel, serif`;
     ctx.fillStyle = '#D9D9D9';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -806,7 +888,7 @@ export const renderCardOnCanvas = (canvas, card, img, positions, targetWidth = C
     const displayRarity = rarity.toLowerCase().includes('sacred') ? 'SR' : rarity.toUpperCase();
     // Mirrors the Well Played watermark: same bottom black border band, same styling,
     // symmetric position on the left side (between the left corner ornament and the center ornament).
-    ctx.font = `bold ${Math.floor(h * 0.019)}px 'Rye', serif`;
+    ctx.font = `bold ${Math.floor(h * 0.019)}px Cinzel, serif`;
     ctx.fillStyle = '#FFFFFF';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -814,7 +896,7 @@ export const renderCardOnCanvas = (canvas, card, img, positions, targetWidth = C
 
     if (!isOnboard) {
       // Set and number, sharing the same bottom-border line as the rarity letter.
-      ctx.font = `bold ${Math.floor(h * 0.019)}px 'Rye', serif`;
+      ctx.font = `bold ${Math.floor(h * 0.019)}px Cinzel, serif`;
       ctx.fillStyle = '#FFFFFF';
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';

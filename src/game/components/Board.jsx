@@ -405,6 +405,7 @@ export default function Board({ state, displayBoard, flashes, lastAttack, lastMa
                 isOwn={occupant.ownerId === viewerId}
                 selected={isSelected}
                 onboard
+                inPlay
                 size="lg"
                 borderImages={borderImages}
                 borderImagesLoaded={borderImagesLoaded}
@@ -450,6 +451,7 @@ export default function Board({ state, displayBoard, flashes, lastAttack, lastMa
                   card={occupant.card}
                   size="md"
                   onboard
+                  inPlay
                   isOwn={occupant.ownerId === viewerId}
                   borderImages={borderImages}
                   borderImagesLoaded={borderImagesLoaded}
@@ -471,6 +473,7 @@ export default function Board({ state, displayBoard, flashes, lastAttack, lastMa
                 isOwn={occupant.ownerId === viewerId}
                 selected={isSelected}
                 onboard
+                inPlay
                 size="lg"
                 borderImages={borderImages}
                 borderImagesLoaded={borderImagesLoaded}
@@ -511,6 +514,7 @@ export default function Board({ state, displayBoard, flashes, lastAttack, lastMa
                 isOwn={occupant.ownerId === viewerId}
                 selected={isSelected}
                 onboard
+                inPlay
                 size="lg"
                 borderImages={borderImages}
                 borderImagesLoaded={borderImagesLoaded}
@@ -545,6 +549,7 @@ export default function Board({ state, displayBoard, flashes, lastAttack, lastMa
                 isOwn={groundRelic.ownerId === viewerId}
                 selected={isSelected}
                 onboard
+                inPlay
                 size="lg"
                 borderImages={borderImages}
                 borderImagesLoaded={borderImagesLoaded}

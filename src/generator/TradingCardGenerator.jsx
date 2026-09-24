@@ -44,10 +44,14 @@ const TradingCardGenerator = () => {
     ...DEFAULT_POSITIONS
   });
 
-  // The On Board style renders at its own (shorter, near-square) shape
-  // instead of the standard trim size — see ONBOARD_CARD_PX_* for why.
-  const cardWidth = borderStyle === 'onboard' ? ONBOARD_CARD_PX_WIDTH : CARD_PX_WIDTH;
-  const cardHeight = borderStyle === 'onboard' ? ONBOARD_CARD_PX_HEIGHT : CARD_PX_HEIGHT;
+  // The On Board / On Board Border styles both render at their own
+  // (shorter, near-square) shape instead of the standard trim size — see
+  // ONBOARD_CARD_PX_* for why. They share the exact same border art/shape;
+  // 'onboardStats' (cardData.js > BORDER_STYLES) only changes which stat
+  // values cardRender.js draws into it.
+  const isOnboardShape = borderStyle === 'onboard' || borderStyle === 'onboardStats';
+  const cardWidth = isOnboardShape ? ONBOARD_CARD_PX_WIDTH : CARD_PX_WIDTH;
+  const cardHeight = isOnboardShape ? ONBOARD_CARD_PX_HEIGHT : CARD_PX_HEIGHT;
   const thumbWidth = 180;
   const thumbHeight = Math.round(thumbWidth * (cardHeight / cardWidth));
 

@@ -15,10 +15,14 @@ const ONBOARD_THUMB_HEIGHT = Math.round(THUMB_WIDTH * ONBOARD_CARD_PX_HEIGHT / O
 // Renders the exact same card art as the Generator — same border template,
 // same pip/text layout — at thumbnail size (or a custom width/height), from
 // a game card's raw CSV row. `onboard` switches to the shorter On Board
-// frame/layout (see cardRender.js's isOnboard handling) instead of the
-// default portrait one — used only for occupants actually sitting on the
-// board (Board.jsx), not the Hand row or any full-size preview.
-export default function CardThumbnail({ card, borderImages, borderImagesLoaded, artImages, artBorderImages, artImagesLoaded, fontLoaded, onboard = false, width, height }) {
+// frame/shape (cardRender.js's isOnboard handling) — used for the Hand row
+// too, which wants that same compact footprint. `inPlay` (Board.jsx only —
+// never Hand.jsx, never any preview) is the separate, narrower flag that
+// actually picks On Board Border's stat-forward layout for a Being/
+// Armament (cardRender.js's appliesStatSwap) instead of Digital Border's —
+// a card in hand keeps Digital Border even though it's onboard-shaped, and
+// only something genuinely sitting on the board gets the swap.
+export default function CardThumbnail({ card, borderImages, borderImagesLoaded, artImages, artBorderImages, artImagesLoaded, fontLoaded, onboard = false, inPlay = false, width, height }) {
   const canvasRef = useRef(null);
   const [rendered, setRendered] = useState(false);
   const w = width ?? (onboard ? ONBOARD_THUMB_WIDTH : THUMB_WIDTH);
@@ -26,7 +30,12 @@ export default function CardThumbnail({ card, borderImages, borderImagesLoaded, 
 
   useEffect(() => {
     if (!fontLoaded) return;
-    const style = onboard ? 'onboard' : 'default';
+    // 'onboardStats' (cardRender.js's own appliesStatSwap) only actually
+    // swaps in the stat-forward layout for a Being/Armament — anything else
+    // renders pixel-identical to plain 'onboard' (Digital Border), so it's
+    // always safe to ask for it here rather than re-deriving the card's own
+    // kind just to guess in advance.
+    const style = !onboard ? 'default' : (inPlay ? 'onboardStats' : 'onboard');
     // artImages/artBorderImages/artImagesLoaded are optional — callers that
     // haven't been updated to load them (or a card with no CARD_ART_SRC
     // entry) fall straight through to the plain border image, unchanged.
@@ -40,7 +49,7 @@ export default function CardThumbnail({ card, borderImages, borderImagesLoaded, 
     if (!canvas) return;
     renderCardOnCanvas(canvas, card.raw, img, DEFAULT_POSITIONS, w, h, style, art?.artImg, art?.artBoxRect);
     setRendered(true);
-  }, [card, borderImages, borderImagesLoaded, artImages, artBorderImages, artImagesLoaded, fontLoaded, w, h, onboard]);
+  }, [card, borderImages, borderImagesLoaded, artImages, artBorderImages, artImagesLoaded, fontLoaded, w, h, onboard, inPlay]);
 
   return (
     <div className={`relative w-full ${onboard ? 'aspect-[750/720]' : 'aspect-[5/7]'} bg-stone-100 rounded overflow-hidden`}>

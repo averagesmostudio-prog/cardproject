@@ -1,21 +1,28 @@
 import { useEffect, useRef, useState } from 'react';
 import { BORDER_IMAGE_SRC, CARD_ART_SRC, ART_BORDER_IMAGE_SRC } from './cardData.js';
 
-// Loads Rye — an antique/letterpress display serif, standing in for Caslon
-// Antique — once per mount. Safe to call from multiple components at once;
-// the browser dedupes the stylesheet/font-file fetch.
+// Loads Cinzel — a Roman-inspired epic-fantasy display serif (the card's
+// full font, name/type line/text box/stats alike; MTG's own title font is a
+// close cousin) — once per mount. Safe to call from multiple components at
+// once; the browser dedupes the stylesheet/font-file fetch.
 export const useCardFont = () => {
   const [fontLoaded, setFontLoaded] = useState(false);
 
   useEffect(() => {
-    if (!document.querySelector('link[data-card-font="rye"]')) {
+    if (!document.querySelector('link[data-card-font="cinzel"]')) {
       const link = document.createElement('link');
-      link.href = 'https://fonts.googleapis.com/css2?family=Rye&display=swap';
+      link.href = 'https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&display=swap';
       link.rel = 'stylesheet';
-      link.dataset.cardFont = 'rye';
+      link.dataset.cardFont = 'cinzel';
       document.head.appendChild(link);
     }
-    document.fonts.load("400 16px 'Rye'").finally(() => setFontLoaded(true));
+    // cardRender.js's own weights: 500 (text box), 600 (card name),
+    // bold/700 (everything else — stats, typing label, cost numerals, ...).
+    Promise.all([
+      document.fonts.load("500 16px 'Cinzel'"),
+      document.fonts.load("600 16px 'Cinzel'"),
+      document.fonts.load("700 16px 'Cinzel'"),
+    ]).finally(() => setFontLoaded(true));
   }, []);
 
   return fontLoaded;
