@@ -14,12 +14,14 @@
     "electron:dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && electron .\"",
     "dist:mac": "npm run build && electron-builder --mac --dir",
     "dist:win": "npm run build && electron-builder --win --dir",
-    "dist:linux": "npm run build && electron-builder --linux --dir"
+    "dist:linux": "npm run build && electron-builder --linux --dir",
+    "relay": "node server/relay.mjs"
   },
   "dependencies": {
     "lucide-react": "^1.34.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "ws": "^8.22.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",

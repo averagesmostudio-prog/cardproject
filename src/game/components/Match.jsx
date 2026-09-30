@@ -15,9 +15,6 @@ import CardPile from './CardPile.jsx';
 import CardTile from './CardTile.jsx';
 import CardThumbnail from './CardThumbnail.jsx';
 
-const HUMAN = 'A';
-const AI = 'B';
-
 // Board.jsx renders rows top-to-bottom as Row 5 -> Row 1; a rail beside the
 // board reuses the same row heights (Mortal Realm cells, and the shorter
 // Ethereal Realm row 3) so a pile lines up with its matching board row.
@@ -399,7 +396,7 @@ function formatDuration(ms) {
 // occurred, not a live choice. Auto-dismisses after 30s either way.
 const REVEAL_POPUP_WIDTH = 260;
 const REVEAL_POPUP_HEIGHT = Math.round(REVEAL_POPUP_WIDTH * 7 / 5);
-function RevealPopup({ revealPopup, dispatch, cardArtProps }) {
+function RevealPopup({ revealPopup, dispatch, cardArtProps, human }) {
   useEffect(() => {
     const id = setTimeout(() => dispatch({ type: 'DISMISS_REVEAL_POPUP' }), 30000);
     return () => clearTimeout(id);
@@ -409,7 +406,7 @@ function RevealPopup({ revealPopup, dispatch, cardArtProps }) {
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
       <div className="bg-white rounded-lg shadow-2xl p-4 flex flex-col items-center gap-3">
         <div className="font-semibold text-stone-800 text-center">
-          {revealPopup.cardName}'s {revealPopup.label} reveals {revealPopup.playerId === HUMAN ? 'your' : "the opponent's"} top card
+          {revealPopup.cardName}'s {revealPopup.label} reveals {revealPopup.playerId === human ? 'your' : "the opponent's"} top card
         </div>
         <div style={{ width: REVEAL_POPUP_WIDTH, height: REVEAL_POPUP_HEIGHT }}>
           <CardThumbnail card={revealPopup.card} width={REVEAL_POPUP_WIDTH} height={REVEAL_POPUP_HEIGHT} {...cardArtProps} />
@@ -428,8 +425,43 @@ function RevealPopup({ revealPopup, dispatch, cardArtProps }) {
   );
 }
 
-export default function Match({ initialState, onExit, onRematch, deckEntries, competitiveMode, aiDifficulty }) {
-  const [state, dispatch, lastAttack, lastMartyr, lastEngageGlow, lastModulate] = useGameEngine(initialState, AI, aiDifficulty);
+export default function Match({ initialState, onExit, onRematch, deckEntries, competitiveMode, aiDifficulty, netRole = null, mySeat = 'A', gameChannel = null, onOpponentDisconnected }) {
+  // `HUMAN`/`AI` used to be module-level constants ('A'/'B') — shadowed here
+  // instead so a net match can seat the local human as either player. Every
+  // other read of HUMAN/AI in this file (still ~90 of them) resolves to
+  // these automatically, with identical single-player behavior since
+  // `mySeat` defaults to 'A'. In net mode "AI" just means "the other
+  // seat" — a real human opponent, not a bot (see the AI-turn-driving
+  // effect inside useGameEngine, which net mode disables via `netRole`).
+  const HUMAN = mySeat;
+  const AI = mySeat === 'A' ? 'B' : 'A';
+  const opponentLabel = netRole ? 'Opponent' : 'AI';
+  const [opponentGone, setOpponentGone] = useState(false);
+  const [state, dispatch, lastAttack, lastMartyr, lastEngageGlow, lastModulate, applyRemoteState] = useGameEngine(
+    initialState, AI, aiDifficulty, netRole,
+    netRole ? (nextState) => gameChannel?.send({ kind: 'state', state: nextState }) : null
+  );
+
+  // Net-sync: adopt whatever state the peer's own dispatchTracked already
+  // computed via gameReducer — this client never calls gameReducer itself
+  // for the opponent's actions, sidestepping gameReducer's own inline
+  // Math.random() calls diverging between the two clients. Disconnect is
+  // treated as terminal for this match (no reconnect/resume) — same
+  // "peer-disconnected", crash, or deliberate quit all collapse to the one
+  // flag below.
+  useEffect(() => {
+    if (!netRole || !gameChannel) return;
+    const offMessage = gameChannel.onMessage((msg) => {
+      if (msg.kind === 'state') applyRemoteState(msg.state);
+    });
+    const onGone = () => {
+      setOpponentGone(true);
+      onOpponentDisconnected?.();
+    };
+    const offPeerGone = gameChannel.onPeerDisconnected(onGone);
+    const offClose = gameChannel.onClose(onGone);
+    return () => { offMessage(); offPeerGone(); offClose(); };
+  }, [netRole, gameChannel, applyRemoteState, onOpponentDisconnected]);
   // Purely a rendering concern — game logic/AI/legality below all keep
   // reading the real state.board; only what gets painted onto <Board> is
   // staged (see useStagedBoard.js).
@@ -706,7 +738,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       : isHumanTurn;
   const legalActions = useMemo(
     () => (humanCanAct ? getLegalActions(state, HUMAN) : []),
-    [state, humanCanAct]
+    [state, humanCanAct, HUMAN]
   );
 
   // "Any target" effects that can hit a player's Lifespan directly
@@ -889,7 +921,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
         .forEach(a => set.add(a.toCellId));
     }
     return set;
-  }, [legalActions, selectedHand, selectedCell, state.pendingChoice, reanimatingPurgatoryId, reanimateSacrificeCandidates]);
+  }, [legalActions, selectedHand, selectedCell, state.pendingChoice, reanimatingPurgatoryId, reanimateSacrificeCandidates, HUMAN]);
 
   // The one board cell the currently-open reactive window's own pending
   // effect is about (Medium Mage's summoned Being, an Engage attempt, a
@@ -906,7 +938,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
   const toggledCells = useMemo(() => {
     if (!TOGGLE_CHOICE_KINDS[state.pendingChoice?.kind] || state.pendingChoice.playerId !== HUMAN) return undefined;
     return new Set(state.pendingChoice.selected);
-  }, [state.pendingChoice]);
+  }, [state.pendingChoice, HUMAN]);
 
   // Dispatches `action` right away, unless paying `card`'s own Faithless
   // portion is a real choice for the human right now (more than one Effigy
@@ -1245,7 +1277,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       .filter(a => a.type === 'RESOLVE_CHOICE')
       .map(a => zone.find(c => c.instanceId === a.instanceId))
       .filter(Boolean);
-  }, [legalActions, state.pendingChoice, state.players]);
+  }, [legalActions, state.pendingChoice, state.players, HUMAN]);
 
   // Every card in the zone a pending search is looking through — offered
   // as a "show all" alternative to the legal-only list above, e.g. to
@@ -1254,7 +1286,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
   const pendingChoiceAllInZone = useMemo(() => {
     if (!state.pendingChoice || state.pendingChoice.kind !== 'search' || state.pendingChoice.playerId !== HUMAN) return [];
     return state.players[HUMAN][state.pendingChoice.source];
-  }, [state.pendingChoice, state.players]);
+  }, [state.pendingChoice, state.players, HUMAN]);
 
   // Candidate targets for a pending Modulate that belongs to the human —
   // grouped by cell so a "±" (player picks the sign) shows one row with
@@ -1269,7 +1301,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       byCell.get(a.cellId).deltas.push(a.delta);
     });
     return Array.from(byCell.values());
-  }, [legalActions, state.pendingChoice, state.board]);
+  }, [legalActions, state.pendingChoice, state.board, HUMAN]);
 
   // Same grouping for an Altar target (Eònion Altar) — altars aren't board
   // cells, so they're addressed by the altar card's own instanceId instead
@@ -1286,7 +1318,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       byAltar.get(a.altarInstanceId).deltas.push(a.delta);
     });
     return Array.from(byAltar.values());
-  }, [legalActions, state.pendingChoice, state.altars]);
+  }, [legalActions, state.pendingChoice, state.altars, HUMAN]);
 
   // Candidate deck cards for a pending Invoke card choice (more than one
   // real card matched the search — see resolveInvoke, actions.js).
@@ -1296,7 +1328,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       .filter(a => a.type === 'RESOLVE_INVOKE_CARD_CHOICE')
       .map(a => state.players[HUMAN].mainDeck.find(c => c.instanceId === a.instanceId))
       .filter(Boolean);
-  }, [legalActions, state.pendingChoice, state.players]);
+  }, [legalActions, state.pendingChoice, state.players, HUMAN]);
 
   // Candidate named tokens for a pending "create a token, choose one of two"
   // choice (Crathea's own "create a face up Blooming Life token... or a
@@ -1307,7 +1339,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
   const pendingCreateTokenChoiceCandidates = useMemo(() => {
     if (!state.pendingChoice || state.pendingChoice.kind !== 'create-token-choice' || state.pendingChoice.playerId !== HUMAN) return [];
     return legalActions.filter(a => a.type === 'RESOLVE_CREATE_TOKEN_CHOICE').map(a => a.tokenKey);
-  }, [legalActions, state.pendingChoice]);
+  }, [legalActions, state.pendingChoice, HUMAN]);
 
   // Candidate hand cards for a pending "put a card from hand on the bottom
   // of deck" choice (Weaver).
@@ -1317,7 +1349,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       .filter(a => a.type === 'RESOLVE_BOTTOM_OF_DECK')
       .map(a => state.players[HUMAN].hand.find(c => c.instanceId === a.instanceId))
       .filter(Boolean);
-  }, [legalActions, state.pendingChoice, state.players]);
+  }, [legalActions, state.pendingChoice, state.players, HUMAN]);
 
   // Candidate hand cards for a pending "Discard a <Kind>: Draw (N) cards"
   // cost (Scrap Removal) — same shape as pendingBottomOfDeckCandidates above.
@@ -1327,7 +1359,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       .filter(a => a.type === 'RESOLVE_DISCARD_KIND_DRAW')
       .map(a => state.players[HUMAN].hand.find(c => c.instanceId === a.instanceId))
       .filter(Boolean);
-  }, [legalActions, state.pendingChoice, state.players]);
+  }, [legalActions, state.pendingChoice, state.players, HUMAN]);
 
   // Candidate hand cards for a pending "Discard a <Typing>" cost (Onagīous
   // Hunger's own "Engage: Discard a Hunger, then draw (1) card.") — same
@@ -1343,7 +1375,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       .filter(a => a.type === 'RESOLVE_DISCARD_TYPED')
       .map(a => state.players[HUMAN].hand.find(c => c.instanceId === a.instanceId))
       .filter(Boolean);
-  }, [legalActions, state.pendingChoice, state.players]);
+  }, [legalActions, state.pendingChoice, state.players, HUMAN]);
 
   // Candidate hand cards for a pending "Discard (1) Card" cost (Skeptical
   // Scrawling's own "Discard (1) Card, then return a Null Being From
@@ -1359,7 +1391,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       .filter(a => a.type === 'RESOLVE_DISCARD_ONE_CARD')
       .map(a => state.players[HUMAN].hand.find(c => c.instanceId === a.instanceId))
       .filter(Boolean);
-  }, [legalActions, state.pendingChoice, state.players]);
+  }, [legalActions, state.pendingChoice, state.players, HUMAN]);
 
   // Candidate hand cards for a pending "Discard a card: the next card you
   // play this turn costs (-1) Faithless" cost (Lighten the Load) — same
@@ -1370,7 +1402,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       .filter(a => a.type === 'RESOLVE_DISCARD_CHOSEN_COST_REDUCTION')
       .map(a => state.players[HUMAN].hand.find(c => c.instanceId === a.instanceId))
       .filter(Boolean);
-  }, [legalActions, state.pendingChoice, state.players]);
+  }, [legalActions, state.pendingChoice, state.players, HUMAN]);
 
   // Candidate Armaments (wherever attached) for a pending "sacrifice an
   // Armament" cost (Tiny Forge Master).
@@ -1384,7 +1416,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
         card: state.board[a.cellId]?.armaments?.find(x => x.card.instanceId === a.armamentInstanceId)?.card,
       }))
       .filter(c => c.card);
-  }, [legalActions, state.pendingChoice, state.board]);
+  }, [legalActions, state.pendingChoice, state.board, HUMAN]);
 
   // Every matching Purgatory card for a pending "Shuffle up to (N)
   // <Typing>(s) into deck from Purgatory" toggle (Scrap Collector) — the
@@ -1397,7 +1429,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
   const pendingShufflePurgatoryToggleCandidates = useMemo(() => {
     if (!state.pendingChoice || state.pendingChoice.kind !== 'shuffle-purgatory-toggle' || state.pendingChoice.playerId !== HUMAN) return [];
     return searchZoneCandidates(state.players[HUMAN].purgatory, state.pendingChoice.query);
-  }, [state.pendingChoice, state.players]);
+  }, [state.pendingChoice, state.players, HUMAN]);
 
   // Candidate Armaments (wherever attached) for a pending "Move target
   // Armament you control..." source choice (Ay-gruhda), Smith Assistant's
@@ -1423,7 +1455,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
         card: state.board[a.cellId]?.armaments?.find(x => x.card.instanceId === a.armamentInstanceId)?.card,
       }))
       .filter(c => c.card);
-  }, [legalActions, state.pendingChoice, state.board, pendingMoveArmamentSourceActionType]);
+  }, [legalActions, state.pendingChoice, state.board, pendingMoveArmamentSourceActionType, HUMAN]);
 
   // Candidate Armaments (wherever attached) for a pending "Sacrifice an
   // Armament, then deal damage equal to its cost" choice (Scrap Shot) —
@@ -1439,7 +1471,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
         card: state.board[a.cellId]?.armaments?.find(x => x.card.instanceId === a.armamentInstanceId)?.card,
       }))
       .filter(c => c.card);
-  }, [legalActions, state.pendingChoice, state.board]);
+  }, [legalActions, state.pendingChoice, state.board, HUMAN]);
 
   // Candidate Armaments (wherever attached) for a pending "Destroy an
   // Armament" Conjuring effect — same compound cellId+armamentInstanceId
@@ -1456,7 +1488,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
         card: state.board[a.cellId]?.armaments?.find(x => x.card.instanceId === a.armamentInstanceId)?.card,
       }))
       .filter(c => c.card);
-  }, [legalActions, state.pendingChoice, state.board]);
+  }, [legalActions, state.pendingChoice, state.board, HUMAN]);
 
   // Desecration's widened "Destroy a Relic." — a freestanding Relic, a
   // Relic-Being, or one specific Relic-Armament entry within a stack/
@@ -1475,7 +1507,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
           : state.board[a.cellId]?.card,
       }))
       .filter(c => c.card);
-  }, [legalActions, state.pendingChoice, state.board]);
+  }, [legalActions, state.pendingChoice, state.board, HUMAN]);
 
   // Antiquities Dealer's "Sacrifice a Relic: Craft (1) Effigy." — same
   // three-shape Relic pool as pendingDestroyRelicCandidates above (plain
@@ -1493,7 +1525,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
           : state.board[a.cellId]?.card,
       }))
       .filter(c => c.card);
-  }, [legalActions, state.pendingChoice, state.board]);
+  }, [legalActions, state.pendingChoice, state.board, HUMAN]);
 
   // Candidate (Prophecy, target Being) pairs for Cro-āsik Hunger's optional
   // "sacrifice a Prophecy, then destroy a non-Deity Being".
@@ -1508,7 +1540,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
         targetCard: state.board[a.targetCellId]?.card,
       }))
       .filter(c => c.prophecyCard && c.targetCard);
-  }, [legalActions, state.pendingChoice, state.board]);
+  }, [legalActions, state.pendingChoice, state.board, HUMAN]);
 
   // Candidate Beings in Purgatory for a pending "Summon a <Typing> Being on
   // this tile from your Purgatory" choice (Grave robber's Martyr).
@@ -1519,7 +1551,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       .filter(a => a.type === 'RESOLVE_SUMMON_FROM_PURGATORY')
       .map(a => purgatory.find(c => c.instanceId === a.instanceId))
       .filter(Boolean);
-  }, [legalActions, state.pendingChoice, state.players]);
+  }, [legalActions, state.pendingChoice, state.players, HUMAN]);
 
   // Candidate Purgatory cards for a pending "Shuffle a <query> into deck
   // from your Purgatory" choice (Melting Clock / Temple of Dubiety) — same
@@ -1539,7 +1571,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
         return card ? { card, ownerId: a.ownerId } : null;
       })
       .filter(Boolean);
-  }, [legalActions, state.pendingChoice, state.players]);
+  }, [legalActions, state.pendingChoice, state.players, HUMAN]);
 
   // Cemetery Physician's own "choose which cost-X Being to summon" step —
   // same shape as pendingSummonFromPurgatoryCandidates above, just a
@@ -1552,7 +1584,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       .filter(a => a.type === 'RESOLVE_SUMMON_FROM_PURGATORY_COST')
       .map(a => purgatory.find(c => c.instanceId === a.instanceId))
       .filter(Boolean);
-  }, [legalActions, state.pendingChoice, state.players]);
+  }, [legalActions, state.pendingChoice, state.players, HUMAN]);
 
   // Osteomancer's own "choose which different <Typing> to summon" step —
   // same shape as pendingSummonFromPurgatoryCostCandidates above, just a
@@ -1565,7 +1597,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       .filter(a => a.type === 'RESOLVE_SUMMON_DIFFERENT_TYPED_FROM_PURGATORY')
       .map(a => purgatory.find(c => c.instanceId === a.instanceId))
       .filter(Boolean);
-  }, [legalActions, state.pendingChoice, state.players]);
+  }, [legalActions, state.pendingChoice, state.players, HUMAN]);
 
   // Candidate hand cards for a pending "Discard (X) <Name>: Draw (X)
   // Cards" toggle-then-confirm choice (Deossification) — hand-based, so
@@ -1577,7 +1609,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       .filter(a => a.type === 'RESOLVE_DISCARD_X_NAMED_TOGGLE')
       .map(a => state.players[HUMAN].hand.find(c => c.instanceId === a.instanceId))
       .filter(Boolean);
-  }, [legalActions, state.pendingChoice, state.players]);
+  }, [legalActions, state.pendingChoice, state.players, HUMAN]);
 
   // Whether a Decline option should render alongside the pending choice's
   // own modal — every "you may" effect (see actions.js > RESOLVE_DECLINE).
@@ -1775,7 +1807,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
           <h2 className="text-2xl font-bold text-stone-800 mb-2">
             {state.loopWin
               ? (humanWonLoop ? 'You have presented a loop! Opponent loses!' : 'Your opponent has presented a loop! You Lose!')
-              : (state.winner ? `${state.winner === HUMAN ? 'You win!' : 'The AI wins.'}` : 'Draw.')}
+              : (state.winner ? `${state.winner === HUMAN ? 'You win!' : (netRole ? 'Opponent wins.' : 'The AI wins.')}` : 'Draw.')}
           </h2>
           {state.loopWin && (
             <div className="flex gap-3 justify-center flex-wrap my-4">
@@ -1816,6 +1848,21 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
     );
   }
 
+  // Net match, opponent's socket closed (a deliberate quit and a crash are
+  // indistinguishable here — fine for this scope) — terminal, no resume.
+  // Short-circuits the render the same way the gameover branch above does.
+  if (opponentGone) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-black p-8">
+        <div className="text-center bg-white rounded-lg shadow p-8 max-w-lg">
+          <h2 className="text-2xl font-bold text-stone-800 mb-2">Opponent disconnected</h2>
+          <p className="text-sm text-stone-500 mb-4">The connection to your opponent was lost.</p>
+          <button onClick={onExit} className="px-4 py-2 border border-stone-300 rounded-lg">Back to menu</button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="h-screen bg-black p-4 flex flex-col gap-3 relative overflow-hidden">
       {/* "View Board" — lets the player peek at the board without losing
@@ -1850,7 +1897,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
           <div className="text-sm text-stone-400 font-mono tabular-nums">{formatDuration(liveElapsedMs)}</div>
         </div>
         <div className="flex items-center gap-3">
-          <div className="text-sm text-stone-400">Turn {state.turnNumber} — {state.turnPlayer === HUMAN ? 'Your turn' : "AI's turn"}</div>
+          <div className="text-sm text-stone-400">Turn {state.turnNumber} — {state.turnPlayer === HUMAN ? 'Your turn' : `${opponentLabel}'s turn`}</div>
           <button
             onClick={() => setHistoryOpen(o => !o)}
             className={`flex items-center gap-1 text-xs px-2 py-1 rounded border transition
@@ -2054,6 +2101,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
           revealPopup={state.revealPopup}
           dispatch={dispatch}
           cardArtProps={{ borderImages, borderImagesLoaded, artImages, artBorderImages, artImagesLoaded, fontLoaded }}
+          human={HUMAN}
         />
       )}
 

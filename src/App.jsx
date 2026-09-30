@@ -2,12 +2,13 @@ import React, { useState } from 'react';
 import Landing from './screens/Landing.jsx';
 import TradingCardGenerator from './generator/TradingCardGenerator.jsx';
 import GameApp from './game/components/GameApp.jsx';
+import NetGameApp from './game/components/NetGameApp.jsx';
 import PackOpener from './screens/PackOpener.jsx';
 import Library from './screens/Library.jsx';
 import HowToPlay from './screens/HowToPlay.jsx';
 
 export default function App() {
-  const [screen, setScreen] = useState('landing'); // 'landing' | 'library' | 'generator' | 'game' | 'pack' | 'howToPlay'
+  const [screen, setScreen] = useState('landing'); // 'landing' | 'library' | 'generator' | 'game' | 'netGame' | 'pack' | 'howToPlay'
   // The Generator is reached both directly (no longer possible from Landing,
   // kept anyway for the 'landing' fallback) and as a Library sub-destination
   // ("Design Cards") — its own back button should return wherever it was
@@ -41,6 +42,10 @@ export default function App() {
     return <GameApp onExitToMenu={() => setScreen('landing')} />;
   }
 
+  if (screen === 'netGame') {
+    return <NetGameApp onExitToMenu={() => setScreen('landing')} />;
+  }
+
   if (screen === 'pack') {
     return <PackOpener onBack={() => setScreen('landing')} />;
   }
@@ -53,6 +58,7 @@ export default function App() {
     <Landing
       onSelectLibrary={() => setScreen('library')}
       onSelectGame={() => setScreen('game')}
+      onSelectNetGame={() => setScreen('netGame')}
       onSelectPack={() => setScreen('pack')}
       onSelectHowToPlay={() => setScreen('howToPlay')}
     />

@@ -2,6 +2,16 @@ import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { gameReducer } from '../engine/actions.js';
 import { pickAiAction, pickAiReaction } from '../engine/ai.js';
 
+// '__ADOPT_REMOTE_STATE__' bypasses gameReducer entirely and returns
+// action.state verbatim — used both for adopting a remote peer's state
+// and, in net mode, for applying this client's own already-computed
+// result (see dispatchTracked below), so gameReducer is called exactly
+// once per action, by dispatchTracked itself, never a second time here.
+// Exported (and kept at module scope, not recreated per render) so it's
+// directly unit-testable without rendering the hook.
+export const engineReducer = (current, action) =>
+  action.type === '__ADOPT_REMOTE_STATE__' ? action.state : gameReducer(current, action);
+
 // Wraps the pure gameReducer in React state and drives the AI player's
 // turns automatically. `dispatch` is only meant to be called for the human
 // player's own actions — the AI dispatches itself via the effect below.
@@ -10,8 +20,21 @@ import { pickAiAction, pickAiReaction } from '../engine/ai.js';
 // difficulty, since a reactive-window response is a single isolated choice
 // (often under a real countdown in competitive mode), not a sequence worth
 // a 2-ply search.
-export const useGameEngine = (initialState, aiPlayer = 'B', aiDifficulty = 'standard') => {
-  const [state, dispatch] = useReducer(gameReducer, initialState);
+//
+// `netRole` ('host' | 'peer' | null) and `onLocalStateChange` opt into
+// two-player-over-the-network mode. gameReducer is not a pure function —
+// several effects in actions.js call bare Math.random() inline — so two
+// clients independently replaying the same dispatched action could
+// silently diverge. In net mode we sidestep that by relaying the
+// *resulting state*, not the action: only the client whose own local
+// human just acted ever calls gameReducer, via dispatchTracked below;
+// the peer adopts that state directly through the '__ADOPT_REMOTE_STATE__'
+// sentinel action, which engineReducer special-cases to bypass gameReducer
+// entirely. This keeps gameReducer invoked exactly once per action even
+// in net mode, matching single-player's existing "useReducer calls it
+// exactly once" behavior.
+export const useGameEngine = (initialState, aiPlayer = 'B', aiDifficulty = 'standard', netRole = null, onLocalStateChange = null) => {
+  const [state, dispatch] = useReducer(engineReducer, initialState);
 
   // Purely a rendering hint for Board.jsx's attack-lunge animation — the
   // reducer itself never sees or produces this; it's just "the most recent
@@ -76,6 +99,15 @@ export const useGameEngine = (initialState, aiPlayer = 'B', aiDifficulty = 'stan
   // dispatch, which is all this needs.
   const stateRef = useRef(state);
   useEffect(() => { stateRef.current = state; });
+  // Same stable-ref treatment as stateRef above, and for the same reason —
+  // netRole is fixed for the life of a match so this is mostly academic,
+  // but onLocalStateChange is whatever function identity Match.jsx's own
+  // render happens to pass in, and closing over it directly would make
+  // dispatchTracked's identity track Match.jsx's render cadence instead of
+  // staying stable.
+  const netRoleRef = useRef(netRole);
+  const onLocalStateChangeRef = useRef(onLocalStateChange);
+  useEffect(() => { netRoleRef.current = netRole; onLocalStateChangeRef.current = onLocalStateChange; });
   const dispatchTracked = useCallback((action) => {
     if (action?.type === 'MOVE_OR_ATTACK' && action.isAttack) {
       attackSeqRef.current += 1;
@@ -102,7 +134,20 @@ export const useGameEngine = (initialState, aiPlayer = 'B', aiDifficulty = 'stan
         };
       }
     }
+    if (netRoleRef.current) {
+      const nextState = gameReducer(stateRef.current, action);
+      dispatch({ type: '__ADOPT_REMOTE_STATE__', state: nextState });
+      onLocalStateChangeRef.current?.(nextState, action);
+      return;
+    }
     dispatch(action);
+  }, []);
+
+  // Lets Match.jsx apply a state received from the peer over the network —
+  // bypasses gameReducer entirely via the same sentinel engineReducer
+  // special-cases above, so the peer never re-derives randomness locally.
+  const applyRemoteState = useCallback((remoteState) => {
+    dispatch({ type: '__ADOPT_REMOTE_STATE__', state: remoteState });
   }, []);
 
   // Fires the candidate captured above once its own card's real resolution
@@ -128,6 +173,7 @@ export const useGameEngine = (initialState, aiPlayer = 'B', aiDifficulty = 'stan
   }, [state.log]);
 
   useEffect(() => {
+    if (netRole) return; // a two-human net match has no AI turn to drive
     if (state.phase === 'gameover') return;
     // A pending search effect (see actions.js > pendingChoice) can belong to
     // either player regardless of whose turn it is — e.g. the AI's Being
@@ -148,7 +194,7 @@ export const useGameEngine = (initialState, aiPlayer = 'B', aiDifficulty = 'stan
     // Small delay so the AI's moves are readable rather than instant.
     const timer = setTimeout(() => dispatchTracked(action), 500);
     return () => clearTimeout(timer);
-  }, [state, aiPlayer, aiDifficulty, dispatchTracked]);
+  }, [state, aiPlayer, aiDifficulty, dispatchTracked, netRole]);
 
-  return [state, dispatchTracked, lastAttack, lastMartyr, lastEngageGlow, lastModulate];
+  return [state, dispatchTracked, lastAttack, lastMartyr, lastEngageGlow, lastModulate, applyRemoteState];
 };
