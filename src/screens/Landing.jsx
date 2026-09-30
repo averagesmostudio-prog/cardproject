@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Settings, X } from 'lucide-react';
+import { Settings, X, BookOpen } from 'lucide-react';
 import { getCustomCsvName, setCustomCsv, clearCustomCsv, CSV_PASSCODE } from '../lib/csvSource.js';
 
 // A closed leather-bound journal — a worn leather cover wrapped with a tied
@@ -217,7 +217,7 @@ function SettingsModal({ onClose }) {
   );
 }
 
-export default function Landing({ onSelectLibrary, onSelectGame, onSelectPack }) {
+export default function Landing({ onSelectLibrary, onSelectGame, onSelectPack, onSelectHowToPlay }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   return (
@@ -239,6 +239,13 @@ export default function Landing({ onSelectLibrary, onSelectGame, onSelectPack })
         aria-label="Settings"
       >
         <Settings className="w-5 h-5 text-stone-300" />
+      </button>
+      <button
+        onClick={onSelectHowToPlay}
+        className="fixed top-4 left-4 z-40 p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors"
+        aria-label="How to play"
+      >
+        <BookOpen className="w-5 h-5 text-stone-300" />
       </button>
 
       <div className="max-w-3xl w-full text-center">

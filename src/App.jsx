@@ -4,9 +4,10 @@ import TradingCardGenerator from './generator/TradingCardGenerator.jsx';
 import GameApp from './game/components/GameApp.jsx';
 import PackOpener from './screens/PackOpener.jsx';
 import Library from './screens/Library.jsx';
+import HowToPlay from './screens/HowToPlay.jsx';
 
 export default function App() {
-  const [screen, setScreen] = useState('landing'); // 'landing' | 'library' | 'generator' | 'game' | 'pack'
+  const [screen, setScreen] = useState('landing'); // 'landing' | 'library' | 'generator' | 'game' | 'pack' | 'howToPlay'
   // The Generator is reached both directly (no longer possible from Landing,
   // kept anyway for the 'landing' fallback) and as a Library sub-destination
   // ("Design Cards") — its own back button should return wherever it was
@@ -44,11 +45,16 @@ export default function App() {
     return <PackOpener onBack={() => setScreen('landing')} />;
   }
 
+  if (screen === 'howToPlay') {
+    return <HowToPlay onBack={() => setScreen('landing')} />;
+  }
+
   return (
     <Landing
       onSelectLibrary={() => setScreen('library')}
       onSelectGame={() => setScreen('game')}
       onSelectPack={() => setScreen('pack')}
+      onSelectHowToPlay={() => setScreen('howToPlay')}
     />
   );
 }
