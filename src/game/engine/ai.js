@@ -6,6 +6,7 @@
 import {
   getLegalActions, actorView, gameReducer, resolveProphecyModulateHitZero,
   countControlledByName, ownedFodderCells, raceTypings, hasOwnTyping, relicWithKeywordAnywhere,
+  effectiveEngage,
 } from './actions.js';
 import { effectiveStrength } from './combat.js';
 import { directionDelta } from './board.js';
@@ -234,6 +235,83 @@ const prophecySynergyBonus = (state, playerId, card) => {
   return Math.min((kw.boardWideAllyBonus.strength + kw.boardWideAllyBonus.lifespan) * allyCount, AURA_EMISSION_BONUS_CAP);
 };
 
+// EXPERIMENTAL (ai-engage-scoring-experiment branch, not yet adopted on
+// main): a crude text-pattern estimate of an Engage ability's own EFFECT
+// (not its cost — lifespanCost/extraCost/counterCost are already paid by
+// the time ACTIVATE_ENGAGE is even a legal candidate, so this only has to
+// judge what the ability DOES). scoreAction previously had no branch for
+// ACTIVATE_ENGAGE at all, so every Engage ability in the whole card pool —
+// strong or weak, safe or risky — fell through to the flat `0` default,
+// the same score as doing nothing in particular. Self-play's own
+// card-impact data (scripts/self-play, 2026-09-21 5hr run) flagged several
+// Engage-ability cards among the worst-impact in the pool (Illegible
+// Grimoire -0.287, Údarik Hunger -0.302, Onagīous Hunger -0.285, Crathean
+// Cultivator -0.287) — not obviously because the abilities are bad on
+// paper, but a real candidate explanation is that the AI was effectively
+// engaging them at random, with no way to weigh a risky coin-flip's
+// downside or recognize a strong card-advantage effect at all.
+// Deliberately simple pattern matching (draw/damage/Lifespan-loss/
+// discard/Invoke), not a full resolveOrLogEffect-style dispatcher — this
+// only needs to roughly RANK candidate actions against each other, not
+// predict an exact outcome. Unrecognized effect text still gets a small
+// positive baseline (not 0), so using a Being's own turn action for
+// SOMETHING still beats leaving it idle by default, matching this file's
+// existing "degrade gracefully, never regress an unhandled case" convention.
+const ENGAGE_DRAW_RE = /draw\s*\(?(\d+)\)?\s+cards?/i;
+const ENGAGE_DAMAGE_RE = /deal\s*\(?(\d+)\)?\s+damage/i;
+const ENGAGE_LOSE_LIFESPAN_RE = /(?:you )?(?:lose|pay)\s*\(?(\d+)\)?\s+Lifespan/i;
+const ENGAGE_DISCARD_RE = /\bdiscard\b/i;
+const ENGAGE_INVOKE_RE = /\bInvoke\b/i;
+const ENGAGE_COIN_FLIP_RE = /if heads\s+(.+?),?\s*if tails\s+(.+?)\.?$/i;
+
+// `gated` tells the scorer which conditional clauses actually fired when
+// this exact action was simulated for real (see the ACTIVATE_ENGAGE branch
+// below) — both Invoke ("Invoke a Seed on target tile this points to") and
+// a typed discard-then-draw ("Discard a Hunger, then draw (1) card.") are
+// printed as unconditional-looking text but are really gated on a resource
+// the flat pattern match can't see from the text alone (a Seed left to
+// invoke AND an empty pointed tile; a Hunger-typed card actually in hand).
+// Self-play found BOTH of these flat-scored as if they always succeed —
+// Crathean Cultivator (Invoke, often no empty pointed tile) and Onagīous
+// Hunger (discard-gated draw, often no Hunger in hand) both got WORSE
+// relative to the pre-ACTIVATE_ENGAGE-scoring baseline specifically
+// because the AI started chasing a bonus that frequently wasn't really
+// there. `gated.invokeSucceeds`/`gated.discardSucceeds` default to true so
+// every other (ungated) caller — including the coin-flip recursion, which
+// has no state to simulate against — keeps today's behavior.
+const engageEffectValue = (text, gated = {}) => {
+  if (!text) return 6;
+  const { invokeSucceeds = true, discardSucceeds = true } = gated;
+  // A coin flip's own two branches are usually printed "if heads X, if
+  // tails Y" — score each half independently and average them (an actual
+  // 50/50 expected value), rather than judging the ability by whichever
+  // branch merely reads better. Recurses so a nested/compound branch still
+  // gets the same per-clause treatment.
+  const coinMatch = text.match(ENGAGE_COIN_FLIP_RE);
+  if (coinMatch) return (engageEffectValue(coinMatch[1], gated) + engageEffectValue(coinMatch[2], gated)) / 2;
+  let value = 4; // using the Being's action for something beats leaving it idle
+  const isDiscardGated = ENGAGE_DISCARD_RE.test(text);
+  const draw = text.match(ENGAGE_DRAW_RE);
+  // A draw this card's own discard clause gates (Onagīous Hunger: "Discard
+  // a Hunger, then draw (1) card") only really happens if the discard did
+  // — same reducer-confirmed chain DISCARD_TYPED_THEN_DRAW_RE's own "no
+  // <typing> to discard" early-return enforces (actions.js). An un-gated
+  // draw (no discard clause at all) is unaffected.
+  if (draw && (!isDiscardGated || discardSucceeds)) value += 6 * parseInt(draw[1], 10);
+  const damage = text.match(ENGAGE_DAMAGE_RE);
+  if (damage) value += 2 * parseInt(damage[1], 10);
+  const loseLifespan = text.match(ENGAGE_LOSE_LIFESPAN_RE);
+  if (loseLifespan) value -= 2 * parseInt(loseLifespan[1], 10);
+  // Discarding for nothing (no paired draw, or the draw didn't happen
+  // either) is a real cost; discarding for a draw that DID happen is
+  // already a wash (the draw bonus above already paid for it) — but if
+  // the discard itself can't even resolve (nothing of the right typing in
+  // hand), this whole clause is a dead no-op, not a cost, so no penalty.
+  if (isDiscardGated && discardSucceeds && !draw) value -= 3;
+  if (ENGAGE_INVOKE_RE.test(text) && invokeSucceeds) value += 8;
+  return value;
+};
+
 // How many of a Prophecy's own future automatic decay ticks (the same
 // 1-per-turn countdown modulate()/turn.js already applies every real turn)
 // to simulate when weighing a Modulate decision. Confirmed with the user:
@@ -416,6 +494,39 @@ const scoreAction = (state, action, playerId) => {
   if (action.type === 'PLACE_RELIC') {
     const card = state.players[playerId].hand.find(c => c.instanceId === action.instanceId);
     return card ? knownComboMarginalValue(state, playerId, card) : 0;
+  }
+
+  // EXPERIMENTAL — see engageEffectValue's own comment above. Osteomancer-
+  // style multi-ability cards select by action.abilityIndex; everything
+  // else reads its one ability off effectiveEngage, same as the real
+  // ACTIVATE_ENGAGE reducer case itself does.
+  if (action.type === 'ACTIVATE_ENGAGE') {
+    const occupant = state.board[action.cellId];
+    if (!occupant) return 0;
+    const ownAbilities = occupant.card.keywords?.engageAbilities || [];
+    const effectText = (ownAbilities.length > 1 && action.abilityIndex != null)
+      ? ownAbilities[action.abilityIndex]?.effect
+      : effectiveEngage(occupant);
+    // Invoke and a typed discard both have a real "might just fail"
+    // resource gate the text alone can't reveal (see engageEffectValue's
+    // own comment) — resolve the action for real, once, only when the
+    // text actually contains one of these, and read the gate off what
+    // really moved: Invoke always removes the invoked card from the
+    // player's own deck on success (invokeCardOnto, actions.js) and never
+    // touches it on failure; a typed discard always shrinks hand on
+    // success and never touches it on failure (DISCARD_TYPED_THEN_DRAW_RE's
+    // own "no <typing> to discard" early-return). Skipped entirely for the
+    // overwhelmingly common case (neither clause present) to avoid an
+    // extra gameReducer call on every other Engage action scored.
+    const needsInvokeCheck = ENGAGE_INVOKE_RE.test(effectText || '');
+    const needsDiscardCheck = ENGAGE_DISCARD_RE.test(effectText || '');
+    if (!needsInvokeCheck && !needsDiscardCheck) return engageEffectValue(effectText);
+    const before = state.players[playerId];
+    const after = gameReducer(state, action).players[playerId];
+    return engageEffectValue(effectText, {
+      invokeSucceeds: !needsInvokeCheck || after.mainDeck.length < before.mainDeck.length,
+      discardSucceeds: !needsDiscardCheck || after.hand.length < before.hand.length,
+    });
   }
 
   if (action.type === 'KEEP_HAND') return 10;

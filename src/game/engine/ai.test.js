@@ -304,6 +304,99 @@ describe('pickAiAction', () => {
   });
 });
 
+// EXPERIMENTAL (ai-engage-scoring-experiment) — regression coverage for the
+// two cards self-play's own watched-card comparison flagged as getting
+// WORSE after ACTIVATE_ENGAGE scoring was added: Crathean Cultivator
+// ("Engage: Invoke a Seed on target tile this points to.") and Onagīous
+// Hunger ("Engage: Discard a Hunger, then draw (1) card.") both print text
+// that LOOKS unconditionally good but is really gated on a resource
+// (an empty pointed tile + a Seed left in deck; a Hunger-typed card
+// actually in hand) the flat text-pattern score couldn't see — so the AI
+// started chasing a bonus that often wasn't really there. Each test offers
+// a second, reliably-resolving Engage (worth more than the dead-gate floor
+// but less than the real payoff) so the AI's actual CHOICE proves whether
+// it can tell the gated effect apart from the real one, not just that a
+// score number moved.
+describe('ACTIVATE_ENGAGE scoring: gated effects (Invoke / typed discard) score low when the gate can\'t resolve', () => {
+  // Placed on B's own HOME row (r5), not the front row (r4) — per
+  // computeAttackCell (board.js), a Being can only attack from the front
+  // row, so a home-row Being with no arrows literally cannot MOVE_OR_ATTACK
+  // at all, leaving ACTIVATE_ENGAGE as its only real candidate and the two
+  // test cells comparable on Engage value alone, with no "free attack into
+  // empty opposing territory" action to confound the comparison.
+  const crathean = (arrows) => ({
+    type: 'being', ownerId: 'B',
+    card: { name: 'Crathean Cultivator', kind: 'being', strength: 2, lifespan: 2, arrows, keywords: { engage: 'Invoke a Seed on target tile this points to.' } },
+    currentLifespan: 2, engaged: false,
+  });
+  // "Deal (1) damage" — deliberately between the dead-Invoke floor (4) and
+  // a real Invoke's payoff (4 + 8 = 12), so the AI's choice between the two
+  // cells is a genuine discriminator either way.
+  const midValueEngager = () => ({
+    type: 'being', ownerId: 'B',
+    card: { name: 'Pinger', kind: 'being', strength: 1, lifespan: 2, arrows: [], keywords: { engage: 'Deal (1) damage to target Being.' } },
+    currentLifespan: 2, engaged: false,
+  });
+  const seedCard = { id: 'seed', instanceId: 'seed#0', name: 'Test Seed', kind: 'being', typing: 'Seed', castingCost: { faithless: 0, colored: {} }, strength: 1, lifespan: 1, arrows: [] };
+
+  it('skips the dead Invoke (no empty pointed tile) for a lower-but-real alternative', () => {
+    // Direction 1 from B's own r5c1 points to r4c1 (board.js's own
+    // direction table) — occupied here, so Invoke's own "has no empty tile
+    // to invoke onto" early-return (placeInvokedCard, actions.js) fires. A
+    // Relic (not a Being) so it can't itself introduce a competing
+    // MOVE_OR_ATTACK action — attacking is Being-only, and any Being placed
+    // on B's own front row (r4) can always attack forward regardless of
+    // arrows (computeAttackCell, board.js), which would confound the test.
+    const blocker = { type: 'relic', ownerId: 'B', card: { name: 'Blocker', kind: 'relic' }, engaged: false };
+    const state = baseState({
+      board: { r5c1: crathean([1]), r4c1: blocker, r5c3: midValueEngager() },
+      players: { A: player({ id: 'A' }), B: player({ id: 'B', mainDeck: [seedCard] }) },
+    });
+    const action = pickAiAction(state, 'B');
+    expect(action).toEqual({ type: 'ACTIVATE_ENGAGE', cellId: 'r5c3' });
+  });
+
+  it('prefers a real, resolvable Invoke (empty pointed tile + a Seed in deck) over the lower alternative', () => {
+    const state = baseState({
+      board: { r5c1: crathean([1]), r5c3: midValueEngager() },
+      players: { A: player({ id: 'A' }), B: player({ id: 'B', mainDeck: [seedCard] }) },
+    });
+    const action = pickAiAction(state, 'B');
+    expect(action).toEqual({ type: 'ACTIVATE_ENGAGE', cellId: 'r5c1' });
+  });
+
+  const onagiousHunger = () => ({
+    type: 'being', ownerId: 'B',
+    card: { name: 'Onagīous Hunger', kind: 'being', strength: 0, lifespan: 2, arrows: [], keywords: { engage: 'Discard a Hunger, then draw (1) card.' } },
+    currentLifespan: 2, engaged: false,
+  });
+  // kind: 'relic' with an unaffordable cost (B's test player() has an
+  // empty effigyPool, same as every other test in this file) — matchesDiscardTyping
+  // only reads `.typing`, so this still counts as a "Hunger" to discard,
+  // but can't itself be played as a competing SUMMON_BEING/PLACE_RELIC
+  // action, which would otherwise confound the comparison.
+  const hungerCard = { id: 'hunger', instanceId: 'hunger#0', name: 'Test Hunger', kind: 'relic', typing: 'Hunger', castingCost: { faithless: 1, colored: {} } };
+  const nonHungerCard = { id: 'nh', instanceId: 'nh#0', name: 'Plain Card', kind: 'relic', typing: 'Living', castingCost: { faithless: 1, colored: {} } };
+
+  it('skips the dead discard-then-draw (no Hunger in hand) for a lower-but-real alternative', () => {
+    const state = baseState({
+      board: { r5c1: onagiousHunger(), r5c3: midValueEngager() },
+      players: { A: player({ id: 'A' }), B: player({ id: 'B', hand: [nonHungerCard] }) },
+    });
+    const action = pickAiAction(state, 'B');
+    expect(action).toEqual({ type: 'ACTIVATE_ENGAGE', cellId: 'r5c3' });
+  });
+
+  it('prefers the real discard-then-draw (a Hunger actually in hand) over the lower alternative', () => {
+    const state = baseState({
+      board: { r5c1: onagiousHunger(), r5c3: midValueEngager() },
+      players: { A: player({ id: 'A' }), B: player({ id: 'B', hand: [hungerCard] }) },
+    });
+    const action = pickAiAction(state, 'B');
+    expect(action).toEqual({ type: 'ACTIVATE_ENGAGE', cellId: 'r5c1' });
+  });
+});
+
 describe('pickAiAction with aiDifficulty "hard" (the shallow search)', () => {
   it('still identifies an obvious lethal attack, same as the default greedy picker', () => {
     const state = baseState({ board: { r4c2: being('B', 60) }, players: { A: player({ id: 'A', lifespan: 5 }), B: player({ id: 'B' }) } });
