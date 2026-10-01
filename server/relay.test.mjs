@@ -89,4 +89,73 @@ describe('RoomRegistry', () => {
     const registry = new RoomRegistry();
     expect(() => registry.disconnect(fakeSocket())).not.toThrow();
   });
+
+  describe('findMatch', () => {
+    it('queues the first socket to look for a match', () => {
+      const registry = new RoomRegistry();
+      const a = fakeSocket();
+      const result = registry.findMatch(a);
+      expect(result).toEqual({ waiting: true });
+      expect(registry.quickMatchQueue).toEqual([a]);
+    });
+
+    it('pairs a second socket with the one already waiting, host first', () => {
+      const registry = new RoomRegistry();
+      const a = fakeSocket();
+      const b = fakeSocket();
+      registry.findMatch(a);
+      const result = registry.findMatch(b);
+      expect(result.waiting).toBe(false);
+      expect(result.host).toBe(a);
+      expect(result.peer).toBe(b);
+      expect(a.role).toBe('host');
+      expect(b.role).toBe('peer');
+      expect(a.roomCode).toBe(b.roomCode);
+      expect(registry.quickMatchQueue).toEqual([]);
+    });
+
+    it('is idempotent if the same socket calls findMatch again while queued', () => {
+      const registry = new RoomRegistry();
+      const a = fakeSocket();
+      registry.findMatch(a);
+      const result = registry.findMatch(a);
+      expect(result).toEqual({ waiting: true });
+      expect(registry.quickMatchQueue).toEqual([a]); // not duplicated, not paired with itself
+    });
+
+    it('queues a third socket once the first two are paired', () => {
+      const registry = new RoomRegistry();
+      const a = fakeSocket();
+      const b = fakeSocket();
+      const c = fakeSocket();
+      registry.findMatch(a);
+      registry.findMatch(b);
+      const result = registry.findMatch(c);
+      expect(result).toEqual({ waiting: true });
+      expect(registry.quickMatchQueue).toEqual([c]);
+    });
+  });
+
+  describe('cancelFind', () => {
+    it('removes a waiting socket from the queue', () => {
+      const registry = new RoomRegistry();
+      const a = fakeSocket();
+      registry.findMatch(a);
+      registry.cancelFind(a);
+      expect(registry.quickMatchQueue).toEqual([]);
+    });
+
+    it('is a no-op for a socket not in the queue', () => {
+      const registry = new RoomRegistry();
+      expect(() => registry.cancelFind(fakeSocket())).not.toThrow();
+    });
+  });
+
+  it('removes a socket from the quick-match queue on disconnect', () => {
+    const registry = new RoomRegistry();
+    const a = fakeSocket();
+    registry.findMatch(a);
+    registry.disconnect(a);
+    expect(registry.quickMatchQueue).toEqual([]);
+  });
 });

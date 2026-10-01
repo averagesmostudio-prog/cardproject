@@ -2,26 +2,34 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createRelayClient, createGameChannel } from '../net/relayClient.js';
 import { getRelayAddress, setRelayAddress } from '../../lib/relayAddress.js';
 
-// Host/join pairing screen for a two-player-over-the-network match — the
-// net-mode counterpart to picking "vs AI" in GameApp.jsx. Visual shell
-// modeled on CoinFlip.jsx's (full-bleed black backdrop, centered white
-// rounded-lg shadow card, max-w-md).
+// Host/join/quick-match pairing screen for a two-player-over-the-network
+// match — the net-mode counterpart to picking "vs AI" in GameApp.jsx.
+// Visual shell modeled on CoinFlip.jsx's (full-bleed black backdrop,
+// centered white rounded-lg shadow card, max-w-md).
 //
-// Host is always seat A, peer is always seat B — fixed at pairing, not
-// coin-flip-derived. Seat assignment (which player-id each client renders
-// as "me") is orthogonal to turn order (who goes first, which the coin
-// flip after this screen decides) — keeping them separate means "who's
-// authoritative for building the initial state" is simply "whoever
-// hosted," with no extra negotiation.
+// Three ways to pair up: host (get a code to share), join (enter a
+// friend's code), or quick match (the relay server auto-pairs you with
+// whoever else is looking right now — server/roomRegistry.mjs's
+// quickMatchQueue). Host/join let two people who already know each other
+// play; quick match doesn't need that, at the cost of playing a stranger
+// under this app's trusted, no-anti-cheat design — same tradeoff flagged
+// when this was scoped.
+//
+// Host is always seat A, peer is always seat B. For host/join the client
+// picks its own role up front (hosting = seat A, joining = seat B); quick
+// match can't know in advance which side of the pairing it'll be, so the
+// server tells every path its role in the 'paired' message itself (`role:
+// 'host'|'peer'`) and all three handlers below read it the same way,
+// rather than host/join continuing to assume their role locally.
 //
 // onPaired({ gameChannel, relayClient, netRole, mySeat }) fires once the
 // relay server reports both sides connected.
 export default function NetLobby({ onPaired, onBack }) {
-  const [mode, setMode] = useState(null); // null | 'host' | 'join'
+  const [mode, setMode] = useState(null); // null | 'host' | 'join' | 'quick'
   const [address, setAddress] = useState(getRelayAddress());
   const [joinCode, setJoinCode] = useState('');
   const [roomCode, setRoomCode] = useState(null); // host's own code, once created
-  const [status, setStatus] = useState('idle'); // 'idle' | 'connecting' | 'waiting' | 'error'
+  const [status, setStatus] = useState('idle'); // 'idle' | 'connecting' | 'waiting' | 'searching' | 'error'
   const [error, setError] = useState(null);
   const clientRef = useRef(null);
   // Set synchronously (not via setStatus) the instant onPaired is called —
@@ -60,7 +68,7 @@ export default function NetLobby({ onPaired, onBack }) {
       if (msg.type === 'paired') {
         handedOffRef.current = true;
         setStatus('paired');
-        onPaired({ gameChannel: createGameChannel(relayClient), relayClient, netRole: 'host', mySeat: 'A' });
+        onPaired({ gameChannel: createGameChannel(relayClient), relayClient, netRole: msg.role, mySeat: msg.role === 'host' ? 'A' : 'B' });
       }
     });
     relayClient.onClose(() => {
@@ -92,7 +100,33 @@ export default function NetLobby({ onPaired, onBack }) {
       if (msg.type === 'paired') {
         handedOffRef.current = true;
         setStatus('paired');
-        onPaired({ gameChannel: createGameChannel(relayClient), relayClient, netRole: 'peer', mySeat: 'B' });
+        onPaired({ gameChannel: createGameChannel(relayClient), relayClient, netRole: msg.role, mySeat: msg.role === 'host' ? 'A' : 'B' });
+      }
+    });
+    relayClient.onClose(() => {
+      setStatus((s) => (s === 'paired' ? s : 'error'));
+      setError('Lost connection to the relay server.');
+    });
+  };
+
+  const startQuickMatch = () => {
+    setRelayAddress(address);
+    setMode('quick');
+    setStatus('connecting');
+    setError(null);
+    const relayClient = createRelayClient(address);
+    clientRef.current = relayClient;
+    relayClient.onOpen(() => {
+      relayClient.send({ type: 'find-match' });
+    });
+    relayClient.onMessage((msg) => {
+      if (msg.type === 'searching') {
+        setStatus('searching');
+      }
+      if (msg.type === 'paired') {
+        handedOffRef.current = true;
+        setStatus('paired');
+        onPaired({ gameChannel: createGameChannel(relayClient), relayClient, netRole: msg.role, mySeat: msg.role === 'host' ? 'A' : 'B' });
       }
     });
     relayClient.onClose(() => {
@@ -105,7 +139,7 @@ export default function NetLobby({ onPaired, onBack }) {
     <div className="min-h-screen flex items-center justify-center bg-black p-8">
       <div className="max-w-md w-full text-center bg-white rounded-lg shadow p-8">
         <h2 className="text-lg font-bold text-stone-800 mb-1">Play Online</h2>
-        <p className="text-sm text-stone-500 mb-6">Host a match, or join with a code.</p>
+        <p className="text-sm text-stone-500 mb-6">Find an opponent automatically, or play a friend directly.</p>
 
         {mode === null && (
           <>
@@ -116,14 +150,32 @@ export default function NetLobby({ onPaired, onBack }) {
               className="w-full mb-6 px-3 py-2 border border-stone-300 rounded-lg text-sm font-mono"
               placeholder="ws://localhost:8787"
             />
+            <button
+              onClick={startQuickMatch}
+              className="w-full mb-5 px-5 py-2.5 bg-amber-600 text-white rounded-lg font-semibold hover:bg-amber-700 transition"
+            >
+              Quick Match
+            </button>
+            <div className="flex items-center gap-3 mb-5">
+              <div className="flex-1 h-px bg-stone-200" />
+              <span className="text-xs text-stone-400 uppercase tracking-wide">Or play a friend</span>
+              <div className="flex-1 h-px bg-stone-200" />
+            </div>
             <div className="flex gap-3 justify-center">
-              <button onClick={startHost} className="px-5 py-2 bg-amber-600 text-white rounded-lg font-semibold hover:bg-amber-700 transition">
+              <button onClick={startHost} className="px-5 py-2 border border-stone-300 rounded-lg font-semibold hover:bg-stone-50 transition">
                 Host a match
               </button>
               <button onClick={startJoin} className="px-5 py-2 border border-stone-300 rounded-lg font-semibold hover:bg-stone-50 transition">
                 Join a match
               </button>
             </div>
+          </>
+        )}
+
+        {mode === 'quick' && (
+          <>
+            {status === 'connecting' && <p className="text-sm text-stone-500">Connecting…</p>}
+            {status === 'searching' && <p className="text-sm text-stone-500 animate-pulse">Searching for an opponent…</p>}
           </>
         )}
 

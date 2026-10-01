@@ -35,8 +35,24 @@ wss.on('connection', (ws) => {
         ws.send(JSON.stringify({ type: 'join-error', reason: result.error }));
         return;
       }
-      ws.send(JSON.stringify({ type: 'paired' }));
-      result.room.host.send(JSON.stringify({ type: 'paired' }));
+      // `role` tells each side which seat it got — redundant for this path
+      // (a joiner already knows it's the peer) but the SAME 'paired' shape
+      // is also used by find-match below, where neither side can know its
+      // role in advance, so both paths send it for one consistent client
+      // handler.
+      ws.send(JSON.stringify({ type: 'paired', role: 'peer' }));
+      result.room.host.send(JSON.stringify({ type: 'paired', role: 'host' }));
+      return;
+    }
+
+    if (msg.type === 'find-match') {
+      const result = registry.findMatch(ws);
+      if (result.waiting) {
+        ws.send(JSON.stringify({ type: 'searching' }));
+        return;
+      }
+      result.host.send(JSON.stringify({ type: 'paired', role: 'host' }));
+      result.peer.send(JSON.stringify({ type: 'paired', role: 'peer' }));
       return;
     }
 

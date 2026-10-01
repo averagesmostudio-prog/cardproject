@@ -23,6 +23,7 @@ export function randomCode(existingCodes) {
 export class RoomRegistry {
   constructor() {
     this.rooms = new Map(); // code -> { host, peer }
+    this.quickMatchQueue = []; // sockets waiting for an auto-matched opponent, FIFO
   }
 
   createRoom(hostSocket) {
@@ -43,6 +44,31 @@ export class RoomRegistry {
     return { room };
   }
 
+  // Pairs with whichever socket has been waiting longest, or queues this
+  // one if nobody's waiting yet. The waiting socket becomes the room's host
+  // (seat A) — same "whoever set the match up owns it" rule the host/join
+  // flow already has, just decided by arrival order instead of a user's own
+  // choice, since quick-match has no code for either side to deliberately
+  // host or join.
+  findMatch(socket) {
+    if (this.quickMatchQueue.includes(socket)) return { waiting: true }; // already queued — ignore a repeat call
+    const waiting = this.quickMatchQueue.shift();
+    if (!waiting) {
+      this.quickMatchQueue.push(socket);
+      return { waiting: true };
+    }
+    const code = this.createRoom(waiting);
+    this.joinRoom(code, socket);
+    return { waiting: false, host: waiting, peer: socket };
+  }
+
+  // Removes a socket from the queue — used for both an explicit cancel and
+  // a disconnect while still waiting (see disconnect() below).
+  cancelFind(socket) {
+    const idx = this.quickMatchQueue.indexOf(socket);
+    if (idx !== -1) this.quickMatchQueue.splice(idx, 1);
+  }
+
   relay(fromSocket, payload) {
     const room = this.rooms.get(fromSocket.roomCode);
     if (!room) return null;
@@ -53,6 +79,7 @@ export class RoomRegistry {
   }
 
   disconnect(socket) {
+    this.cancelFind(socket);
     const room = this.rooms.get(socket.roomCode);
     if (!room) return null;
     const other = socket.role === 'host' ? room.peer : room.host;
