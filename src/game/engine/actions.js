@@ -1155,6 +1155,10 @@ const resolveDesperateFinale = (state, playerId, cardName, cellId) => {
     players: { ...state.players, [playerId]: { ...owner, lifespan: owner.lifespan - cost } },
   };
   next = addLog(next, `${playerId} pays ${cost} Lifespan (${target.card.name}'s own Lifespan) for ${cardName}'s additional cost.`);
+  // A genuine Lifespan payment (the player chose to conjure this), same
+  // "Whenever you pay Lifespan" reaction (Ravenous Lamtukka) every other
+  // real payment site in this file triggers.
+  next = triggerLifespanPaidReactions(next, playerId);
   const targetInstanceId = target.card.instanceId;
   next = resolveAttackFrom(next, playerId, cellId);
   if (next.board[cellId]?.card?.instanceId === targetInstanceId) {
@@ -4889,8 +4893,14 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
   if (payLifespanBareMatch) {
     const amount = parseInt(payLifespanBareMatch[1], 10);
     const player = state.players[playerId];
-    const next = { ...state, players: { ...state.players, [playerId]: { ...player, lifespan: player.lifespan - amount } } };
-    return checkWin(addLog(next, `${cardName}'s ${label} costs ${playerId} ${amount} Lifespan.`));
+    let next = { ...state, players: { ...state.players, [playerId]: { ...player, lifespan: player.lifespan - amount } } };
+    next = addLog(next, `${cardName}'s ${label} costs ${playerId} ${amount} Lifespan.`);
+    // A genuine Lifespan payment (e.g. Illegible Grimoire's coin-flip tails
+    // branch), not forced loss/damage — same "Whenever you pay Lifespan"
+    // reaction (Ravenous Lamtukka) every other real payment site above
+    // triggers; this bare-"Pay (N) Lifespan." branch was missing it.
+    next = triggerLifespanPaidReactions(next, playerId);
+    return checkWin(next);
   }
 
   if (SELF_BECOME_FAVORED_RE.test(text) && context.selfCellId && state.board[context.selfCellId]?.type === 'being') {
@@ -13627,6 +13637,11 @@ const gameReducerCore = (state, action) => {
         players: { ...state.players, [playerId]: { ...player, lifespan: player.lifespan - ability.amount } },
       };
       next = addLog(next, `${playerId} pays ${ability.amount} Lifespan for ${occupant.card.name}'s ability.`);
+      // A genuine Lifespan payment (Sha-KaRah: "Pay (5) Lifespan to move
+      // an adjacent Armament..."), same "Whenever you pay Lifespan"
+      // reaction (Ravenous Lamtukka) every other real payment site in
+      // this file triggers.
+      next = triggerLifespanPaidReactions(next, playerId);
       return resolveOrLogEffect(next, playerId, occupant.card.name, ability.effect, 'ability', { selfCellId: action.cellId });
     }
 

@@ -1180,6 +1180,31 @@ describe('PLACE_ALTAR: "additional cost to Conjure"', () => {
     expect(next.players.A.purgatory).toEqual([{ instanceId: 'd1' }]);
   });
 
+  it('regression: mills for real against the actual CSV-parsed card, whose Text Box uses real CRLF line endings', () => {
+    // The real CSV's multi-line Text Box cells are "\r\n"-terminated, not
+    // plain "\n" — confirmed by reading the actual file. cardData.js's
+    // conjureCost-extraction regex used to require a bare "\n" immediately
+    // after its capture, and since regex "." doesn't match "\r" either, a
+    // stray "\r" there made the whole match silently fail (not a partial
+    // capture — a hard `null`). PLACE_ALTAR still placed the Altar
+    // (unrelated to conjureCost), but its `if (card.keywords?.
+    // conjureCost)` gate was then false, so the mill never ran — reported
+    // in play as "the altar entered and my purgatory remained empty."
+    const csvRow = {
+      'Card Name': 'Kalduran Altar', 'Card Typing': 'Altar', 'Effigy Costs': '2 Shifting', 'Conjuring Cost': '2',
+      'Text Box': 'As an additional cost to conjure, send the top (3) cards of your deck to your Purgatory.\r\n Craft (1) additional Effigy on your turn\r\n(Conjures in the Effigy Zone).',
+      Strength: 'XXX', Lifespan: 'XXX',
+    };
+    const card = toGameCard(csvRow, 0);
+    expect(card.keywords.conjureCost).toBe('send the top (3) cards of your deck to your Purgatory.');
+    const deck = [{ instanceId: 'd1' }, { instanceId: 'd2' }, { instanceId: 'd3' }, { instanceId: 'd4' }];
+    const state = baseState({ players: { A: player({ hand: [card], mainDeck: deck, effigyPool: [effigy('shifting'), effigy('shifting')] }), B: player() } });
+    const next = gameReducer(state, { type: 'PLACE_ALTAR', instanceId: card.instanceId });
+    expect(next.players.A.purgatory).toHaveLength(3);
+    expect(next.players.A.mainDeck).toEqual([{ instanceId: 'd4' }]);
+    expect(next.log.some(e => e.message.includes('sends 3 card(s)'))).toBe(true);
+  });
+
   it('discards a random hand card to Purgatory (e.g. "NamKaranian Altar")', () => {
     const filler = { instanceId: 'filler#0', name: 'Filler' };
     const card = altarCard({ keywords: { craftBonus: 1, conjureCost: 'discard a card at random' } });
@@ -10125,6 +10150,44 @@ describe('"Whenever you pay Lifespan gain +1/+1." (Ravenous Lamtukka)', () => {
     const next = gameReducer(state, { type: 'RESOLVE_PAY_LIFESPAN_OPTIONAL' });
     expect(next.board.r2c1.permanentBonus).toEqual({ strength: 1, lifespan: 1 });
     expect(next.board.r2c2.permanentBonus).toEqual({ strength: 1, lifespan: 1 });
+  });
+
+  // Regression: three real cards' own genuine Lifespan payments were each
+  // missing the triggerLifespanPaidReactions call every OTHER payment site
+  // in actions.js already made (user-reported for Illegible Grimoire).
+
+  it('grows off Illegible Grimoire\'s coin-flip tails branch ("if tails Pay (3) Lifespan")', () => {
+    const spy = vi.spyOn(Math, 'random').mockReturnValue(0.9); // forces tails
+    const state = baseState({ board: { r2c1: lamtukka }, players: { A: player({ lifespan: 20 }), B: player() } });
+    const next = resolveOrLogEffect(state, 'A', 'Illegible Grimoire', 'Flip a coin, if heads draw (1) card, if tails Pay (3) Lifespan.', 'Engage ability', {});
+    spy.mockRestore();
+    expect(next.players.A.lifespan).toBe(17);
+    expect(next.board.r2c1.permanentBonus).toEqual({ strength: 1, lifespan: 1 });
+  });
+
+  it('grows off Desperate Finale\'s additional conjure cost ("Pay Lifespan equal to target engaged Being\'s own Lifespan")', () => {
+    const desperateFinale = {
+      id: 'df-1', instanceId: 'df-1#0', name: 'Desperate Finale', kind: 'conjuring',
+      castingCost: { faithless: 0, colored: {} },
+      keywords: { conjureCost: 'Pay Lifespan equal to the Lifespan of target engaged Being you control.' },
+    };
+    const engagedBeing = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'eng#0', strength: 3, lifespan: 5 }), currentLifespan: 5, engaged: true };
+    const state = baseState({
+      board: { r2c1: lamtukka, r2c2: engagedBeing },
+      players: { A: player({ hand: [desperateFinale], lifespan: 50 }), B: player({ lifespan: 50 }) },
+    });
+    const next = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'df-1#0' });
+    expect(next.players.A.lifespan).toBe(45); // 50 - 5 (the target's own printed Lifespan)
+    expect(next.board.r2c1.permanentBonus).toEqual({ strength: 1, lifespan: 1 });
+  });
+
+  it('grows off Sha-KaRah\'s own ability cost ("Pay (5) Lifespan to move an adjacent Armament...")', () => {
+    const shaKaRah = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'sk#0', name: 'Sha-KaRah', keywords: { payLifespanCostAbility: { amount: 5, effect: 'move an adjacent Armament one tile in any direction.' } } }), currentLifespan: 3, engaged: false };
+    const armamentPile = { type: 'armament-stack', ownerId: 'A', armaments: [{ card: { id: 'am', instanceId: 'Some Armament#0', name: 'Some Armament', kind: 'relic-armament' }, engaged: false }] };
+    const state = baseState({ board: { r2c1: lamtukka, r2c2: shaKaRah, r2c3: armamentPile }, players: { A: player({ lifespan: 10 }), B: player() } });
+    const next = gameReducer(state, { type: 'ACTIVATE_PAY_LIFESPAN_COST_ABILITY', cellId: 'r2c2' });
+    expect(next.players.A.lifespan).toBe(5); // 10 - 5
+    expect(next.board.r2c1.permanentBonus).toEqual({ strength: 1, lifespan: 1 });
   });
 });
 
