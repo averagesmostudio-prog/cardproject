@@ -9709,15 +9709,30 @@ export const getLegalActions = (state, playerId) => {
       // point at an Altar (off-board entirely), so this is skipped then.
       // anyOwner (OPTIONAL_MODULATE_ANY_OWNER_RE) scans both players' own
       // altar lists instead of just the activating player's.
+      // `ownerId` rides along on the action itself when anyOwner — same
+      // "deck-built instanceIds are only unique WITHIN one player's own
+      // deck" fix already applied to purgatory search actions above
+      // (searchZoneCandidates' own comment). Two players on the same
+      // precon genuinely produce the same altar instanceId on both sides;
+      // without ownerId, the reducer's own owner lookup (`Object.keys(
+      // state.altars).find(...)`) always resolves to whichever owner
+      // comes first, silently redirecting a legal, offered action at the
+      // OTHER player's (possibly already-exhausted) altar instead —
+      // confirmed via self-play as a real infinite-loop cause: the
+      // reducer's early-return-unchanged on the wrong, exhausted altar
+      // left `pendingChoice` stuck forever while getLegalActions kept
+      // re-offering the same (from the right owner's view, still valid)
+      // action.
       if (!allowedCells) {
         const altarOwners = anyOwner ? Object.keys(state.altars) : [playerId];
         altarOwners.forEach((ownerId) => (state.altars[ownerId] || []).forEach(altar => {
           if (!isModulateableAltar(altar)) return;
+          const ownerField = anyOwner ? { ownerId } : {};
           if (delta === 'choose') {
-            actions.push({ type: 'RESOLVE_MODULATE', altarInstanceId: altar.card.instanceId, delta: 1 });
-            actions.push({ type: 'RESOLVE_MODULATE', altarInstanceId: altar.card.instanceId, delta: -1 });
+            actions.push({ type: 'RESOLVE_MODULATE', altarInstanceId: altar.card.instanceId, delta: 1, ...ownerField });
+            actions.push({ type: 'RESOLVE_MODULATE', altarInstanceId: altar.card.instanceId, delta: -1, ...ownerField });
           } else {
-            actions.push({ type: 'RESOLVE_MODULATE', altarInstanceId: altar.card.instanceId, delta });
+            actions.push({ type: 'RESOLVE_MODULATE', altarInstanceId: altar.card.instanceId, delta, ...ownerField });
           }
         }));
       }
@@ -14488,9 +14503,25 @@ const gameReducerCore = (state, action) => {
       // event), so this just writes the new count and continues any Time
       // Capsule-style repeat, same as Hourglass below.
       if (action.altarInstanceId) {
-        const altarOwnerId = anyOwner
-          ? Object.keys(state.altars).find(oid => (state.altars[oid] || []).some(a => a.card.instanceId === action.altarInstanceId))
-          : playerId;
+        // `action.ownerId` (set by getLegalActions' own anyOwner branch,
+        // above) disambiguates which player's altar this is — two players
+        // on the same precon genuinely produce the same altar instanceId
+        // on both sides (buildMainDeckList's own `${card.id}#${i}`
+        // pattern is only unique within one player's deck), so falling
+        // back to a plain `.find()` here would silently resolve to
+        // whichever owner's altars object key comes first, even when that
+        // owner's same-instanceId altar is a completely different (and
+        // possibly already-exhausted) card. Confirmed via self-play as a
+        // real infinite-loop cause (Orbital Acceleration's "You may
+        // Modulate (-1)" targeting the opponent's altar, silently
+        // redirected to the activator's own already-dry one every time).
+        // The `.find()` fallback only remains for any other
+        // anyOwner-but-no-explicit-ownerId caller this file doesn't yet
+        // have (there are none right now).
+        const altarOwnerId = action.ownerId
+          || (anyOwner
+            ? Object.keys(state.altars).find(oid => (state.altars[oid] || []).some(a => a.card.instanceId === action.altarInstanceId))
+            : playerId);
         const altarList = (altarOwnerId && state.altars[altarOwnerId]) || [];
         const altarIndex = altarList.findIndex(a => a.card.instanceId === action.altarInstanceId);
         const altar = altarList[altarIndex];

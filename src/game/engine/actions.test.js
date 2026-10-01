@@ -7854,8 +7854,8 @@ describe('"You may Modulate (-1)." (Orbital Acceleration\'s own third clause) �
     const state = baseState({ altars: { A: [], B: [opponentAltar] } });
     const next = resolveOrLogEffect(state, 'A', 'Orbital Acceleration', 'You may Modulate (-1).', 'Prophecy', {});
     const legal = getLegalActions(next, 'A');
-    expect(legal).toContainEqual({ type: 'RESOLVE_MODULATE', altarInstanceId: 'ealtar#0', delta: -1 });
-    const resolved = gameReducer(next, { type: 'RESOLVE_MODULATE', altarInstanceId: 'ealtar#0', delta: -1 });
+    expect(legal).toContainEqual({ type: 'RESOLVE_MODULATE', altarInstanceId: 'ealtar#0', delta: -1, ownerId: 'B' });
+    const resolved = gameReducer(next, { type: 'RESOLVE_MODULATE', altarInstanceId: 'ealtar#0', delta: -1, ownerId: 'B' });
     expect(resolved.altars.B[0].counters.time).toBe(2); // written back to B's own list, not A's
     expect(resolved.altars.A).toEqual([]);
     expect(resolved.pendingChoice).toBeNull();
@@ -7866,6 +7866,33 @@ describe('"You may Modulate (-1)." (Orbital Acceleration\'s own third clause) �
     const next = resolveOrLogEffect(state, 'A', 'Orbital Acceleration', 'You may Modulate (-1).', 'Prophecy', {});
     expect(next.pendingChoice).toBeNull();
     expect(next.log.some(e => e.message.includes('no Time Counter on the board to Modulate'))).toBe(true);
+  });
+
+  // Regression: both players building the same precon deck genuinely
+  // produce the same altar instanceId on both sides (buildMainDeckList's
+  // own `${card.id}#${i}` pattern is only unique within one player's own
+  // deck — same root cause as the purgatory-instanceId-collision case
+  // above). Before `ownerId` rode along on the action, the reducer's own
+  // `Object.keys(state.altars).find(...)` lookup always resolved to
+  // whichever owner's key came first — here, A's own already-exhausted
+  // altar — even when the player was choosing to modulate B's. Found via
+  // self-play as a genuine infinite loop: getLegalActions kept re-offering
+  // the (from B's own still-valid altar) action every tick, while the
+  // reducer kept silently rejecting it against A's dry one, so
+  // pendingChoice never cleared.
+  it('resolves against the RIGHT player\'s altar when both players\' altars share the same instanceId', () => {
+    const sharedInstanceId = 'Eònion Altar__259#0';
+    const exhaustedOwnAltar = { card: { instanceId: sharedInstanceId, name: 'Eònion Altar' }, counters: { time: 0 } };
+    const freshOpponentAltar = { card: { instanceId: sharedInstanceId, name: 'Eònion Altar' }, counters: { time: 3 } };
+    const state = baseState({ altars: { A: [exhaustedOwnAltar], B: [freshOpponentAltar] } });
+    const next = resolveOrLogEffect(state, 'B', 'Orbital Acceleration', 'You may Modulate (-1).', 'Prophecy', {});
+    const legal = getLegalActions(next, 'B');
+    const action = legal.find(a => a.type === 'RESOLVE_MODULATE' && a.altarInstanceId === sharedInstanceId && a.ownerId === 'B');
+    expect(action).toBeDefined();
+    const resolved = gameReducer(next, action);
+    expect(resolved.pendingChoice).toBeNull(); // the choice actually resolved — no stuck loop
+    expect(resolved.altars.B[0].counters.time).toBe(2); // B's own altar was modulated...
+    expect(resolved.altars.A[0].counters.time).toBe(0); // ...A's same-instanceId altar was untouched
   });
 
   it('still lets the activating player Modulate their own Time Counter too (own permanents were never excluded, just no longer required)', () => {
@@ -7947,10 +7974,10 @@ describe('MetaToris: "Twice per turn Modulate (±1)."', () => {
     let state = baseState({ board: { r2c1: metaToris() }, altars: { A: [eonionAltar], B: [] } });
     state = gameReducer(state, { type: 'ACTIVATE_TIMES_PER_TURN_ABILITY', cellId: 'r2c1' });
     expect(getLegalActions(state, 'A')).toEqual(expect.arrayContaining([
-      { type: 'RESOLVE_MODULATE', altarInstanceId: 'eonion#0', delta: 1 },
-      { type: 'RESOLVE_MODULATE', altarInstanceId: 'eonion#0', delta: -1 },
+      { type: 'RESOLVE_MODULATE', altarInstanceId: 'eonion#0', delta: 1, ownerId: 'A' },
+      { type: 'RESOLVE_MODULATE', altarInstanceId: 'eonion#0', delta: -1, ownerId: 'A' },
     ]));
-    const next = gameReducer(state, { type: 'RESOLVE_MODULATE', altarInstanceId: 'eonion#0', delta: -1 });
+    const next = gameReducer(state, { type: 'RESOLVE_MODULATE', altarInstanceId: 'eonion#0', delta: -1, ownerId: 'A' });
     expect(next.altars.A).toEqual([{ card: eonionAltar.card, counters: { time: 2 } }]);
     expect(next.pendingChoice).toBeNull();
   });

@@ -299,7 +299,7 @@ describe('pickAiAction', () => {
         pendingChoice: { kind: 'modulate', playerId: 'B', cardName: 'Test', delta: 'choose', anyOwner: true },
       });
       const action = pickAiAction(state, 'B');
-      expect(action).toEqual({ type: 'RESOLVE_MODULATE', altarInstanceId: 'alt#0', delta: 1 });
+      expect(action).toEqual({ type: 'RESOLVE_MODULATE', altarInstanceId: 'alt#0', delta: 1, ownerId: 'A' });
     });
   });
 });
