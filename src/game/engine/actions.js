@@ -1642,14 +1642,14 @@ const UDARIK_FORCE_SHIFT_THEN_LOSE_RE = /^Target Being you control Shifts\s*\(?(
 // "You may pay (N) Lifespan to X" (Vassal Matriach) — generic optional-cost
 // wrapper; see its own resolver branch below for why BUFF_ALLY_RE's more
 // specific shape above is excluded.
-const MAY_PAY_LIFESPAN_RE = /you may pay\s*\(?(\d+)\)?\s+Lifespan to\s+(.+?)(?:\n|$)/i;
+const MAY_PAY_LIFESPAN_RE = /you may pay\s*\(?(\d+)\)?\s+Lifespan to\s+(.+?)(?:\r?\n|$)/i;
 
 // "you may sacrifice this and <effect>" (Oracle of Eonia: "Reveal the top
 // card of your deck, then you may sacrifice this and draw a card.") — same
 // generic optional-cost-wrapper treatment as MAY_PAY_LIFESPAN_RE above,
 // just costed by self-sacrifice instead of Lifespan. Distinct from
 // SACRIFICE_THIS_THEN_RE (a mandatory cost, no "you may", no Decline).
-const MAY_SACRIFICE_THIS_AND_RE = /you may sacrifice this and\s+(.+?)(?:\n|$)/i;
+const MAY_SACRIFICE_THIS_AND_RE = /you may sacrifice this and\s+(.+?)(?:\r?\n|$)/i;
 
 // "you may target a Prophecy and reveal it" (Vaticinator) — reveal-only,
 // no state change (Prophecies are always modeled face-down already).

@@ -324,8 +324,8 @@ export const parseKeywords = (textBox, cardName = null) => {
   // dies, X" / "When this dies X". Both feed the same `depart` field rather
   // than needing their own separate trigger point, since Depart's own
   // definition already IS "when this Being dies, X happens".
-  const departMatch = text.match(/(?:^|\n)\s*Depart:\s*(.+?)(?:\n|$)/i)
-    || text.match(/(?:^|\n)\s*When this(?: Being)? dies,?\s*(.+?)(?:\n|$)/i);
+  const departMatch = text.match(/(?:^|\n)\s*Depart:\s*(.+?)(?:\r?\n|$)/i)
+    || text.match(/(?:^|\n)\s*When this(?: Being)? dies,?\s*(.+?)(?:\r?\n|$)/i);
   // "Martyr: X" (a Being's usual, effect-bearing form), or a bare "Martyr"
   // with no colon or effect at all — printed on a couple of Relics (Bag o'
   // Bones; the real CSV also typos it "Matyr" on one row, so the "r" after
@@ -334,19 +334,19 @@ export const parseKeywords = (textBox, cardName = null) => {
   // colon-and-text case gets its trimmed effect text, the bare case gets
   // `''` (still real Martyr — distinct from `null`, "no Martyr at all" —
   // and resolveOrLogEffect already no-ops gracefully on an empty string).
-  const martyrMatch = text.match(/(?:^|\n)\s*Mar?tyr:?\s*(.*)(?:\n|$)/i);
+  const martyrMatch = text.match(/(?:^|\n)\s*Mar?tyr:?\s*(.*)(?:\r?\n|$)/i);
   // "When Summoned <effect>" — a Being's ETB trigger (RULES.md > Keywords).
   // Also matches on Armaments/Relics, which print their own "When Summoned
   // gain (N) <Name> Counters" (see armamentCounterMatch below) — harmless,
   // since only SUMMON_BEING (actions.js) ever reads this field, and only off
   // a 'being' board occupant.
-  const whenSummonedMatch = text.match(/(?:^|\n)\s*When [Ss]ummoned,?\s*(.+?)(?:\n|$)/i)
-    || (ownNameRe && text.match(new RegExp(`(?:^|\\n)\\s*When ${ownNameRe} is summoned,?\\s*(.+?)(?:\\n|$)`, 'i')));
+  const whenSummonedMatch = text.match(/(?:^|\n)\s*When [Ss]ummoned,?\s*(.+?)(?:\r?\n|$)/i)
+    || (ownNameRe && text.match(new RegExp(`(?:^|\\n)\\s*When ${ownNameRe} is summoned,?\\s*(.+?)(?:\\r?\\n|$)`, 'i')));
   // "Whenever you conjure a Prophecy, X" (Timeline Tinker) — a Being's own
   // triggered ability firing off PLAY_PROPHECY (actions.js), same
   // real-trigger-point/generic-resolver treatment as `whenSummoned` above,
   // just keyed off a different action instead of SUMMON_BEING.
-  const whenConjureProphecyMatch = text.match(/(?:^|\n)\s*Whenever you conjure a Prophecy,?\s*(.+?)(?:\n|$)/i);
+  const whenConjureProphecyMatch = text.match(/(?:^|\n)\s*Whenever you conjure a Prophecy,?\s*(.+?)(?:\r?\n|$)/i);
   // False Testament: "When conjured you may have this enter with up to (5)
   // Time Counters." — its own printed Timer column is the literal letter
   // "X" (parsed as 0 by toNumber's own fallback), meaning this specific
@@ -381,15 +381,15 @@ export const parseKeywords = (textBox, cardName = null) => {
   // "additonal" are elsewhere in this file, rather than fixing the CSV.
   const ownNameTypoRe = cardName && cardName.includes('Dryad')
     ? escapeForRegExp(cardName.replace('Dryad', 'Druid')) : null;
-  const onMoveMatch = text.match(/(?:^|\n)\s*Each time this moves,?\s*(.+?)(?:\n|$)/i)
-    || (ownNameRe && text.match(new RegExp(`(?:^|\\n)\\s*When ${ownNameRe} moves,?\\s*(.+?)(?:\\n|$)`, 'i')))
-    || (ownNameTypoRe && text.match(new RegExp(`(?:^|\\n)\\s*When ${ownNameTypoRe} moves,?\\s*(.+?)(?:\\n|$)`, 'i')));
+  const onMoveMatch = text.match(/(?:^|\n)\s*Each time this moves,?\s*(.+?)(?:\r?\n|$)/i)
+    || (ownNameRe && text.match(new RegExp(`(?:^|\\n)\\s*When ${ownNameRe} moves,?\\s*(.+?)(?:\\r?\\n|$)`, 'i')))
+    || (ownNameTypoRe && text.match(new RegExp(`(?:^|\\n)\\s*When ${ownNameTypoRe} moves,?\\s*(.+?)(?:\\r?\\n|$)`, 'i')));
   // "When a Being with Dryad moves onto this, X" (Sporangium) — the
   // reverse of onMove above: a reaction to some OTHER Being's Dryad
   // attachment landing on THIS card's own tile, not this card's own
   // movement. Fired from MOVE_OR_ATTACK's Dryad-attach branch (actions.js)
   // — see triggerOnDryadAttachedOnto there.
-  const onDryadAttachedOntoMatch = text.match(/(?:^|\n)\s*When a Being with Dryad moves onto this,?\s*(.+?)(?:\n|$)/i);
+  const onDryadAttachedOntoMatch = text.match(/(?:^|\n)\s*When a Being with Dryad moves onto this,?\s*(.+?)(?:\r?\n|$)/i);
   // "Shift (X)" (bare — Shifting Shade, Ounati Hunger) or "Shift (X):
   // "quoted prophecy text"" (Scā-vuhk Hunger) — an Engage-costed ability
   // (RULES.md > Keywords > Shift): the Being becomes a Prophecy with X
@@ -400,12 +400,12 @@ export const parseKeywords = (textBox, cardName = null) => {
   // Prophecy — re-parsed through this very function once a Being actually
   // shifts, so it's not captured as free text here, just the amount.
   const shiftMatch = text.match(/(?:^|\n)\s*Shift\s*\((\d+)\)\s*:\s*"(.+?)"/i)
-    || text.match(/(?:^|\n)\s*Shift\s*\((\d+)\)\.?\s*(?:\n|$)/i);
+    || text.match(/(?:^|\n)\s*Shift\s*\((\d+)\)\.?\s*(?:\r?\n|$)/i);
   // "When this moves into the Mortal Realm, X" — the reverse trip of Shift
   // (RULES.md > Keywords > Shift): fires the instant a shifted Being
   // returns from the Ethereal Realm, in addition to landing Engaged. See
   // returnFromShift, actions.js.
-  const onMovedIntoMortalRealmMatch = text.match(/(?:^|\n)\s*When this moves into the Mortal Realm,?\s*(.+?)(?:\n|$)/i);
+  const onMovedIntoMortalRealmMatch = text.match(/(?:^|\n)\s*When this moves into the Mortal Realm,?\s*(.+?)(?:\r?\n|$)/i);
   // Shift's own quoted "prophecy text" shape so far (Scā-vuhk Hunger: "At
   // the end of your turn remove (1) Time Counter from this") — the
   // shifted form's own self-decay, applied by applyEndOfTurnShiftDecay
@@ -477,7 +477,7 @@ export const parseKeywords = (textBox, cardName = null) => {
   // trigger, not the equipment's) — see triggerOnAttachedBeingDied,
   // actions.js, fired from both real death paths right after the tile is
   // vacated.
-  const onAttachedBeingDiedMatch = text.match(/When the attached Being dies,?\s*sacrifice this,?\s*(.+?)(?:\n|$)/i);
+  const onAttachedBeingDiedMatch = text.match(/When the attached Being dies,?\s*sacrifice this,?\s*(.+?)(?:\r?\n|$)/i);
   // "Engage: X" — a generic activated ability (RULES.md's Engage keyword is
   // the generic "take an action" term; this is the specific printed pattern
   // for abilities costed by it, distinct from Martyr's engage-then-sacrifice
@@ -492,14 +492,14 @@ export const parseKeywords = (textBox, cardName = null) => {
   // sets `engage` — the extra cost/condition (if any) is captured into its
   // own separate field instead of getting lost.
   const payLifespanEngageMatch = !grantedEngageMatch
-    && text.match(/Pay\s*\(?(\d+)\)?\s+Lifespan,?\s*Engage:\s*(.+?)(?:\n|$)/i);
+    && text.match(/Pay\s*\(?(\d+)\)?\s+Lifespan,?\s*Engage:\s*(.+?)(?:\r?\n|$)/i);
   // "Pay (1) Living Essence, Engage: X" (Tilled Fields) — the same
   // Lifespan-cost-then-Engage shape as payLifespanEngageMatch above, just
   // costed by real Effigy from the pool instead (see engageEffigyCost,
   // ACTIVATE_GROUND_RELIC_ENGAGE in actions.js) — distinct from
   // payEffigyCostMatch below, which has no Engage at all.
   const payEffigyEngageMatch = !grantedEngageMatch && !payLifespanEngageMatch
-    && text.match(/Pay\s*\(?(\d+)\)?\s+(\w+) Essence,?\s*Engage:\s*(.+?)(?:\n|$)/i);
+    && text.match(/Pay\s*\(?(\d+)\)?\s+(\w+) Essence,?\s*Engage:\s*(.+?)(?:\r?\n|$)/i);
   // "Remove (X) Crossing Counters, Engage: Restore (X) Lifespan to
   // target." (Sanative Siphon) — X is a genuine player choice (however
   // many Counters they remove right now), the same shape
@@ -515,7 +515,7 @@ export const parseKeywords = (textBox, cardName = null) => {
   const removeCountersEngageRestoreMatch = !grantedEngageMatch && !payLifespanEngageMatch && !payEffigyEngageMatch
     && text.match(/Remove\s*\(?X\)?\s+(\w+) Counters?,?\s*Engage:\s*Restore\s*\(?X\)?\s+Lifespan to target/i);
   const conditionalEngageMatch = !grantedEngageMatch && !payLifespanEngageMatch && !payEffigyEngageMatch && !removeCountersEngageRestoreMatch
-    && text.match(/If you control\s+(.+?)\s+you may\s+Engage:\s*(.+?)(?:\n|$)/i);
+    && text.match(/If you control\s+(.+?)\s+you may\s+Engage:\s*(.+?)(?:\r?\n|$)/i);
   // "Engage, X: Y" — a comma (not a colon) right after "Engage" means X is
   // a *required second part of the cost*, not the effect: both "Engage"
   // and X must be paid before Y (after the real colon) happens (e.g.
@@ -525,7 +525,7 @@ export const parseKeywords = (textBox, cardName = null) => {
   // Doesn't collide with any pattern above — none of them match on a bare
   // "Engage," (no colon immediately after), only "Engage:".
   const engageExtraCostMatch = !grantedEngageMatch && !payLifespanEngageMatch && !payEffigyEngageMatch && !removeCountersEngageRestoreMatch && !conditionalEngageMatch
-    && text.match(/(?:^|\n).*?\bEngage,\s*(.+?):\s*(.+?)(?:\n|$)/i);
+    && text.match(/(?:^|\n).*?\bEngage,\s*(.+?):\s*(.+?)(?:\r?\n|$)/i);
   // "Remove (N) <Type> Counter(s): Engage then <effect>" (Crucible), the
   // comma+colon variant "Remove (N) <Type> Counter(s), Engage: <effect>"
   // (Ferryman's Boat), or "Remove (N) <Type> Counter, then Engage: <effect>"
@@ -539,7 +539,7 @@ export const parseKeywords = (textBox, cardName = null) => {
   // (\d+), so it never collides with removeCountersEngageRestoreMatch
   // above (that one's own amount is the literal letter "X").
   const counterCostEngageMatch = !grantedEngageMatch && !payLifespanEngageMatch && !payEffigyEngageMatch && !removeCountersEngageRestoreMatch && !conditionalEngageMatch && !engageExtraCostMatch
-    && text.match(/Remove\s*\(?(\d+)\)?\s+(\w+)\s+Counters?,?:?\s*(?:then\s+)?Engage,?:?\s*(?:then\s+)?(.+?)(?:\n|$)/i);
+    && text.match(/Remove\s*\(?(\d+)\)?\s+(\w+)\s+Counters?,?:?\s*(?:then\s+)?Engage,?:?\s*(?:then\s+)?(.+?)(?:\r?\n|$)/i);
   // Plain "Engage: X" anywhere on its own line — checked only once neither
   // more specific shape above matched. Deliberately not anchored to the
   // very start of the line (a bare Engage's usual position) because real
@@ -566,7 +566,7 @@ export const parseKeywords = (textBox, cardName = null) => {
   // before "Engage:" that a token-descriptor parenthetical never happens
   // to contain, so only this last catch-all needs the guard.
   const engageMatch = !grantedEngageMatch && !payLifespanEngageMatch && !payEffigyEngageMatch && !removeCountersEngageRestoreMatch && !conditionalEngageMatch && !engageExtraCostMatch && !counterCostEngageMatch
-    && blankParensContainingEngage(text).match(/(?:^|\n).*?\bEngage:\s*(.+?)(?:\n|$)/i);
+    && blankParensContainingEngage(text).match(/(?:^|\n).*?\bEngage:\s*(.+?)(?:\r?\n|$)/i);
   const engageLifespanCost = payLifespanEngageMatch ? parseInt(payLifespanEngageMatch[1], 10) : null;
   const engageEffigyCost = payEffigyEngageMatch
     ? { color: payEffigyEngageMatch[2].toLowerCase(), amount: parseInt(payEffigyEngageMatch[1], 10) }
@@ -627,7 +627,7 @@ export const parseKeywords = (textBox, cardName = null) => {
   // two different ways ("aditional" — one d; "additonal" — missing the
   // second "i"), so the word itself is matched loosely rather than
   // requiring exact spelling either way.
-  const conjureCostMatch = text.match(/As an ad{1,2}it(?:ional|onal) cost to Conjure[,:]?\s*(.+?)(?:\n|$)/i);
+  const conjureCostMatch = text.match(/As an ad{1,2}it(?:ional|onal) cost to Conjure[,:]?\s*(.+?)(?:\r?\n|$)/i);
   // A Being/Deity's own mirror of conjureCostMatch above, but for Summon —
   // so far only ever "Sacrifice (N) Beings" (Immen Gorta), captured as a
   // plain number rather than free text like conjureCost/engage's cost
@@ -719,13 +719,13 @@ export const parseKeywords = (textBox, cardName = null) => {
   // to "When" at the start of a line (not "Whenever") so it never collides
   // with movesToNewlySummonedBeing's own "Whenever a Being is summoned..."
   // text.
-  const onTypedSummonedMatch = text.match(/(?:^|\n)\s*When an?\s+(.+?)\s+is summoned under your control,?\s*(.+?)(?:\n|$)/i);
+  const onTypedSummonedMatch = text.match(/(?:^|\n)\s*When an?\s+(.+?)\s+is summoned under your control,?\s*(.+?)(?:\r?\n|$)/i);
   // "Sacrifice this when you summon a Familiar." (White Whisker) — a
   // reactive Relic-level trigger (not a Being's own onTypedSummonedUnderControl
   // above), watched for by triggerSacrificeSelfOnSummonTyping (actions.js),
   // called from the same shared placeBeingOnBoard every summon path funnels
   // through.
-  const sacrificeSelfOnSummonTypingMatch = text.match(/(?:^|\n)\s*Sacrifice this when you summon an?\s+(.+?)\.?\s*(?:\n|$)/i);
+  const sacrificeSelfOnSummonTypingMatch = text.match(/(?:^|\n)\s*Sacrifice this when you summon an?\s+(.+?)\.?\s*(?:\r?\n|$)/i);
   // "Beings may move across this" (Shifting Sands, Tilled Fields — the real
   // CSV phrases the self-reference differently card to card: "this",
   // "this Relic", or the card's own printed name, so this just detects the
@@ -769,12 +769,12 @@ export const parseKeywords = (textBox, cardName = null) => {
   // own — same "typing + free effect text" shape as onTypedSummonedMatch
   // above, just watching Martyr instead of summon. See
   // triggerMartyrTypedReactions, actions.js.
-  const onOwnMartyrTypedMatch = text.match(/Whenever you Martyr an? (.+?),\s*(.+?)(?:\n|$)/i);
+  const onOwnMartyrTypedMatch = text.match(/Whenever you Martyr an? (.+?),\s*(.+?)(?:\r?\n|$)/i);
   // "When revealed on the top of your deck, <effect>" (Distant Debator) —
   // a genuinely new trigger point: this engine has no separate reveal-
   // without-drawing mechanic, so the closest real moment is the literal
   // draw itself — see triggerOnRevealedTopOfDeck, actions.js.
-  const onRevealedTopOfDeckMatch = text.match(/When revealed on the top of your deck,?\s*(.+?)(?:\n|$)/i);
+  const onRevealedTopOfDeckMatch = text.match(/When revealed on the top of your deck,?\s*(.+?)(?:\r?\n|$)/i);
   // "Whenever you pay Lifespan gain +1/+1." (Ravenous Lamtukka) — a
   // passive reaction to the controller's own GENUINE Lifespan payments (an
   // optional cost deliberately spent for an ability), not damage/forced
@@ -846,11 +846,11 @@ export const parseKeywords = (textBox, cardName = null) => {
   // bare trailing `$` would require the WHOLE card's text to end right
   // after "Shifts." — it never does, so this silently never matched the
   // real card at all (only ever verified against hand-authored single-line
-  // test fixtures that happened to end there). `(?:\n|$)` tolerates a
+  // test fixtures that happened to end there). `(?:\r?\n|$)` tolerates a
   // second line following, same convention every other multi-line-aware
   // pattern in this file already uses.
-  const onOwnBeingShiftWheneverFirst = text.match(/(?:^|\n)\s*Whenever a Being you control Shifts,?\s*(except during the end step,?\s*)?(.+?)\.?(?:\n|$)/i);
-  const onOwnBeingShiftEffectFirst = !onOwnBeingShiftWheneverFirst && text.match(/(?:^|\n)\s*(.+?)\s+whenever a Being you control Shifts\.?(?:\n|$)/i);
+  const onOwnBeingShiftWheneverFirst = text.match(/(?:^|\n)\s*Whenever a Being you control Shifts,?\s*(except during the end step,?\s*)?(.+?)\.?(?:\r?\n|$)/i);
+  const onOwnBeingShiftEffectFirst = !onOwnBeingShiftWheneverFirst && text.match(/(?:^|\n)\s*(.+?)\s+whenever a Being you control Shifts\.?(?:\r?\n|$)/i);
   // "Restless Dead has +2/+0 until end of turn for each Being that died
   // under your control this turn." — a LIVE, continuously-recomputed bonus
   // (grows the instant beingsDiedThisTurn does, same "recomputed after
@@ -937,7 +937,7 @@ export const parseKeywords = (textBox, cardName = null) => {
   // ACTIVATE_PAY_EFFIGY_COST_ABILITY, actions.js) and an optional trailing
   // "Essence" after the color word that Blooming Seed/Skeleton Key's own
   // plainer "Pay (N) <Color>:"/"Burn (N) <Color>:" phrasing doesn't print.
-  const payEffigyCostMatch = text.match(/(?:^|\n)\s*(Once per turn,?\s*you may\s+)?(?:Pay|Burn)\s*\(?(\d+)\)?\s+(\w+)(?:\s+Essence)?:\s*(.+?)(?:\n|$)/i);
+  const payEffigyCostMatch = text.match(/(?:^|\n)\s*(Once per turn,?\s*you may\s+)?(?:Pay|Burn)\s*\(?(\d+)\)?\s+(\w+)(?:\s+Essence)?:\s*(.+?)(?:\r?\n|$)/i);
   const payEffigyCostAbility = payEffigyCostMatch && EFFIGY_COLORS.includes(payEffigyCostMatch[3].toLowerCase())
     ? { color: payEffigyCostMatch[3].toLowerCase(), amount: parseInt(payEffigyCostMatch[2], 10), effect: payEffigyCostMatch[4].trim(), once: !!payEffigyCostMatch[1] }
     : null;
@@ -948,7 +948,7 @@ export const parseKeywords = (textBox, cardName = null) => {
   // (unlike payEffigyCostMatch's own "Pay (N) <Color>: X"), and never
   // collides with payLifespanEngageMatch above since that one requires a
   // literal "Engage" in the same clause.
-  const payLifespanCostMatch = !payLifespanEngageMatch && text.match(/(?:^|\n)\s*Pay\s*\(?(\d+)\)?\s+Lifespan to\s+(.+?)(?:\n|$)/i);
+  const payLifespanCostMatch = !payLifespanEngageMatch && text.match(/(?:^|\n)\s*Pay\s*\(?(\d+)\)?\s+Lifespan to\s+(.+?)(?:\r?\n|$)/i);
   const payLifespanCostAbility = payLifespanCostMatch
     ? { amount: parseInt(payLifespanCostMatch[1], 10), effect: payLifespanCostMatch[2].trim() }
     : null;
@@ -976,7 +976,7 @@ export const parseKeywords = (textBox, cardName = null) => {
   // requires "Sacrifice this" instead, so the two never collide. Generic
   // over the counter type and effect text, so any future card printing the
   // same shape (e.g. other Seed-family cards) is picked up automatically.
-  const counterCostSacrificeMatch = text.match(/Remove\s*\(?(\d+)\)?\s+(\w+)\s+Counters?,?:?\s*Sacrifice this,?\s*(.+?)(?:\n|$)/i);
+  const counterCostSacrificeMatch = text.match(/Remove\s*\(?(\d+)\)?\s+(\w+)\s+Counters?,?:?\s*Sacrifice this,?\s*(.+?)(?:\r?\n|$)/i);
   const counterCostSacrificeAbility = counterCostSacrificeMatch
     ? { type: counterCostSacrificeMatch[2].toLowerCase(), amount: parseInt(counterCostSacrificeMatch[1], 10), effect: counterCostSacrificeMatch[3].trim() }
     : null;
@@ -1010,7 +1010,7 @@ export const parseKeywords = (textBox, cardName = null) => {
   // counterCostSacrificeMatch above, just "Martyr" instead of "Sacrifice
   // this" (Martyr's own engage-then-sacrifice already covers the
   // sacrifice, so no separate "Sacrifice this" phrase is printed).
-  const counterCostMartyrMatch = text.match(/Remove\s*\(?(\d+)\)?\s+(\w+)\s+Counters?,?:?\s*Mar?tyr,?:?\s*(.+?)(?:\n|$)/i);
+  const counterCostMartyrMatch = text.match(/Remove\s*\(?(\d+)\)?\s+(\w+)\s+Counters?,?:?\s*Mar?tyr,?:?\s*(.+?)(?:\r?\n|$)/i);
   const martyrCounterCost = counterCostMartyrMatch
     ? { type: counterCostMartyrMatch[2].toLowerCase(), amount: parseInt(counterCostMartyrMatch[1], 10) }
     : null;
@@ -1019,7 +1019,7 @@ export const parseKeywords = (textBox, cardName = null) => {
   // the pool instead of spending the card's own Counters (same shape
   // payEffigyCostMatch already uses for a bare "Pay (N) Color: X" ability,
   // just with "Martyr" as the actual trigger word instead of a colon).
-  const payEffigyCostMartyrMatch = text.match(/Pay\s*\(?(\d+)\)?\s+(\w+)\s+Essence,?:?\s*Mar?tyr,?:?\s*(.+?)(?:\n|$)/i);
+  const payEffigyCostMartyrMatch = text.match(/Pay\s*\(?(\d+)\)?\s+(\w+)\s+Essence,?:?\s*Mar?tyr,?:?\s*(.+?)(?:\r?\n|$)/i);
   const martyrEffigyCost = payEffigyCostMartyrMatch && EFFIGY_COLORS.includes(payEffigyCostMartyrMatch[2].toLowerCase())
     ? { color: payEffigyCostMartyrMatch[2].toLowerCase(), amount: parseInt(payEffigyCostMartyrMatch[1], 10) }
     : null;
@@ -1047,7 +1047,7 @@ export const parseKeywords = (textBox, cardName = null) => {
   // resolveOrLogEffect's "isn't automated yet" fallback.
   const TIMES_WORDS = { once: 1, twice: 2, thrice: 3 };
   const timesPerTurnMatch = !prophecyCounterMatch && !reanimateFromPurgatoryMatch
-    && text.match(/(?:^|\n)\s*(Once|Twice|Thrice)\s+per\s+turn\s+(.+?)(?:\n|$)/i);
+    && text.match(/(?:^|\n)\s*(Once|Twice|Thrice)\s+per\s+turn\s+(.+?)(?:\r?\n|$)/i);
   // "You do not draw during the start of your turn" (Daylight Savings) —
   // an ongoing effect that applies for as long as a face-up Prophecy with
   // this text sits on the board with at least 1 Time Counter left (RULES.md

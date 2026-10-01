@@ -136,6 +136,26 @@ describe('parseKeywords', () => {
     expect(kw.conjureCost).toBe('send the top (3) cards of your deck to your Purgatory.');
   });
 
+  it('still captures the conjure cost when the source uses real CRLF line endings (the actual CSV file does)', () => {
+    // Regression test: the real CSV's multi-line Text Box cells are
+    // "\r\n"-terminated, not plain "\n" (confirmed by reading the actual
+    // file). Every "(?:\n|$)" line-end anchor in this file used to require
+    // a bare "\n" immediately after its capture — since JS regex "."
+    // doesn't match "\r" either, a stray "\r" sitting between the real
+    // content and the "\n" made the whole match silently fail (not even a
+    // partial/wrong capture, a hard `null`). That's exactly how Kalduran
+    // Altar's conjureCost ended up null in real play: the Altar still got
+    // placed (unrelated to this), but PLACE_ALTAR's `if (card.keywords?.
+    // conjureCost)` gate (actions.js) was simply false, so the mill never
+    // ran and Purgatory stayed empty with no log line — reported as "the
+    // altar entered and my purgatory remained empty." Every affected
+    // regex now uses "(?:\r?\n|$)" instead, tolerating both line-ending
+    // styles.
+    const kw = parseKeywords('As an additional cost to conjure, send the top (3) cards of your deck to your Purgatory.\r\n Craft (1) additional Effigy on your turn\r\n(Conjures in the Effigy Zone).');
+    expect(kw.conjureCost).toBe('send the top (3) cards of your deck to your Purgatory.');
+    expect(kw.craftBonus).toBe(1);
+  });
+
   it('tolerates the real CSV\'s "aditional" misspelling (e.g. "Rhak-tùrin Altar")', () => {
     const kw = parseKeywords('As an aditional cost to Conjure: Deal (3) Damage to a Turanga you control.\nCraft (1) additional Effigy on your turn.\n(Conjures in the Effigy Zone)');
     expect(kw.conjureCost).toBe('Deal (3) Damage to a Turanga you control.');
