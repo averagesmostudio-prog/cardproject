@@ -3,7 +3,12 @@
 // Electron IPC/preload infra for this app, and none needed here either).
 
 const ADDRESS_KEY = 'scripturas-relay-address';
-const DEFAULT_ADDRESS = 'ws://localhost:8787';
+// The deployed relay (server/relay.mjs on the Bluehost VPS, behind nginx +
+// Let's Encrypt TLS at relay.scripturastcg.com) — so "Play Online" works
+// out of the box for real matches. ws://localhost:8787 (server/relay.mjs
+// run locally via `npm run relay`) still works fine by typing it into the
+// relay-address field; it's just no longer what a fresh install defaults to.
+const DEFAULT_ADDRESS = 'wss://relay.scripturastcg.com';
 
 export const getRelayAddress = () => {
   try {

@@ -1,0 +1,13 @@
+{
+  "name": "scripturas-relay",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "main": "relay.mjs",
+  "scripts": {
+    "start": "node relay.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.22.0"
+  }
+}
