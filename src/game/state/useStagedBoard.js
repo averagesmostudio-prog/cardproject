@@ -20,6 +20,21 @@ const indexBeings = (board) => {
   return map;
 };
 
+// A Being that just Shifted away also vanishes from indexBeings — its
+// occupant `type` flips from 'being' to 'prophecy' (performShift,
+// actions.js), so it genuinely disappears from a Being-only index the same
+// way a real death does. Shift already gets its own distinct arrival
+// animation (useShiftVortex below) at the DESTINATION tile; without this
+// check, diffBoardDamage would also wrongly stage a "dying" flash at the
+// tile it Shifted FROM, which currently just means a brief red pulse but
+// would misread badly once that same branch starts driving a real
+// shatter-into-pieces animation (Board.jsx) — a Being relocating to the
+// Ethereal Realm, not dying. `shiftedFromCard` (set to the original
+// occupant.card in performShift) is how every other Shift-aware check in
+// this codebase already recognizes a Shift-produced Prophecy.
+const instanceIdJustShiftedAway = (nextBoard, instanceId) =>
+  Object.values(nextBoard || {}).some(o => o?.type === 'prophecy' && o.shiftedFromCard?.instanceId === instanceId);
+
 // Diffs two board snapshots to find Beings that took damage or died in
 // place (same cell, lower/gone Lifespan) between them — the only two
 // events worth pausing on. A plain move/reposition (same instanceId, new
@@ -32,6 +47,7 @@ const diffBoardDamage = (prevBoard, nextBoard) => {
   Object.entries(prevIdx).forEach(([instanceId, prevEntry]) => {
     const nextEntry = nextIdx[instanceId];
     if (!nextEntry) {
+      if (instanceIdJustShiftedAway(nextBoard, instanceId)) return;
       staged[prevEntry.cellId] = { occupant: prevEntry.occupant, amount: prevEntry.currentLifespan, dying: true };
     } else if (nextEntry.cellId === prevEntry.cellId && nextEntry.currentLifespan < prevEntry.currentLifespan) {
       staged[prevEntry.cellId] = { occupant: prevEntry.occupant, amount: prevEntry.currentLifespan - nextEntry.currentLifespan, dying: false };
@@ -424,6 +440,199 @@ export const useOpenLaneStrike = (log) => {
   useEffect(() => () => { Object.values(timersRef.current).forEach(clearTimeout); }, []);
 
   return strikes;
+};
+
+const FEATHER_MOVE_MS = 800;
+
+const escapeForRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Indexes every Armament-card instanceId currently on the board, scoped to
+// wherever it actually lives — attached to a Being (occupant.armaments) or
+// freestanding in its own pile (`type: 'armament-stack'`, same .armaments
+// field name either way — insertArmamentEntry/removeArmamentEntry,
+// actions.js, both write/read it identically).
+const indexArmaments = (board) => {
+  const map = {};
+  Object.entries(board || {}).forEach(([cellId, occupant]) => {
+    (occupant?.armaments || []).forEach(entry => { map[entry.card.instanceId] = cellId; });
+  });
+  return map;
+};
+
+// Board.jsx's feather drift — plays whenever something relocates OUTSIDE of
+// a normal player-clicked move: Happy Hammer's own "moves and attaches to
+// the newly summoned Being" reaction (moveAutoAttachArmaments, actions.js),
+// Divine Winds/Feathers of the Fallen's forced-move effects, and every
+// other card/effect that calls the shared moveBeingFreely (actions.js)
+// rather than the player's own MOVE_OR_ATTACK. Like Shift/Depart above,
+// there's no single action type to key off — a forced move can come from
+// any of ~15 different regex-matched effects — so this diffs the board for
+// a relocation, then confirms it WASN'T a normal player move by checking
+// the log: a plain MOVE_OR_ATTACK move always logs the exact line
+// "<player> moves <card> to <cellId>." (actions.js), while every
+// non-standard mover funnels through moveBeingFreely instead, whose own
+// log line is structurally different ("<card> is moved to <cellId>.") — so
+// the ABSENCE of the standard-move line among the log entries added since
+// the last render is sufficient proof this was something else, without
+// needing to recognize which of the many possible effects it specifically
+// was.
+//
+// Two independent relocation checks, merged into one cellId -> seq map
+// keyed by destination: a Being changing cells (no Lifespan-equality
+// requirement — Diablerie moves AND damages the same Being in one
+// dispatch, so a feather and a damage flash can legitimately coincide),
+// and an Armament-card instanceId moving to a different cellId than it was
+// at. A normal Being move carries its own attached Armaments along for the
+// ride, which would otherwise look like an independent Armament
+// relocation — excluded the same way as a Being's own move, checking for a
+// standard-move log line landing at that exact destination cell (this
+// single check also covers an Animated Armament top moving itself via
+// MOVE_OR_ATTACK, since its mover can be a real Being OR an Animated top —
+// actions.js's own animatedTopEntry).
+export const useFeatherMove = (board, log) => {
+  const prevBoardRef = useRef(board);
+  const prevLogLenRef = useRef(log.length);
+  const [featherCells, setFeatherCells] = useState({});
+  const timersRef = useRef({});
+
+  useEffect(() => {
+    const prevBoard = prevBoardRef.current;
+    const prevLogLen = prevLogLenRef.current;
+    prevBoardRef.current = board;
+    prevLogLenRef.current = log.length;
+    if (prevBoard === board && log.length === prevLogLen) return undefined;
+
+    const newMessages = log.slice(prevLogLen).map(entry => entry.message);
+    const freshCellIds = new Set();
+
+    const prevBeings = indexBeings(prevBoard);
+    const nextBeings = indexBeings(board);
+    Object.entries(prevBeings).forEach(([instanceId, prevEntry]) => {
+      const nextEntry = nextBeings[instanceId];
+      if (!nextEntry || nextEntry.cellId === prevEntry.cellId) return;
+      const escapedName = escapeForRegExp(nextEntry.occupant.card.name);
+      const standardMoveRe = new RegExp(`^[AB] moves ${escapedName} to ${nextEntry.cellId}\\.`);
+      if (newMessages.some(m => standardMoveRe.test(m))) return; // a normal player move
+      freshCellIds.add(nextEntry.cellId);
+    });
+
+    const prevArmaments = indexArmaments(prevBoard);
+    const nextArmaments = indexArmaments(board);
+    Object.entries(prevArmaments).forEach(([instanceId, prevCellId]) => {
+      const nextCellId = nextArmaments[instanceId];
+      if (!nextCellId || nextCellId === prevCellId) return;
+      const escapedCell = escapeForRegExp(nextCellId);
+      const standardMoveRe = new RegExp(`^[AB] moves .+? to ${escapedCell}\\.`);
+      if (newMessages.some(m => standardMoveRe.test(m))) return; // rode along with a normal move
+      freshCellIds.add(nextCellId);
+    });
+
+    if (freshCellIds.size === 0) return undefined;
+
+    setFeatherCells(prev => {
+      const next = { ...prev };
+      freshCellIds.forEach(cellId => { next[cellId] = (next[cellId] || 0) + 1; });
+      return next;
+    });
+    freshCellIds.forEach(cellId => {
+      if (timersRef.current[cellId]) clearTimeout(timersRef.current[cellId]);
+      timersRef.current[cellId] = setTimeout(() => {
+        setFeatherCells(prev => {
+          const { [cellId]: _dropped, ...rest } = prev;
+          return rest;
+        });
+        delete timersRef.current[cellId];
+      }, FEATHER_MOVE_MS);
+    });
+    return undefined;
+  }, [board, log]);
+
+  useEffect(() => () => { Object.values(timersRef.current).forEach(clearTimeout); }, []);
+
+  return featherCells;
+};
+
+const PURGATORY_SWIRL_MS = 900;
+const PURGATORY_TOMBSTONE_MS = 1200;
+
+// CardPile.jsx's Purgatory-arrival flourishes — a per-player pair of
+// signals, since this isn't a board-cell effect. Purgatory has no single
+// reducer chokepoint either (mill, discard, combat death, Martyr, a
+// sacrifice/destroy effect, an expired Prophecy, and more all append to it
+// independently throughout actions.js), so like every other hook in this
+// file, this diffs state rather than keying off one action type.
+//
+// Runs its own independent Being-vanished-from-board diff (same shape as
+// diffBoardDamage's death branch above, not shared state with it — matches
+// how useShiftVortex/useDeitySummonCinematic each already own their own
+// board diff rather than reaching into useStagedBoard's internals), then
+// diffs each player's `purgatory` array for newly-appeared instanceIds.
+// Correlating the two tells tombstone-worthy arrivals (a Being's
+// instanceId that just vanished from the board AND just appeared in that
+// same player's purgatory — true for combat death, Martyr, and a
+// destroy/sacrifice effect alike, confirmed: dealDamageToBeing,
+// destroyBeing, and ACTIVATE_MARTYR all push the literal occupant.card
+// into purgatory) apart from everything else that lands there (mill,
+// discard, a sacrificed Relic, an expired Prophecy, ...), which gets the
+// swirl treatment as the default "something was sent to Purgatory by an
+// effect, not a death" case.
+export const usePurgatoryArrivals = (board, players) => {
+  const prevBoardRef = useRef(board);
+  const prevPurgatoryRef = useRef({ A: players.A.purgatory, B: players.B.purgatory });
+  const [tombstone, setTombstone] = useState({});
+  const [swirl, setSwirl] = useState({});
+  const timersRef = useRef({});
+
+  useEffect(() => {
+    const prevBoard = prevBoardRef.current;
+    const prevPurgatory = prevPurgatoryRef.current;
+    prevBoardRef.current = board;
+    prevPurgatoryRef.current = { A: players.A.purgatory, B: players.B.purgatory };
+    if (prevBoard === board && prevPurgatory.A === players.A.purgatory && prevPurgatory.B === players.B.purgatory) return undefined;
+
+    const vanishedIds = new Set();
+    const prevBeings = indexBeings(prevBoard);
+    const nextBeings = indexBeings(board);
+    Object.keys(prevBeings).forEach(instanceId => { if (!nextBeings[instanceId]) vanishedIds.add(instanceId); });
+
+    const tombstoneIds = [];
+    const swirlIds = [];
+    ['A', 'B'].forEach(id => {
+      const prevIds = new Set(prevPurgatory[id].map(c => c.instanceId));
+      players[id].purgatory.forEach(card => {
+        if (prevIds.has(card.instanceId)) return;
+        (vanishedIds.has(card.instanceId) ? tombstoneIds : swirlIds).push(id);
+      });
+    });
+    if (tombstoneIds.length === 0 && swirlIds.length === 0) return undefined;
+
+    const bump = (setter, ids, msPrefix, ms) => {
+      if (ids.length === 0) return;
+      setter(prev => {
+        const next = { ...prev };
+        ids.forEach(id => { next[id] = (next[id] || 0) + 1; });
+        return next;
+      });
+      ids.forEach(id => {
+        const key = `${msPrefix}-${id}`;
+        if (timersRef.current[key]) clearTimeout(timersRef.current[key]);
+        timersRef.current[key] = setTimeout(() => {
+          setter(prev => {
+            const { [id]: _dropped, ...rest } = prev;
+            return rest;
+          });
+          delete timersRef.current[key];
+        }, ms);
+      });
+    };
+    bump(setTombstone, tombstoneIds, 'tombstone', PURGATORY_TOMBSTONE_MS);
+    bump(setSwirl, swirlIds, 'swirl', PURGATORY_SWIRL_MS);
+    return undefined;
+  }, [board, players]);
+
+  useEffect(() => () => { Object.values(timersRef.current).forEach(clearTimeout); }, []);
+
+  return { tombstone, swirl };
 };
 
 const DEITY_CINEMATIC_MS = 1200;

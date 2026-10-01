@@ -334,3 +334,149 @@
 .turn-banner-text {
   animation: turn-banner-text 1500ms ease-in-out both;
 }
+
+/* Board.jsx > FeatherDrift (useStagedBoard.js > useFeatherMove) — a
+   relocation caused by something other than a normal player-clicked move
+   (Happy Hammer auto-attaching to a freshly summoned Being, Divine Winds,
+   Feathers of the Fallen, and anything else routing through the engine's
+   shared moveBeingFreely). Three small feather shapes (border-radius
+   pinched to one point, a thin quill line down the middle — no image
+   asset, same flat-CSS approach as depart-bones' crossed bars above) drift
+   in from staggered offsets and settle near the tile's center, each on its
+   own animation-delay so they don't read as one single blob. */
+@keyframes feather-drift {
+  0% { transform: translate(var(--feather-start-x), var(--feather-start-y)) rotate(var(--feather-start-rot)) scale(0.55); opacity: 0; }
+  30% { opacity: 1; }
+  65% { opacity: 0.9; }
+  100% { transform: translate(var(--feather-rest-x), var(--feather-rest-y)) rotate(var(--feather-rest-rot)) scale(1); opacity: 0; }
+}
+.feather-drift {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 14px;
+  height: 24px;
+  margin: -12px 0 0 -7px;
+  background: linear-gradient(160deg, #f8f4e8 0%, #e6ddc2 55%, #cabe96 100%);
+  border-radius: 50% 0 50% 50%;
+  box-shadow: inset 0 0 0 1px rgba(120,108,76,0.35);
+  animation: feather-drift 800ms ease-out both;
+}
+.feather-drift::after {
+  content: '';
+  position: absolute;
+  top: 12%;
+  left: 48%;
+  width: 1px;
+  height: 72%;
+  background: rgba(120,108,76,0.4);
+}
+.feather-drift-1 { --feather-start-x: -26px; --feather-start-y: -14px; --feather-start-rot: -40deg; --feather-rest-x: -4px; --feather-rest-y: -2px; --feather-rest-rot: -8deg; }
+.feather-drift-2 { --feather-start-x: 16px; --feather-start-y: -20px; --feather-start-rot: 30deg; --feather-rest-x: 5px; --feather-rest-y: -6px; --feather-rest-rot: 6deg; animation-delay: 90ms; }
+.feather-drift-3 { --feather-start-x: 2px; --feather-start-y: 20px; --feather-start-rot: 12deg; --feather-rest-x: -1px; --feather-rest-y: 6px; --feather-rest-rot: -3deg; animation-delay: 160ms; }
+
+/* CardPile.jsx > BlackHoleSwirl (useStagedBoard.js > usePurgatoryArrivals,
+   the `swirl` signal) — a card milled off the deck or discarded from hand.
+   Reuses shift-vortex-spin's own conic-gradient/glow/blur TECHNIQUE above,
+   recolored to a true black-hole palette (near-black center, a thin
+   violet accretion-ring) with its motion deliberately inverted: Shift's
+   vortex scales UP and OUT (arriving); this scales DOWN and IN, with a
+   faster spin, to read as "being pulled into the pile" instead — the same
+   tool, an unmistakably different motion. */
+@keyframes purgatory-swirl-spin {
+  0% { transform: rotate(0deg) scale(1); opacity: 0; }
+  15% { opacity: 0.95; }
+  70% { opacity: 0.9; }
+  100% { transform: rotate(-480deg) scale(0.12); opacity: 0; }
+}
+.purgatory-swirl-spin {
+  background: conic-gradient(from 0deg,
+    rgba(8,5,16,0.95), rgba(76,29,149,0.65), rgba(17,10,30,0.9),
+    rgba(124,58,237,0.5), rgba(5,3,10,0.97), rgba(76,29,149,0.65),
+    rgba(8,5,16,0.95));
+  box-shadow: 0 0 14px 3px rgba(76,29,149,0.6), inset 0 0 10px 3px rgba(0,0,0,0.8);
+  filter: blur(0.5px);
+  animation: purgatory-swirl-spin 900ms cubic-bezier(0.55, 0, 0.85, 0.35) both;
+}
+
+/* CardPile.jsx > Tombstone (useStagedBoard.js > usePurgatoryArrivals, the
+   `tombstone` signal) — a Being sent to Purgatory from the board (combat
+   death, Martyr, a destroy/sacrifice effect). A flat silhouette (an
+   oversized top border-radius, same "shape via border-radius, no image
+   asset" approach as depart-bones' bars/ModulateHourglass's clip-path
+   triangles) rises with the same overshoot easing turn-banner-glow/
+   depart-bones-pop/modulate-hourglass-flip/deity-summon-card-fall already
+   share for "something just landed," plus a dim ground-mist glow
+   underneath on the way up (same two-layer glow+pop pattern those
+   establish). */
+@keyframes purgatory-tombstone-rise {
+  0% { transform: translateY(60%) scale(0.85); opacity: 0; }
+  30% { opacity: 1; }
+  40% { transform: translateY(0) scale(1.05); opacity: 1; }
+  55% { transform: translateY(0) scale(1); opacity: 1; }
+  85% { opacity: 1; }
+  100% { transform: translateY(-6%) scale(1); opacity: 0; }
+}
+.purgatory-tombstone-rise {
+  width: 34px;
+  height: 42px;
+  margin-bottom: 4px;
+  background: linear-gradient(160deg, #78716c 0%, #57534e 60%, #44403c 100%);
+  border: 2px solid #292524;
+  border-radius: 50% 50% 6px 6px / 60% 60% 6px 6px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+  animation: purgatory-tombstone-rise 1200ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+@keyframes purgatory-tombstone-glow {
+  0% { opacity: 0; }
+  30% { opacity: 0.8; }
+  75% { opacity: 0.6; }
+  100% { opacity: 0; }
+}
+.purgatory-tombstone-glow {
+  background: radial-gradient(ellipse at center, rgba(40,40,45,0.6) 0%, rgba(40,40,45,0.25) 55%, rgba(40,40,45,0) 78%);
+  animation: purgatory-tombstone-glow 1200ms ease-out both;
+}
+
+/* Board.jsx > ShatterBreak — a killing blow's own card breaks apart
+   (Hearthstone-style) instead of the plain red pulse this used to be: a
+   brief bright crack-flash, then 7 shard pieces (one shared clip-path
+   triangle — no image/canvas slicing — reused via 7 discrete trajectory
+   classes rather than computed CSS trig, matching this file's existing
+   "named keyframe per variant" approach elsewhere) flying outward and
+   fading. Colored with the same amber/orange/red gradient damage-burst-pop
+   above already uses, so a death reads as part of the same combat-feedback
+   family rather than a one-off. Runs for DAMAGE_ANIMATION_MS (700ms,
+   useStagedBoard.js) — the same window the pre-damage card is already held
+   on screen for, so there's something to visibly break apart. */
+@keyframes shatter-crack {
+  0% { opacity: 0; }
+  12% { opacity: 1; }
+  30% { opacity: 0; }
+  100% { opacity: 0; }
+}
+.shatter-crack {
+  background: radial-gradient(circle, rgba(255,255,255,0.9) 0%, rgba(255,180,80,0.5) 40%, rgba(255,180,80,0) 70%);
+  animation: shatter-crack 700ms ease-out both;
+}
+@keyframes shatter-fly {
+  0% { transform: translate(0, 0) rotate(0deg) scale(1); opacity: 0; }
+  10% { opacity: 1; }
+  100% { transform: translate(var(--shard-x), var(--shard-y)) rotate(var(--shard-rot)) scale(0.3); opacity: 0; }
+}
+.shatter-shard {
+  position: absolute;
+  width: 34%;
+  height: 34%;
+  background: linear-gradient(160deg, #fcd34d 0%, #f97316 55%, #b91c1c 100%);
+  clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
+  box-shadow: 0 0 4px rgba(0,0,0,0.5);
+  animation: shatter-fly 700ms cubic-bezier(0.33, 0, 0.67, 1) both;
+}
+.shatter-shard-1 { top: 10%; left: 15%; --shard-x: -40px; --shard-y: -34px; --shard-rot: -120deg; }
+.shatter-shard-2 { top: 5%; left: 45%; --shard-x: 10px; --shard-y: -46px; --shard-rot: 90deg; }
+.shatter-shard-3 { top: 15%; left: 70%; --shard-x: 44px; --shard-y: -20px; --shard-rot: 160deg; }
+.shatter-shard-4 { top: 45%; left: 5%; --shard-x: -46px; --shard-y: 10px; --shard-rot: -200deg; }
+.shatter-shard-5 { top: 45%; left: 75%; --shard-x: 46px; --shard-y: 16px; --shard-rot: 220deg; }
+.shatter-shard-6 { top: 70%; left: 20%; --shard-x: -26px; --shard-y: 42px; --shard-rot: -80deg; }
+.shatter-shard-7 { top: 70%; left: 55%; --shard-x: 18px; --shard-y: 46px; --shard-rot: 140deg; }

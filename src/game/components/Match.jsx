@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { History, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Flag, Eye, EyeOff } from 'lucide-react';
 import { useGameEngine } from '../state/useGameEngine.js';
-import { useStagedBoard, useStagedLife, useTurnBanner, useJustDrawn, useShiftVortex, useDepartFlash, useDeitySummonCinematic, useOpenLaneStrike } from '../state/useStagedBoard.js';
+import { useStagedBoard, useStagedLife, useTurnBanner, useJustDrawn, useShiftVortex, useDepartFlash, useDeitySummonCinematic, useOpenLaneStrike, useFeatherMove, usePurgatoryArrivals } from '../state/useStagedBoard.js';
 import { getLegalActions, effectiveEngage, animatedTopEntry, effectiveCastingCost, faithlessPaymentNeedsChoice, faithlessPaymentCandidates, searchZoneCandidates } from '../engine/actions.js';
 import { effectiveStrength } from '../engine/combat.js';
 import { STARTING_LIFESPAN } from '../engine/constants.js';
@@ -471,8 +471,10 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
   const justDrawnIds = useJustDrawn(state.players[HUMAN].hand);
   const vortexCells = useShiftVortex(state.board);
   const departCells = useDepartFlash(state.board, state.log);
+  const featherCells = useFeatherMove(state.board, state.log);
   const deityCells = useDeitySummonCinematic(state.board);
   const openLaneStrikes = useOpenLaneStrike(state.log);
+  const purgatoryEffects = usePurgatoryArrivals(state.board, state.players);
   const [selectedHand, setSelectedHand] = useState(null);
   const [selectedCell, setSelectedCell] = useState(null);
   // Set when the human clicks a highlighted Modulate target that offers
@@ -3002,6 +3004,8 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
                 clickable
                 onClick={() => openPurgatory(AI)}
                 tone="purple"
+                swirlSeq={purgatoryEffects.swirl[AI]}
+                tombstoneSeq={purgatoryEffects.tombstone[AI]}
               />
             </div>
             <div className={`${ETHEREAL_ROW_H} flex items-center justify-start gap-2`}>
@@ -3020,6 +3024,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
             lastModulate={lastModulate}
             vortexCells={vortexCells}
             departCells={departCells}
+            featherCells={featherCells}
             deityCells={deityCells}
             viewerId={HUMAN}
             highlightCells={highlightCells}
@@ -3055,6 +3060,8 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
                 onClick={() => openPurgatory(HUMAN)}
                 tone="purple"
                 highlight={reanimatablePurgatoryIds.size > 0 || summonWindowPurgatoryIds.size > 0}
+                swirlSeq={purgatoryEffects.swirl[HUMAN]}
+                tombstoneSeq={purgatoryEffects.tombstone[HUMAN]}
               />
               <CardPile
                 label="Altars"

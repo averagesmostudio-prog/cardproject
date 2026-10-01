@@ -97,20 +97,38 @@ function CounterBadges({ counters }) {
   );
 }
 
+// A killing blow shatters the dying Being's own card into pieces
+// (Hearthstone-style) instead of the plain red pulse this used to be — a
+// brief bright crack-flash (.shatter-crack) then 7 shard pieces
+// (.shatter-shard, one shared clip-path triangle reused via 7 discrete
+// trajectory classes rather than computed CSS trig, matching this file's
+// existing "named keyframe per variant" convention) flying outward and
+// fading. z-20, the same slot the red wash used to occupy — unaffected by
+// Shift (useStagedBoard.js's diffBoardDamage no longer flags a Shift-away
+// as `dying` at all, so this never fires for one).
+function ShatterBreak() {
+  return (
+    <div className="absolute inset-0 z-20 pointer-events-none overflow-visible">
+      <div className="absolute inset-0 shatter-crack" />
+      {Array.from({ length: 7 }).map((_, i) => (
+        <div key={i} className={`absolute inset-0 shatter-shard shatter-shard-${i + 1}`} />
+      ))}
+    </div>
+  );
+}
+
 // The impact burst shown over a Being for the brief window useStagedBoard.js
 // holds its pre-damage self on screen — `flash` is `{ amount, dying }` for
 // the cell this render currently occupies, or undefined the rest of the
 // time. Two overlapping rotated squares form an 8-point starburst (a
 // Hearthstone-style "hit" badge) with the damage number popped on top;
-// `dying` additionally washes the tile red so a killing blow reads
+// `dying` additionally plays ShatterBreak above so a killing blow reads
 // differently from a Being that's merely damaged and staying on the board.
 function DamageFlash({ flash }) {
   if (!flash) return null;
   return (
     <>
-      {flash.dying && (
-        <div className="absolute inset-0 z-20 bg-red-900/40 rounded pointer-events-none animate-pulse" />
-      )}
+      {flash.dying && <ShatterBreak />}
       <div className="absolute inset-0 z-30 flex items-center justify-center pointer-events-none">
         <div className="relative w-12 h-12 damage-burst-pop">
           <div className="absolute inset-0 bg-gradient-to-br from-amber-300 via-orange-500 to-red-600 rounded-md shadow-[0_0_6px_rgba(0,0,0,0.6)] rotate-45" />
@@ -181,6 +199,28 @@ function ShiftVortex({ seq }) {
   return (
     <div key={`vortex-${seq}`} className="absolute inset-0 z-[16] flex items-center justify-center pointer-events-none overflow-hidden rounded">
       <div className="w-full aspect-square rounded-full shift-vortex-spin" />
+    </div>
+  );
+}
+
+// A relocation caused by something OTHER than a normal player-clicked move
+// (useStagedBoard.js > useFeatherMove) — Happy Hammer moving to a freshly
+// summoned Being, Divine Winds/Feathers of the Fallen's forced moves, and
+// anything else that routes through the engine's shared moveBeingFreely
+// rather than MOVE_OR_ATTACK. Rendered at the bare-tile level (the
+// destination can be a Being, an armament-stack, or an Armament newly
+// attached within a Being's own pile, so this doesn't assume an occupant
+// shape) — z-[22], above the vortex/Engage-glow layer but below Martyr/
+// Depart/Modulate, since those represent a different concurrent event and
+// should still read on top if they ever land on the same tile. A handful
+// of small feather shapes drift in and settle, one shot, keyed on `seq`.
+function FeatherDrift({ seq }) {
+  if (!seq) return null;
+  return (
+    <div key={`feather-${seq}`} className="absolute inset-0 z-[22] pointer-events-none overflow-visible">
+      <div className="feather-drift feather-drift-1" />
+      <div className="feather-drift feather-drift-2" />
+      <div className="feather-drift feather-drift-3" />
     </div>
   );
 }
@@ -294,7 +334,7 @@ function EffigyZoneBreakdown({ pool }) {
   );
 }
 
-export default function Board({ state, displayBoard, flashes, lastAttack, lastMartyr, lastEngageGlow, vortexCells, departCells, lastModulate, deityCells, viewerId, highlightCells, selectedCell, toggledCells, respondingCellId, onCellClick, onCellDoubleClick, borderImages, borderImagesLoaded, artImages, artBorderImages, artImagesLoaded, fontLoaded }) {
+export default function Board({ state, displayBoard, flashes, lastAttack, lastMartyr, lastEngageGlow, vortexCells, departCells, featherCells, lastModulate, deityCells, viewerId, highlightCells, selectedCell, toggledCells, respondingCellId, onCellClick, onCellDoubleClick, borderImages, borderImagesLoaded, artImages, artBorderImages, artImagesLoaded, fontLoaded }) {
   const rows = [];
   // `displayBoard` (useStagedBoard.js) is a momentarily-lagged view of
   // state.board for a Being that just took damage or died — falls back to
@@ -357,6 +397,9 @@ export default function Board({ state, displayBoard, flashes, lastAttack, lastMa
       // `departCells` (useStagedBoard.js > useDepartFlash) — a Depart-
       // keyword Being just died on this specific tile.
       const departSeq = departCells?.[id];
+      // `featherCells` (useStagedBoard.js > useFeatherMove) — something just
+      // landed on this specific tile via a non-standard move.
+      const featherSeq = featherCells?.[id];
       // `lastModulate` (useGameEngine.js) — a Time Counter on this specific
       // tile's occupant was just Modulated.
       const modulateSeq = lastModulate?.cellId === id ? lastModulate.seq : null;
@@ -378,6 +421,7 @@ export default function Board({ state, displayBoard, flashes, lastAttack, lastMa
             <div key={`martyr-${lastMartyr.seq}`} className="absolute inset-0 z-[25] rounded pointer-events-none martyr-glow" />
           )}
           <DepartBones seq={departSeq} />
+          <FeatherDrift seq={featherSeq} />
           <ModulateHourglass seq={modulateSeq} />
           {deityEntry && (
             <DeitySummonCinematic
