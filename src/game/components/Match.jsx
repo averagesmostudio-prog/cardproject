@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { History, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Flag, Eye, EyeOff } from 'lucide-react';
+import { History, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Flag, Eye, EyeOff, Sun, Moon } from 'lucide-react';
 import { useGameEngine } from '../state/useGameEngine.js';
 import { useStagedBoard, useStagedLife, useTurnBanner, useJustDrawn, useShiftVortex, useDepartFlash, useDeitySummonCinematic, useOpenLaneStrike, useFeatherMove, usePurgatoryArrivals } from '../state/useStagedBoard.js';
 import { getLegalActions, effectiveEngage, animatedTopEntry, effectiveCastingCost, faithlessPaymentNeedsChoice, faithlessPaymentCandidates, searchZoneCandidates } from '../engine/actions.js';
@@ -8,6 +8,7 @@ import { STARTING_LIFESPAN } from '../engine/constants.js';
 import { useCardFont, useBorderImages, useCardArtImages } from '../../lib/useCardAssets.js';
 import { getBorderTypeForCard, resolveCardArt, EFFIGY_COLORS, EFFIGY_TYPE_COLORS, totalCastingCost } from '../../lib/cardData.js';
 import { renderCardOnCanvas, DEFAULT_POSITIONS } from '../../lib/cardRender.js';
+import { getBoardTheme, setBoardTheme } from '../../lib/boardTheme.js';
 import Board from './Board.jsx';
 import Hand from './Hand.jsx';
 import ActionLog from './ActionLog.jsx';
@@ -502,6 +503,15 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
   const [showBoardOnGameOver, setShowBoardOnGameOver] = useState(false);
   const [expandedCell, setExpandedCell] = useState(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  // Light/dark board toggle (lib/boardTheme.js) — lazily reads localStorage
+  // once per mount via the initializer form, same as useState(getBoardTheme)
+  // elsewhere in this file's own convention.
+  const [boardTheme, setBoardThemeState] = useState(getBoardTheme);
+  const toggleBoardTheme = () => {
+    const next = boardTheme === 'dark' ? 'light' : 'dark';
+    setBoardThemeState(next);
+    setBoardTheme(next);
+  };
   // "← Menu" during an active match would otherwise silently abandon it
   // with no result recorded — this confirms first, same "Concede or keep
   // playing" choice handleConcede's own window.confirm already offers, just
@@ -1805,6 +1815,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
               artBorderImages={artBorderImages}
               artImagesLoaded={artImagesLoaded}
               fontLoaded={fontLoaded}
+              boardTheme={boardTheme}
             />
           </div>
         </div>
@@ -1907,6 +1918,14 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
         </div>
         <div className="flex items-center gap-3">
           <div className="text-sm text-stone-400">Turn {state.turnNumber} — {state.turnPlayer === HUMAN ? 'Your turn' : `${opponentLabel}'s turn`}</div>
+          <button
+            onClick={toggleBoardTheme}
+            title={boardTheme === 'dark' ? 'Switch to light board' : 'Switch to dark board'}
+            className="flex items-center gap-1 text-xs px-2 py-1 rounded border border-stone-700 text-stone-400 hover:text-stone-200 hover:border-stone-500 transition"
+          >
+            {boardTheme === 'dark' ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+            {boardTheme === 'dark' ? 'Light Board' : 'Dark Board'}
+          </button>
           <button
             onClick={() => setHistoryOpen(o => !o)}
             className={`flex items-center gap-1 text-xs px-2 py-1 rounded border transition
@@ -3075,6 +3094,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
             artBorderImages={artBorderImages}
             artImagesLoaded={artImagesLoaded}
             fontLoaded={fontLoaded}
+            boardTheme={boardTheme}
           />
 
           <div className="flex flex-col gap-1 p-2 w-56">

@@ -17,6 +17,41 @@ const effigyZoneOwnerForCell = (id) => cellOwner(id, EFFIGY_ZONE_CELL);
 
 const STACK_LAYERS = 5; // purely visual shorthand for "a stack of many cards"
 
+// The two board looks a player can toggle between (Match.jsx's header
+// button, persisted via lib/boardTheme.js). Light's cell tints (emerald/
+// indigo at low opacity) are designed to composite over a light backdrop;
+// dark swaps in a near-black backdrop with the same tints at higher
+// opacity so they stay identifiable against it, plus lighter stack/ring
+// colors so nothing goes low-contrast against the darker base.
+const BOARD_THEME_CLASSES = {
+  light: {
+    container: 'bg-stone-100',
+    cellEthereal: 'bg-indigo-950/20',
+    cellDefault: 'bg-emerald-900/10',
+    cellSummonEmpty: 'bg-amber-50',
+    cellRing: 'ring-stone-300',
+    stackBg: 'bg-stone-200',
+    stackBorder: 'border-stone-400',
+    stackText: 'text-stone-800',
+  },
+  dark: {
+    // Muted, close-in-value neutrals (sampled off an earlier static mockup)
+    // rather than Tailwind's saturated emerald-900/indigo-900 swatches —
+    // those read as distinctly "green"/"blue" once set against a near-black
+    // container; this keeps the board reading as one dark charcoal surface
+    // with just a whisper of each row's hue, the same low-contrast feel the
+    // light theme's own low-opacity tints have on their pale backdrop.
+    container: 'bg-[#3d3b39]',
+    cellEthereal: 'bg-[#37363b]',
+    cellDefault: 'bg-[#434039]',
+    cellSummonEmpty: 'bg-[#413e37]',
+    cellRing: 'ring-[#5c5955]',
+    stackBg: 'bg-[#4a4844]',
+    stackBorder: 'border-[#5c5955]',
+    stackText: 'text-stone-100',
+  },
+};
+
 // The attack-lunge animation (index.css > .attack-lunge) is a generic
 // lift-push-return keyframe driven entirely by these two CSS custom
 // properties — this just picks their sign/magnitude from the attacker's
@@ -42,13 +77,13 @@ const lungeOffsetFor = (fromCellId, toCellId) => {
 // showing a stack — it's a real deck of unknown-until-flipped cards) and the
 // Effigy Zone breakdown below (only once there's actually a card to
 // illustrate — an empty Zone has no cards to look like a stack of).
-function StackBacking() {
+function StackBacking({ theme }) {
   return (
     <>
       {Array.from({ length: STACK_LAYERS }).map((_, i) => (
         <div
           key={i}
-          className="absolute inset-x-0 bottom-0 h-20 rounded border border-stone-400 bg-stone-200"
+          className={`absolute inset-x-0 bottom-0 h-20 rounded border ${theme.stackBorder} ${theme.stackBg}`}
           style={{ bottom: i * 2 }}
         />
       ))}
@@ -56,11 +91,11 @@ function StackBacking() {
   );
 }
 
-function EffigyDeckStack({ count }) {
+function EffigyDeckStack({ count, theme }) {
   return (
     <div className="relative w-24 h-24 sm:w-28 sm:h-28">
-      <StackBacking />
-      <div className="absolute inset-x-0 flex items-center justify-center text-2xl font-extrabold text-stone-800" style={{ bottom: (STACK_LAYERS - 1) * 2 + 30 }}>
+      <StackBacking theme={theme} />
+      <div className={`absolute inset-x-0 flex items-center justify-center text-2xl font-extrabold ${theme.stackText}`} style={{ bottom: (STACK_LAYERS - 1) * 2 + 30 }}>
         {count}
       </div>
     </div>
@@ -305,7 +340,7 @@ function DeitySummonCinematic({ seq, card, borderImages, borderImagesLoaded, art
   );
 }
 
-function EffigyZoneBreakdown({ pool }) {
+function EffigyZoneBreakdown({ pool, theme }) {
   const counts = {};
   pool.forEach(e => { counts[e.effigyType] = (counts[e.effigyType] || 0) + 1; });
   const present = EFFIGY_COLORS.filter(color => counts[color] > 0);
@@ -319,7 +354,7 @@ function EffigyZoneBreakdown({ pool }) {
   // just with the per-color counts overlaid instead of a single total.
   return (
     <div className="relative w-24 h-24 sm:w-28 sm:h-28">
-      <StackBacking />
+      <StackBacking theme={theme} />
       <div
         className="absolute inset-x-0 grid grid-cols-2 gap-x-3 gap-y-1 justify-items-center"
         style={{ bottom: (STACK_LAYERS - 1) * 2 + 28 }}
@@ -334,7 +369,8 @@ function EffigyZoneBreakdown({ pool }) {
   );
 }
 
-export default function Board({ state, displayBoard, flashes, lastAttack, lastMartyr, lastEngageGlow, vortexCells, departCells, featherCells, lastModulate, deityCells, viewerId, highlightCells, selectedCell, toggledCells, respondingCellId, onCellClick, onCellDoubleClick, borderImages, borderImagesLoaded, artImages, artBorderImages, artImagesLoaded, fontLoaded }) {
+export default function Board({ state, displayBoard, flashes, lastAttack, lastMartyr, lastEngageGlow, vortexCells, departCells, featherCells, lastModulate, deityCells, viewerId, highlightCells, selectedCell, toggledCells, respondingCellId, onCellClick, onCellDoubleClick, borderImages, borderImagesLoaded, artImages, artBorderImages, artImagesLoaded, fontLoaded, boardTheme = 'light' }) {
+  const theme = BOARD_THEME_CLASSES[boardTheme] || BOARD_THEME_CLASSES.light;
   const rows = [];
   // `displayBoard` (useStagedBoard.js) is a momentarily-lagged view of
   // state.board for a Being that just took damage or died — falls back to
@@ -426,9 +462,9 @@ export default function Board({ state, displayBoard, flashes, lastAttack, lastMa
           onClick={() => onCellClick(id)}
           onDoubleClick={() => onCellDoubleClick?.(id)}
           className={`relative rounded flex items-center justify-center
-            ${isEthereal ? 'w-36 h-24 sm:w-44 sm:h-28 bg-indigo-950/20' : 'w-36 h-[138px] sm:w-44 sm:h-[169px] bg-emerald-900/10'}
-            ${isToggled ? 'ring-4 ring-red-500 ring-inset' : isRespondingTo ? 'ring-4 ring-yellow-400 ring-inset' : isHighlighted ? 'ring-2 ring-green-400 ring-inset' : 'ring-1 ring-stone-300'}
-            ${isSummonCell && !occupant ? 'bg-amber-50' : ''}`}
+            ${isEthereal ? `w-36 h-24 sm:w-44 sm:h-28 ${theme.cellEthereal}` : `w-36 h-[138px] sm:w-44 sm:h-[169px] ${theme.cellDefault}`}
+            ${isToggled ? 'ring-4 ring-red-500 ring-inset' : isRespondingTo ? 'ring-4 ring-yellow-400 ring-inset' : isHighlighted ? 'ring-2 ring-green-400 ring-inset' : `ring-1 ${theme.cellRing}`}
+            ${isSummonCell && !occupant ? theme.cellSummonEmpty : ''}`}
         >
           {isMartyred && (
             <div key={`martyr-${lastMartyr.seq}`} className="absolute inset-0 z-[25] rounded pointer-events-none martyr-glow" />
@@ -593,10 +629,10 @@ export default function Board({ state, displayBoard, flashes, lastAttack, lastMa
             );
           })()}
           {!occupant && effigyDeckOwner && (
-            <EffigyDeckStack count={state.players[effigyDeckOwner].effigyDeck.length} />
+            <EffigyDeckStack count={state.players[effigyDeckOwner].effigyDeck.length} theme={theme} />
           )}
           {!occupant && effigyZoneOwner && (
-            <EffigyZoneBreakdown pool={state.players[effigyZoneOwner].effigyPool} />
+            <EffigyZoneBreakdown pool={state.players[effigyZoneOwner].effigyPool} theme={theme} />
           )}
           {!occupant && groundRelic && (
             <div className="relative">
@@ -641,11 +677,10 @@ export default function Board({ state, displayBoard, flashes, lastAttack, lastMa
   }
 
   return (
-    // The cell tints (emerald/indigo at low opacity) are designed to
-    // composite over a light backdrop — give the board its own fixed light
-    // background so it always renders with the same tones regardless of the
-    // surrounding page's own background color.
-    <div className="flex flex-col gap-1 items-center bg-stone-100 p-2 rounded-lg">
+    // Give the board its own fixed background (per boardTheme) so it always
+    // renders with the same tones regardless of the surrounding page's own
+    // background color — see BOARD_THEME_CLASSES above for both looks.
+    <div className={`flex flex-col gap-1 items-center p-2 rounded-lg ${theme.container}`}>
       {rows}
     </div>
   );
