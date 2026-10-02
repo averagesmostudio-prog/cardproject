@@ -7705,6 +7705,57 @@ describe('"Beings may move across this" ground Relics + Al khali the Empty\'s ar
   });
 });
 
+// Regression: "Pay (1) Formless, Engage: ..." (no "Essence" after the color
+// name, unlike Tilled Fields' "Pay (1) Living Essence, Engage: ...") used to
+// fail to parse at all (cardData.js's own payEffigyEngageMatch required the
+// literal word "Essence"), silently dropping the cost and leaving the whole
+// ability a free, unconditional Engage — reported from real play as
+// Illegible Grimoire being Engage-able with no Formless to pay for it. Three
+// separate offer sites (main-phase, reactive, and the reducer's own
+// re-validation) each needed the same engageEffigyCost check Tilled Fields'
+// ground-Relic equivalent already had.
+describe('Illegible Grimoire\'s own Engage cost: "Pay (1) Formless, Engage: ..." (no "Essence" in the printed text)', () => {
+  const illegibleGrimoire = {
+    type: 'relic', ownerId: 'A',
+    card: {
+      id: 'ig', instanceId: 'ig#0', name: 'Illegible Grimoire', kind: 'relic',
+      keywords: { engage: 'Flip a coin, if heads draw (1) card, if tails Pay (3) Lifespan.', engageEffigyCost: { color: 'formless', amount: 1 } },
+    },
+  };
+
+  it('is not offered main-phase without a Formless to pay', () => {
+    const state = baseState({ board: { r2c1: illegibleGrimoire }, players: { A: player({ effigyPool: [] }), B: player() } });
+    expect(getLegalActions(state, 'A').some(a => a.type === 'ACTIVATE_ENGAGE')).toBe(false);
+  });
+
+  it('is offered main-phase once a Formless is affordable', () => {
+    const state = baseState({ board: { r2c1: illegibleGrimoire }, players: { A: player({ effigyPool: [effigy('formless')] }), B: player() } });
+    expect(getLegalActions(state, 'A')).toContainEqual({ type: 'ACTIVATE_ENGAGE', cellId: 'r2c1' });
+  });
+
+  it('is not offered reactively (ethereal speed) without a Formless to pay', () => {
+    const state = baseState({
+      board: { r2c1: illegibleGrimoire },
+      reactiveWindow: { openFor: 'A', triggerDescription: null, everResponded: false, passedOnce: false },
+      players: { A: player({ effigyPool: [] }), B: player() },
+    });
+    expect(getLegalActions(state, 'A').some(a => a.type === 'ACTIVATE_ENGAGE')).toBe(false);
+  });
+
+  it('actually spends the Formless (not just gates the offer) when activated', () => {
+    const state = baseState({ board: { r2c1: illegibleGrimoire }, players: { A: player({ effigyPool: [effigy('formless')] }), B: player() } });
+    const next = gameReducer(state, { type: 'ACTIVATE_ENGAGE', cellId: 'r2c1' });
+    expect(next.players.A.effigyPool).toEqual([]);
+    expect(next.log.some(e => e.message.includes('A pays 1 formless to engage Illegible Grimoire'))).toBe(true);
+  });
+
+  it('the reducer itself rejects activation without a Formless, even if dispatched directly (not just relying on the offer-time gate)', () => {
+    const state = baseState({ board: { r2c1: illegibleGrimoire }, players: { A: player({ effigyPool: [] }), B: player() } });
+    const next = gameReducer(state, { type: 'ACTIVATE_ENGAGE', cellId: 'r2c1' });
+    expect(next).toBe(state); // untouched — no engage, no pendingResolution, no spent Effigy
+  });
+});
+
 describe('"Engage: Target Effigy that you control Engages, then add (1) Essence of its typing." (Effigial Conservator)', () => {
   const conservator = { type: 'being', ownerId: 'A', card: beingCard({ name: 'Effigial Conservator', keywords: { engage: 'Target Effigy that you control Engages, then add (1) Essence of its typing.' } }), currentLifespan: 2, engaged: false };
 

@@ -497,9 +497,17 @@ export const parseKeywords = (textBox, cardName = null) => {
   // Lifespan-cost-then-Engage shape as payLifespanEngageMatch above, just
   // costed by real Effigy from the pool instead (see engageEffigyCost,
   // ACTIVATE_GROUND_RELIC_ENGAGE in actions.js) — distinct from
-  // payEffigyCostMatch below, which has no Engage at all.
+  // payEffigyCostMatch below, which has no Engage at all. "Essence" is
+  // optional in the match itself (not every printing of this same cost
+  // shape includes the word — Illegible Grimoire prints "Pay (1)
+  // Formless, Engage: ..." with no "Essence" at all, same mechanic as
+  // Tilled Fields' "Pay (1) Living Essence, Engage: ..."): without it, the
+  // whole clause silently failed to match anything at all and fell
+  // through to a bare, unconditional `engage` with no cost gating —
+  // reported from real play as Illegible Grimoire being Engage-able with
+  // no Formless to actually pay for it.
   const payEffigyEngageMatch = !grantedEngageMatch && !payLifespanEngageMatch
-    && text.match(/Pay\s*\(?(\d+)\)?\s+(\w+) Essence,?\s*Engage:\s*(.+?)(?:\r?\n|$)/i);
+    && text.match(/Pay\s*\(?(\d+)\)?\s+(\w+)(?:\s+Essence)?,?\s*Engage:\s*(.+?)(?:\r?\n|$)/i);
   // "Remove (X) Crossing Counters, Engage: Restore (X) Lifespan to
   // target." (Sanative Siphon) — X is a genuine player choice (however
   // many Counters they remove right now), the same shape
@@ -1044,9 +1052,16 @@ export const parseKeywords = (textBox, cardName = null) => {
   // dedicated path — is only ever readable while the card is still ON THE
   // BOARD (not yet in Purgatory), offering a second, broken
   // ACTIVATE_TIMES_PER_TURN_ABILITY button that always fell through to
-  // resolveOrLogEffect's "isn't automated yet" fallback.
+  // resolveOrLogEffect's "isn't automated yet" fallback. Also excludes
+  // sacrificeXSummonMatch above (Cemetery Physician: "Once per turn
+  // sacrifice (X) Bag o' Bones: Summon a Being from your Purgatory with
+  // cost (X).") — same exact collision, just missed when the other two
+  // exclusions were added: its own dedicated ACTIVATE_SACRIFICE_X_SUMMON
+  // path already handles the ability fully, so without this exclusion the
+  // card offered TWO buttons for its one real ability (reported from real
+  // play).
   const TIMES_WORDS = { once: 1, twice: 2, thrice: 3 };
-  const timesPerTurnMatch = !prophecyCounterMatch && !reanimateFromPurgatoryMatch
+  const timesPerTurnMatch = !prophecyCounterMatch && !reanimateFromPurgatoryMatch && !sacrificeXSummonMatch
     && text.match(/(?:^|\n)\s*(Once|Twice|Thrice)\s+per\s+turn\s+(.+?)(?:\r?\n|$)/i);
   // "You do not draw during the start of your turn" (Daylight Savings) —
   // an ongoing effect that applies for as long as a face-up Prophecy with

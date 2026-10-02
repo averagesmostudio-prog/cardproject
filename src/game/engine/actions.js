@@ -9586,7 +9586,12 @@ const offerReactiveEngageActions = (state, playerId, actions) => {
         // one).
         const counterCost = engageKeywords.engageCounterCost;
         const counterCostOk = !counterCost || (occupant.counters?.[counterCost.type] || 0) >= counterCost.amount;
-        if (conditionOk && costOk && extraCostOk && counterCostOk) {
+        // Same Effigy-cost check (and same reasoning) as the matching
+        // main-phase offer and the reducer's own re-validation — see
+        // their own fuller comments.
+        const effigyCost = engageKeywords.engageEffigyCost;
+        const effigyCostOk = !effigyCost || payablePool(player.effigyPool).filter(e => e.effigyType === effigyCost.color).length >= effigyCost.amount;
+        if (conditionOk && costOk && extraCostOk && counterCostOk && effigyCostOk) {
           actions.push({ type: 'ACTIVATE_ENGAGE', cellId: cell });
         }
       }
@@ -9609,7 +9614,14 @@ const offerReactiveEngageActions = (state, playerId, actions) => {
       const ownEffectCounterMatch = occupant.card.keywords.engage.match(REMOVE_OWN_COUNTERS_RE);
       const ownEffectCounterOk = !ownEffectCounterMatch
         || (occupant.counters?.[ownEffectCounterMatch[2].toLowerCase()] || 0) >= parseInt(ownEffectCounterMatch[1], 10);
-      if (conditionOk && lifespanCostOk && extraCostOk && counterCostOk && ownEffectCounterOk) {
+      // Illegible Grimoire: "Pay (1) Formless, Engage: ..." — same
+      // Effigy-cost check (and same reasoning) as the matching main-phase
+      // offer and the reducer's own re-validation — see their own fuller
+      // comments. Reported from real play as this card being reactively
+      // Engage-able with no Formless to actually pay for it.
+      const effigyCost = occupant.card.keywords?.engageEffigyCost;
+      const effigyCostOk = !effigyCost || payablePool(player.effigyPool).filter(e => e.effigyType === effigyCost.color).length >= effigyCost.amount;
+      if (conditionOk && lifespanCostOk && extraCostOk && counterCostOk && ownEffectCounterOk && effigyCostOk) {
         actions.push({ type: 'ACTIVATE_ENGAGE', cellId: cell });
       }
     }
@@ -10558,7 +10570,17 @@ export const getLegalActions = (state, playerId) => {
       // offerReactiveEngageActions above.
       const counterCost = engageKeywords.engageCounterCost;
       const counterCostOk = !counterCost || (occupant.counters?.[counterCost.type] || 0) >= counterCost.amount;
-      if (conditionOk && costOk && extraCostOk && counterCostOk) {
+      // An Effigy-costed Engage (Illegible Grimoire: "Pay (1) Formless,
+      // Engage: ..."; Tilled Fields: "Pay (1) Living Essence, Engage:
+      // ...") — groundRelicEngageCostPayable already checks this for a
+      // GROUND Relic's own Engage, but this is the generic path every
+      // other Engage-able occupant (a Being, or a plain board Relic like
+      // Illegible Grimoire) goes through, which never checked it at all.
+      // Reported from real play as Illegible Grimoire being Engage-able
+      // with no Formless on hand to actually pay for it.
+      const effigyCost = engageKeywords.engageEffigyCost;
+      const effigyCostOk = !effigyCost || payablePool(player.effigyPool).filter(e => e.effigyType === effigyCost.color).length >= effigyCost.amount;
+      if (conditionOk && costOk && extraCostOk && counterCostOk && effigyCostOk) {
         actions.push({ type: 'ACTIVATE_ENGAGE', cellId: cell });
       }
     }
@@ -10804,7 +10826,14 @@ export const getLegalActions = (state, playerId) => {
       const ownEffectCounterMatch = occupant.card.keywords.engage.match(REMOVE_OWN_COUNTERS_RE);
       const ownEffectCounterOk = !ownEffectCounterMatch
         || (occupant.counters?.[ownEffectCounterMatch[2].toLowerCase()] || 0) >= parseInt(ownEffectCounterMatch[1], 10);
-      if (conditionOk && lifespanCostOk && extraCostOk && counterCostOk && ownEffectCounterOk) {
+      // Illegible Grimoire: "Pay (1) Formless, Engage: ..." — same
+      // Effigy-cost check (and same reasoning) as the matching reactive
+      // offer and the reducer's own re-validation — see their own fuller
+      // comments. Reported from real play as this card being Engage-able
+      // with no Formless to actually pay for it.
+      const effigyCost = occupant.card.keywords?.engageEffigyCost;
+      const effigyCostOk = !effigyCost || payablePool(player.effigyPool).filter(e => e.effigyType === effigyCost.color).length >= effigyCost.amount;
+      if (conditionOk && lifespanCostOk && extraCostOk && counterCostOk && ownEffectCounterOk && effigyCostOk) {
         actions.push({ type: 'ACTIVATE_ENGAGE', cellId: cell });
       }
     }
@@ -14200,6 +14229,11 @@ const gameReducerCore = (state, action) => {
       let condition;
       let extraCost;
       let counterCost;
+      // Osteomancer-style multi-ability cards don't currently print an
+      // Effigy-costed ability (none in the real set do), so effigyCost is
+      // only read off the single-ability keywords branch below — same
+      // scope the matching getLegalActions fix above uses.
+      let effigyCost = null;
       if (ownAbilities.length > 1 && action.abilityIndex != null) {
         const ability = ownAbilities[action.abilityIndex];
         if (!ability) return state;
@@ -14211,6 +14245,7 @@ const gameReducerCore = (state, action) => {
         condition = engageKeywords.engageCondition;
         extraCost = engageKeywords.engageExtraCost;
         counterCost = engageKeywords.engageCounterCost;
+        effigyCost = engageKeywords.engageEffigyCost;
       }
       if (!engageEffect) return state;
       lifespanCost = lifespanCost || 0;
@@ -14225,6 +14260,14 @@ const gameReducerCore = (state, action) => {
       // normal board Relic instead of one living in groundRelics.
       const haveCounters = counterCost ? (occupant.counters?.[counterCost.type] || 0) : 0;
       if (counterCost && haveCounters < counterCost.amount) return state;
+      // An Effigy-costed Engage (Illegible Grimoire: "Pay (1) Formless,
+      // Engage: ..."; Tilled Fields' own ground-Relic equivalent already
+      // has this via groundRelicEngageCostPayable/its own payment block
+      // below, ACTIVATE_GROUND_RELIC_ENGAGE) — re-validated here (not just
+      // trusted from getLegalActions' own offer-time check) same as every
+      // other cost on this action, then actually paid further down.
+      const effigyPayable = !effigyCost || payablePool(player.effigyPool).filter(e => e.effigyType === effigyCost.color).length >= effigyCost.amount;
+      if (!effigyPayable) return state;
 
       let next = {
         ...state,
@@ -14258,6 +14301,18 @@ const gameReducerCore = (state, action) => {
         };
         next = addLog(next, `${playerId} pays ${lifespanCost} Lifespan to engage ${occupant.card.name}.`);
         next = triggerLifespanPaidReactions(next, playerId);
+      }
+      // Same payment pattern ACTIVATE_GROUND_RELIC_ENGAGE's own Tilled-
+      // Fields-covering block below uses, just for a normal board Relic.
+      if (effigyCost) {
+        const payer = next.players[playerId];
+        const pool = [...payer.effigyPool];
+        for (let i = 0; i < effigyCost.amount; i++) {
+          const idx = pool.findIndex(e => e.effigyType === effigyCost.color && !e.engaged);
+          pool.splice(idx, 1);
+        }
+        next = { ...next, players: { ...next.players, [playerId]: { ...payer, effigyPool: pool } } };
+        next = addLog(next, `${playerId} pays ${effigyCost.amount} ${effigyCost.color} to engage ${occupant.card.name}.`);
       }
       let sacrificedCardName = null;
       if (sacrificeCellId) {

@@ -356,6 +356,13 @@ describe('parseKeywords', () => {
   it('captures "Once per turn sacrifice (X) <Name>: Summon a Being from your Purgatory with cost (X)" (Cemetery Physician)', () => {
     const kw = parseKeywords("Once per turn sacrifice (X) Bag o' Bones: Summon a Being from your Purgatory with cost (X).");
     expect(kw.sacrificeXSummon).toEqual({ fodderName: "Bag o' Bones" });
+    // Regression: the leading "Once per turn" also matched the generic
+    // timesPerTurnAbility catch-all (same collision already excluded for
+    // prophecyCounterMatch/reanimateFromPurgatoryMatch, just missed for
+    // this one), offering a second, broken ACTIVATE_TIMES_PER_TURN_ABILITY
+    // button for what is really one single ability — reported from real
+    // play as Cemetery Physician showing two options for its one ability.
+    expect(kw.timesPerTurnAbility).toBe(null);
   });
 
   it('captures "Pay (1) Living: Add (1) Growth Counter." / "Remove (1) Growth Counter: Sacrifice this, ..." (Blooming Seed, real CSV text)', () => {

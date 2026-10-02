@@ -502,6 +502,13 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
   const [showBoardOnGameOver, setShowBoardOnGameOver] = useState(false);
   const [expandedCell, setExpandedCell] = useState(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  // "← Menu" during an active match would otherwise silently abandon it
+  // with no result recorded — this confirms first, same "Concede or keep
+  // playing" choice handleConcede's own window.confirm already offers, just
+  // as a real styled modal (matching this file's own "fixed inset-0...
+  // bg-white rounded-lg" convention) instead of a native browser dialog, per
+  // the user's own request.
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
   // `.slice(-30)` on every render would otherwise hand ActionLog a brand
   // new array reference each time — including the once-a-second re-render
   // from the live match clock (setLiveElapsedMs below) — which made its own
@@ -1895,7 +1902,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
       <div className="flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
-          <button onClick={onExit} className="text-sm text-stone-400 hover:text-stone-200">← Menu</button>
+          <button onClick={() => setShowExitConfirm(true)} className="text-sm text-stone-400 hover:text-stone-200">← Menu</button>
           <div className="text-sm text-stone-400 font-mono tabular-nums">{formatDuration(liveElapsedMs)}</div>
         </div>
         <div className="flex items-center gap-3">
@@ -1917,6 +1924,35 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
           </button>
         </div>
       </div>
+
+      {showExitConfirm && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-2xl p-6 flex flex-col items-center gap-4 max-w-sm text-center">
+            <h3 className="text-lg font-bold text-stone-800">Leave the match?</h3>
+            <p className="text-sm text-stone-600">
+              Returning to the menu will concede this match{netRole ? " — your opponent will be declared the winner" : ' — the AI will be declared the winner'}.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowExitConfirm(false)}
+                className="px-4 py-2 border border-stone-300 rounded-lg font-semibold text-stone-700 hover:bg-stone-100"
+              >
+                Return to Battle
+              </button>
+              <button
+                onClick={() => {
+                  if (state.phase === 'playing') dispatch({ type: 'CONCEDE', player: HUMAN });
+                  setShowExitConfirm(false);
+                  onExit();
+                }}
+                className="px-4 py-2 bg-red-700 text-white rounded-lg font-semibold hover:bg-red-600"
+              >
+                Concede
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {historyOpen && (
         <div className="absolute top-12 right-4 z-40 w-80">

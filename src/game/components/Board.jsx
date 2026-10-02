@@ -343,12 +343,25 @@ export default function Board({ state, displayBoard, flashes, lastAttack, lastMa
   // groundRelics, players' Effigy piles) is read live as always; only board
   // occupant rendering itself is ever staged.
   const board = displayBoard || state.board;
-  // Rendered top-to-bottom as Row 5 -> Row 1: the opponent's side (Rows 4-5)
-  // sits at the top of the screen, farthest away, while the human player's
-  // own side (Rows 1-2) sits at the bottom, right above their Hand.
-  for (let row = ROWS; row >= 1; row--) {
+  // Rendered top-to-bottom so the VIEWER's own side always sits at the
+  // bottom, right above their Hand, with the opponent's side farthest away
+  // at the top — matching the real game's own per-player "forward" sense
+  // (board.js's directionDelta already flips BOTH row and column sign for
+  // player B, a full 180° rotation of the logical model) rather than
+  // always assuming the viewer is seat A. A's own rows (1-2) sit at the
+  // bottom for A; a 180°-rotated iteration (row ascending, column
+  // descending) puts B's own rows (4-5) at the bottom for B instead, with
+  // the same rotation applied to columns so left/right reads correctly
+  // from each viewer's own side too, not just rows. Confirmed as a real
+  // bug via a live two-player multiplayer report: a peer (seat B) saw the
+  // whole board upside down, since this used to be hardcoded to the A-only
+  // ordering regardless of who was actually viewing.
+  const viewerIsB = viewerId === 'B';
+  for (let rowIdx = 0; rowIdx < ROWS; rowIdx++) {
+    const row = viewerIsB ? rowIdx + 1 : ROWS - rowIdx;
     const cells = [];
-    for (let col = 1; col <= COLS; col++) {
+    for (let colIdx = 0; colIdx < COLS; colIdx++) {
+      const col = viewerIsB ? COLS - colIdx : colIdx + 1;
       const id = cellId(row, col);
       const occupant = board[id];
       // A "Beings may move across this" Relic (RULES.md > Keywords) — lives
