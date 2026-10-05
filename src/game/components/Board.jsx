@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { cellId, parseCellId, ROWS, COLS, EFFIGY_DECK_CELL, EFFIGY_ZONE_CELL, SUMMON_CELLS } from '../../game/engine/board.js';
 import { effectiveStrength } from '../../game/engine/combat.js';
 import { animatedTopEntry, actorView } from '../../game/engine/actions.js';
@@ -372,6 +372,24 @@ function EffigyZoneBreakdown({ pool, theme }) {
 export default function Board({ state, displayBoard, flashes, lastAttack, lastMartyr, lastEngageGlow, vortexCells, departCells, featherCells, lastModulate, deityCells, viewerId, highlightCells, selectedCell, toggledCells, respondingCellId, onCellClick, onCellDoubleClick, borderImages, borderImagesLoaded, artImages, artBorderImages, artImagesLoaded, fontLoaded, boardTheme = 'light' }) {
   const theme = BOARD_THEME_CLASSES[boardTheme] || BOARD_THEME_CLASSES.light;
   const rows = [];
+  // Touch screens never fire the browser's dblclick for a quick double-tap
+  // (the page is touch-action: manipulation, which also suppresses it), so a
+  // stack of Armaments/Dryad mount/ground Relic had no way to open there.
+  // Two taps on the same tile within 400ms count as a double-click on
+  // coarse pointers only — a mouse keeps using the real dblclick event.
+  const lastTapRef = useRef({ id: null, at: 0 });
+  const handleCellTap = (id) => {
+    onCellClick(id);
+    if (!onCellDoubleClick || !window.matchMedia('(pointer: coarse)').matches) return;
+    const now = Date.now();
+    const last = lastTapRef.current;
+    if (last.id === id && now - last.at < 400) {
+      lastTapRef.current = { id: null, at: 0 };
+      onCellDoubleClick(id);
+    } else {
+      lastTapRef.current = { id, at: now };
+    }
+  };
   // `displayBoard` (useStagedBoard.js) is a momentarily-lagged view of
   // state.board for a Being that just took damage or died — falls back to
   // the real board when no staged view was passed in (e.g. any future
@@ -459,7 +477,7 @@ export default function Board({ state, displayBoard, flashes, lastAttack, lastMa
       cells.push(
         <div
           key={id}
-          onClick={() => onCellClick(id)}
+          onClick={() => handleCellTap(id)}
           onDoubleClick={() => onCellDoubleClick?.(id)}
           className={`relative rounded flex items-center justify-center
             ${isEthereal ? `w-36 h-24 sm:w-44 sm:h-28 ${theme.cellEthereal}` : `w-36 h-[138px] sm:w-44 sm:h-[169px] ${theme.cellDefault}`}

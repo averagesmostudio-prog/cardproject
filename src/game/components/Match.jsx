@@ -199,6 +199,31 @@ const SINGLE_CELL_CHOICE_KINDS = {
   // enough are picked, then resolves and places the Being — see
   // RESOLVE_SUMMON_SACRIFICE_COST, actions.js.
   'summon-sacrifice-cost': { actionType: 'RESOLVE_SUMMON_SACRIFICE_COST', cellField: 'cellId' },
+  // These had a legal-action list in getLegalActions but no UI at all, so
+  // the moment one opened (Animate with 2+ Relics on the board, say) nothing
+  // on screen could resolve it and the whole game froze behind the open
+  // pendingChoice.
+  'animate-relic-target': { actionType: 'RESOLVE_ANIMATE_RELIC_TARGET', cellField: 'cellId' },
+  'copy-textbox-until-end-of-turn': { actionType: 'RESOLVE_COPY_TEXTBOX_UNTIL_END_OF_TURN', cellField: 'cellId' },
+  'desperate-finale-target': { actionType: 'RESOLVE_DESPERATE_FINALE_TARGET', cellField: 'cellId' },
+  'destroy-pointed-summon-token': { actionType: 'RESOLVE_DESTROY_POINTED_SUMMON_TOKEN', cellField: 'cellId' },
+  'engage-being-cost': { actionType: 'RESOLVE_ENGAGE_BEING_COST', cellField: 'cellId' },
+  'engage-grant-counter-source': { actionType: 'RESOLVE_ENGAGE_GRANT_COUNTER_SOURCE', cellField: 'cellId' },
+  'grant-martyr-target': { actionType: 'RESOLVE_GRANT_MARTYR_TARGET', cellField: 'cellId' },
+  'switch-with-typed': { actionType: 'RESOLVE_SWITCH_WITH_TYPED', cellField: 'cellId' },
+  'force-combat-select-mine': { actionType: 'RESOLVE_FORCE_COMBAT_SELECT_MINE', cellField: 'cellId' },
+  'force-combat-select-theirs': { actionType: 'RESOLVE_FORCE_COMBAT_SELECT_THEIRS', cellField: 'cellId' },
+};
+
+// pendingChoice kinds resolved by picking one non-board item — a card in
+// hand or Purgatory, or an Effigy in the pool — from a small list modal (the
+// same shape as the per-kind discard modals below, one generic one here).
+// `source` says where the item named by the action's instanceId lives.
+const INSTANCE_CHOICE_KINDS = {
+  'discard-being-draw-bonus': { actionType: 'RESOLVE_DISCARD_BEING_DRAW_BONUS', source: 'hand', prompt: (pc) => `${pc.cardName}: choose a Being to discard` },
+  'discard-then-search-purgatory': { actionType: 'RESOLVE_DISCARD_THEN_SEARCH_PURGATORY', source: 'hand', prompt: (pc) => `${pc.cardName}: choose a card to discard` },
+  'conjure-prophecy-purgatory': { actionType: 'RESOLVE_CONJURE_PROPHECY_PURGATORY', source: 'purgatory', prompt: (pc) => `${pc.cardName}: choose a Prophecy from Purgatory to conjure` },
+  'engage-effigy-add-essence': { actionType: 'RESOLVE_ENGAGE_EFFIGY_ADD_ESSENCE', source: 'effigy', prompt: (pc) => `${pc.cardName}: choose an Effigy to add Essence to` },
 };
 
 // pendingChoice kinds resolved by toggling any number of board cells in or
@@ -210,6 +235,7 @@ const TOGGLE_CHOICE_KINDS = {
   'sacrifice-x-toggle': { toggleActionType: 'RESOLVE_SACRIFICE_X_TOGGLE', confirmActionType: 'RESOLVE_SACRIFICE_X_CONFIRM' },
   'sacrifice-any-beings-toggle': { toggleActionType: 'RESOLVE_SACRIFICE_ANY_BEINGS_TOGGLE', confirmActionType: 'RESOLVE_SACRIFICE_ANY_BEINGS_CONFIRM' },
   'summon-vine-tokens-toggle': { toggleActionType: 'RESOLVE_SUMMON_VINE_TOKENS_TOGGLE', confirmActionType: 'RESOLVE_SUMMON_VINE_TOKENS_CONFIRM' },
+  'favor-pointed-toggle': { toggleActionType: 'RESOLVE_FAVOR_POINTED_TOGGLE', confirmActionType: 'RESOLVE_FAVOR_POINTED_CONFIRM' },
 };
 
 // pendingChoice kinds resolved by picking a single whole number 0..max —
@@ -243,6 +269,26 @@ const singleCellChoiceLabel = (pendingChoice) => {
       return `${cardName}: choose a highlighted Being to give ${pendingChoice.amount} -1/-1 Counter(s).`;
     case 'invoke-destination':
       return `${cardName}: choose a highlighted tile to invoke onto.`;
+    case 'animate-relic-target':
+      return `${cardName}: choose a highlighted Relic to animate.`;
+    case 'copy-textbox-until-end-of-turn':
+      return `${cardName}: choose a highlighted Being to copy the text of until end of turn.`;
+    case 'desperate-finale-target':
+      return `${cardName}: choose a highlighted Being of yours.`;
+    case 'destroy-pointed-summon-token':
+      return `${cardName}: choose a highlighted Being it points to, to destroy.`;
+    case 'engage-being-cost':
+      return `${cardName}: choose a highlighted disengaged Being of yours to Engage as the cost.`;
+    case 'engage-grant-counter-source':
+      return `${cardName}: choose a highlighted disengaged Being of yours to Engage.`;
+    case 'grant-martyr-target':
+      return `${cardName}: choose a highlighted Being to give Martyr to.`;
+    case 'switch-with-typed':
+      return `${cardName}: choose a highlighted Being of yours to switch places with.`;
+    case 'force-combat-select-mine':
+      return `${cardName}: choose a highlighted Being of yours to force into combat.`;
+    case 'force-combat-select-theirs':
+      return `${cardName}: choose a highlighted opposing Being for it to fight.`;
     case 'add-counter-typed-pointed-target':
       return `${cardName}: choose a highlighted Being to add ${pendingChoice.amount} ${pendingChoice.counterType} Counter(s) to.`;
     case 'move-armament-destination':
@@ -1437,6 +1483,25 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       .filter(Boolean);
   }, [legalActions, state.pendingChoice, state.players, HUMAN]);
 
+  // Options for a pending INSTANCE_CHOICE_KINDS choice, each resolved to a
+  // readable label from wherever its card/Effigy lives.
+  const pendingInstanceChoice = useMemo(() => {
+    const pc = state.pendingChoice;
+    const cfg = pc && pc.playerId === HUMAN ? INSTANCE_CHOICE_KINDS[pc.kind] : null;
+    if (!cfg) return null;
+    const me = state.players[HUMAN];
+    const pool = cfg.source === 'hand' ? me.hand : cfg.source === 'purgatory' ? me.purgatory : me.effigyPool;
+    const options = legalActions
+      .filter(a => a.type === cfg.actionType)
+      .map(action => {
+        const item = pool.find(c => c.instanceId === action.instanceId);
+        if (!item) return null;
+        return { action, label: item.name || (item.effigyType ? `${item.effigyType} Effigy` : 'Item') };
+      })
+      .filter(Boolean);
+    return options.length > 0 ? { prompt: cfg.prompt(pc), options } : null;
+  }, [legalActions, state.pendingChoice, state.players, HUMAN]);
+
   // Candidate hand cards for a pending "Discard a card: the next card you
   // play this turn costs (-1) Faithless" cost (Lighten the Load) — same
   // shape as pendingDiscardKindDrawCandidates above.
@@ -2317,6 +2382,25 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
                   className="w-full text-left text-sm px-2 py-1.5 rounded hover:bg-stone-100 text-stone-700 border border-stone-200"
                 >
                   {card.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingInstanceChoice && (
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1 ${popupHidden ? 'hidden' : ''}`}>
+          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75dvh] short:max-h-[94dvh] flex flex-col">
+            <div className="font-semibold text-stone-800 mb-3">{pendingInstanceChoice.prompt}</div>
+            <div className="overflow-y-auto space-y-1">
+              {pendingInstanceChoice.options.map(({ action, label }) => (
+                <button
+                  key={action.instanceId}
+                  onClick={() => dispatch(action)}
+                  className="w-full text-left text-sm px-2 py-1.5 rounded hover:bg-stone-100 text-stone-700 border border-stone-200"
+                >
+                  {label}
                 </button>
               ))}
             </div>
@@ -3379,6 +3463,8 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
             ? `click highlighted ${state.pendingChoice.fodderName} tiles to choose how many to sacrifice`
             : state.pendingChoice.kind === 'summon-vine-tokens-toggle'
             ? `click highlighted tiles to choose up to ${state.pendingChoice.maxCount} to summon ${state.pendingChoice.tokenName || 'Blooming Vine'} token(s) on`
+            : state.pendingChoice.kind === 'favor-pointed-toggle'
+            ? `click highlighted Beings to choose up to ${state.pendingChoice.maxCount} to make Favored`
             : 'click highlighted Beings to choose how many to sacrifice';
           return (
             <div className="flex items-center gap-2 bg-stone-900 border border-purple-700 rounded-lg px-3 py-2 mb-1">
@@ -3469,6 +3555,22 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
             </div>
           );
         })()}
+        {selectedCell && (state.board[selectedCell]?.armaments?.length > 0 || state.board[selectedCell]?.dryadAttached || state.groundRelics[selectedCell]) && (
+          // The same stack view a double-click opens (onCellDoubleClick) — a
+          // tap target for touch screens, where double-tapping a tile is easy
+          // to miss, and a hint on desktop that the stack is openable.
+          <div className="flex items-center gap-2 bg-stone-900 border border-stone-700 rounded-lg px-3 py-2 mb-1">
+            <span className="text-xs text-stone-300">
+              {state.board[selectedCell]?.card?.name || 'This tile'} has a stack — Armaments and their abilities
+            </span>
+            <button
+              onClick={() => onCellDoubleClick(selectedCell)}
+              className={`ml-auto shrink-0 bg-stone-700 text-white rounded font-semibold hover:bg-stone-600 transition ${compact ? 'px-4 py-2 text-sm' : 'px-3 py-1 text-xs'}`}
+            >
+              View stack
+            </button>
+          </div>
+        )}
         {martyrAction && (
           <div className="flex items-center gap-2 bg-stone-900 border border-stone-700 rounded-lg px-3 py-2 mb-1">
             <span className="text-xs text-stone-300">
