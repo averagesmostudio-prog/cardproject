@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import CardThumbnail from './CardThumbnail.jsx';
+import { useCompactLandscape } from '../../lib/useDeviceMode.js';
 
 // 'lg' matches Board.jsx's onboard cell width at both breakpoints (w-36 /
 // sm:w-44) so onboard cards fill the tile instead of leaving a gap once the
@@ -54,6 +55,9 @@ export default function CardTile({
   const wrapRef = useRef(null);
   const [hoverPos, setHoverPos] = useState(null);
   const hoverTimerRef = useRef(null);
+  const compact = useCompactLandscape();
+  const longPressTimerRef = useRef(null);
+  const longPressedRef = useRef(false);
 
   const showPreview = () => {
     const rect = wrapRef.current?.getBoundingClientRect();
@@ -74,7 +78,7 @@ export default function CardTile({
   const handleMouseEnter = () => {
     // The mulligan screen's star layout drives its own centered expand
     // preview instead of this tile's near-tile popup — see Match.jsx.
-    if (disableHoverPreview) return;
+    if (disableHoverPreview || compact) return;
     if (hoverDelayMs <= 0) {
       showPreview();
       return;
@@ -94,6 +98,44 @@ export default function CardTile({
   };
   useEffect(() => () => { if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current); }, []);
 
+  // Touch screens have no hover: a ~450ms press shows the same preview, any
+  // later touch dismisses it, and the click that long-press would otherwise
+  // end with is swallowed so inspecting a card never also selects it.
+  const cancelLongPress = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+  const touchProps = compact && !disableHoverPreview ? {
+    onTouchStart: () => {
+      setHoverPos(null);
+      cancelLongPress();
+      longPressTimerRef.current = setTimeout(() => {
+        longPressTimerRef.current = null;
+        longPressedRef.current = true;
+        showPreview();
+      }, 450);
+    },
+    onTouchEnd: cancelLongPress,
+    onTouchMove: cancelLongPress,
+    onTouchCancel: cancelLongPress,
+    onClickCapture: (e) => {
+      if (longPressedRef.current) {
+        longPressedRef.current = false;
+        e.stopPropagation();
+        e.preventDefault();
+      }
+    },
+  } : {};
+  useEffect(() => {
+    if (!hoverPos || !compact) return undefined;
+    const dismiss = () => setHoverPos(null);
+    const id = setTimeout(() => window.addEventListener('touchstart', dismiss, { once: true }), 0);
+    return () => { clearTimeout(id); window.removeEventListener('touchstart', dismiss); };
+  }, [hoverPos, compact]);
+  useEffect(() => cancelLongPress, []);
+
   if (faceDown) {
     // Prophecies sit in the Ethereal Realm (Row 3), which is laid out
     // sideways relative to the rest of the board — so the card itself is
@@ -109,6 +151,7 @@ export default function CardTile({
         ref={isOwn ? wrapRef : undefined}
         onClick={onClick}
         onMouseEnter={isOwn ? handleMouseEnter : undefined}
+        {...(isOwn ? touchProps : {})}
         onMouseLeave={isOwn ? handleMouseLeave : undefined}
         className={`${faceDownDims} rounded border-2 flex items-center justify-center font-semibold cursor-pointer select-none text-[10px]
           ${isOwn ? 'border-blue-900 bg-blue-700 text-blue-200' : 'border-red-900 bg-red-700 text-red-200'}`}
@@ -171,6 +214,7 @@ export default function CardTile({
       ref={wrapRef}
       onClick={onClick}
       onMouseEnter={handleMouseEnter}
+      {...touchProps}
       onMouseLeave={handleMouseLeave}
       className={`relative ${dims} cursor-pointer select-none transition rounded
         ${selected ? 'ring-2 ring-amber-400' : ''}`}

@@ -36,16 +36,16 @@ export default function PreconSelect({ pool, onStart, onCustom, onEdit, onBack, 
   const handleEdit = (deck) => onEdit(toDeckSeed(deck));
 
   return (
-    <div className="min-h-screen bg-black p-8">
+    <div className="min-h-dvh bg-black p-8 short:p-2">
       <button
         onClick={onBack}
         className="fixed top-3 left-3 z-40 text-xs bg-white/90 border border-stone-300 rounded px-3 py-1.5 shadow hover:bg-white"
       >
         ← Menu
       </button>
-      <div className="max-w-3xl mx-auto text-center pt-8">
-        <h1 className="text-2xl font-bold text-white mb-2">Play a Game</h1>
-        <p className="text-stone-400 mb-6 text-sm">
+      <div className="max-w-3xl mx-auto text-center pt-8 short:pt-4">
+        <h1 className="text-2xl font-bold text-white mb-2 short:mb-0">Play a Game</h1>
+        <p className="text-stone-400 mb-6 short:mb-3 text-sm">
           Pick a ready-to-play deck, or build your own. The AI opponent's own
           deck is chosen at random, scoped to the AI Difficulty below.
         </p>
@@ -106,7 +106,7 @@ export default function PreconSelect({ pool, onStart, onCustom, onEdit, onBack, 
         </div>
 
         {error && (
-          <p className="text-sm text-red-400 mb-6 max-w-lg mx-auto">{error}</p>
+          <p className="text-sm text-red-400 mb-6 short:mb-3 max-w-lg mx-auto">{error}</p>
         )}
 
         <button

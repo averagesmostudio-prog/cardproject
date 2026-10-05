@@ -100,7 +100,7 @@ export default function NetGameApp({ onExitToMenu }) {
 
   if (opponentGoneBeforeMatch && screen !== 'match') {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-black p-8">
+      <div className="min-h-dvh flex items-center justify-center bg-black p-8 short:p-2">
         <div className="text-center bg-white rounded-lg shadow p-8 max-w-lg">
           <h2 className="text-2xl font-bold text-stone-800 mb-2">Opponent disconnected</h2>
           <p className="text-sm text-stone-500 mb-4">The connection to your opponent was lost before the match started.</p>
@@ -133,7 +133,7 @@ export default function NetGameApp({ onExitToMenu }) {
   }
   if (screen === 'waitingForPeerDeck') {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-black p-8">
+      <div className="min-h-dvh flex items-center justify-center bg-black p-8 short:p-2">
         <div className="max-w-md w-full text-center bg-white rounded-lg shadow p-8">
           <h2 className="text-lg font-bold text-stone-800 mb-2">Deck locked in</h2>
           <p className="text-sm text-stone-500 animate-pulse">Waiting for your opponent to finish their deck…</p>

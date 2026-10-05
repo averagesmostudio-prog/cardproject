@@ -59,7 +59,7 @@ export default function NetCoinFlip({ netRole, mySeat, peerResult, onHostResolve
   const meLabel = (player) => (player === mySeat ? 'You go' : 'Opponent goes');
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-black p-8">
+    <div className="min-h-dvh flex items-center justify-center bg-black p-8 short:p-2">
       <div className="max-w-md w-full text-center bg-white rounded-lg shadow p-8">
         <h2 className="text-lg font-bold text-stone-800 mb-1">Coin flip</h2>
         <p className="text-sm text-stone-500 mb-6">The host's flip decides who goes first.</p>

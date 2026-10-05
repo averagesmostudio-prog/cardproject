@@ -143,7 +143,7 @@ export default function HowToPlay({ onBack }) {
   const [tab, setTab] = useState('rules'); // 'rules' | 'keywords'
 
   return (
-    <div className="min-h-screen bg-black p-8">
+    <div className="min-h-dvh bg-black p-8 short:p-2">
       <button
         onClick={onBack}
         className="fixed top-3 left-3 z-40 text-xs bg-white/90 border border-stone-300 rounded px-3 py-1.5 shadow hover:bg-white"

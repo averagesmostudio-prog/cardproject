@@ -136,10 +136,10 @@ export default function NetLobby({ onPaired, onBack }) {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-black p-8">
-      <div className="max-w-md w-full text-center bg-white rounded-lg shadow p-8">
+    <div className="min-h-dvh flex items-center justify-center bg-black p-8 short:p-2">
+      <div className="max-w-md w-full text-center bg-white rounded-lg shadow p-8 short:p-3">
         <h2 className="text-lg font-bold text-stone-800 mb-1">Play Online</h2>
-        <p className="text-sm text-stone-500 mb-6">Find an opponent automatically, or play a friend directly.</p>
+        <p className="text-sm text-stone-500 mb-6 short:mb-2">Find an opponent automatically, or play a friend directly.</p>
 
         {mode === null && (
           <>
@@ -147,7 +147,7 @@ export default function NetLobby({ onPaired, onBack }) {
             <input
               value={address}
               onChange={(e) => setAddress(e.target.value)}
-              className="w-full mb-6 px-3 py-2 border border-stone-300 rounded-lg text-sm font-mono"
+              className="w-full mb-6 short:mb-2 px-3 py-2 border border-stone-300 rounded-lg text-sm font-mono"
               placeholder="ws://localhost:8787"
             />
             <button
@@ -185,7 +185,7 @@ export default function NetLobby({ onPaired, onBack }) {
             {status === 'waiting' && (
               <>
                 <p className="text-sm text-stone-600 mb-2">Share this code with your opponent:</p>
-                <div className="text-3xl font-mono font-bold tracking-widest text-stone-800 mb-4">{roomCode}</div>
+                <div className="text-3xl font-mono font-bold tracking-widest text-stone-800 mb-4 short:mb-2">{roomCode}</div>
                 <p className="text-sm text-stone-500 animate-pulse">Waiting for opponent…</p>
               </>
             )}
@@ -198,7 +198,7 @@ export default function NetLobby({ onPaired, onBack }) {
             <input
               value={joinCode}
               onChange={(e) => setJoinCode(e.target.value)}
-              className="w-full mb-4 px-3 py-2 border border-stone-300 rounded-lg text-sm font-mono uppercase tracking-widest text-center"
+              className="w-full mb-4 short:mb-2 px-3 py-2 border border-stone-300 rounded-lg text-sm font-mono uppercase tracking-widest text-center"
               placeholder="ABCD"
               maxLength={4}
             />
