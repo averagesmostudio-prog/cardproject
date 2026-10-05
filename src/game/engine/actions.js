@@ -9217,8 +9217,14 @@ const emptyPlayerState = (id, mainDeck, effigyDeck) => ({
   keptHand: false,
 });
 
-export const createInitialState = ({ mainDeckA, effigyDeckA, mainDeckB, effigyDeckB, startingPlayer }) => ({
+export const createInitialState = ({ mainDeckA, effigyDeckA, mainDeckB, effigyDeckB, startingPlayer, alwaysOfferPriorityTo = [] }) => ({
   phase: 'mulligan',
+  // Seats played by a real person. A priority window (state.reactiveWindow)
+  // opened for one of these is NEVER auto-skipped for lack of a response —
+  // otherwise how fast a window passes would tell their opponent whether
+  // they hold something. AI seats (and the headless self-play harness, which
+  // leaves this empty) keep the instant auto-skip.
+  alwaysOfferPriorityTo,
   turnPlayer: startingPlayer,
   turnNumber: 1,
   winner: null,
@@ -15138,7 +15144,9 @@ const manageReactiveWindow = (prevState, state, action) => {
     if (!next.reactiveWindow) break;
     const { openFor } = next.reactiveWindow;
     const hasRealOption = getLegalActions(next, openFor).some(a => REACTIVE_RESPONSE_ACTION_TYPES.has(a.type));
-    if (hasRealOption) break;
+    // A person is always given the chance to pass explicitly, even with
+    // nothing to respond with — see createInitialState's alwaysOfferPriorityTo.
+    if (hasRealOption || next.alwaysOfferPriorityTo?.includes(openFor)) break;
     next = passReactiveWindowPriority(next);
   }
   return next;

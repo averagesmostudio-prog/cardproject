@@ -14230,3 +14230,30 @@ describe('Shift — several shifted Beings returning at the start of the same tu
     });
   });
 });
+
+describe('priority windows for human seats (alwaysOfferPriorityTo) — never auto-skipped for lack of a response', () => {
+  const summonState = (extra = {}) => {
+    const card = beingCard({ castingCost: { faithless: 0, colored: {} } });
+    return baseState({ turnPlayer: 'A', players: { A: player({ hand: [card] }), B: player() }, ...extra });
+  };
+  const summon = (state) => gameReducer(state, { type: 'SUMMON_BEING', instanceId: 'being-1#0', cellId: 'r1c2' });
+
+  it('an AI/headless seat with no possible response is auto-skipped instantly, as before', () => {
+    const next = summon(summonState());
+    expect(next.reactiveWindow).toBeNull();
+  });
+
+  it('a human seat is still offered the window with nothing to cast, and can pass it explicitly', () => {
+    const declared = summon(summonState({ alwaysOfferPriorityTo: ['B'] }));
+    expect(declared.reactiveWindow).toMatchObject({ openFor: 'B' });
+    expect(getLegalActions(declared, 'B').map(a => a.type)).toEqual(['PASS_PRIORITY']);
+    const passed = gameReducer(declared, { type: 'PASS_PRIORITY' });
+    expect(passed.reactiveWindow).toBeNull();
+  });
+
+  it('only the listed seat is held — the other seat is still auto-skipped', () => {
+    const declared = summon(summonState({ alwaysOfferPriorityTo: ['A'] }));
+    expect(declared.reactiveWindow).toBeNull();
+  });
+});
+

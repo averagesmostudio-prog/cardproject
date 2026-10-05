@@ -496,6 +496,13 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
   // Viewer-style popups (hand/Purgatory/armament zoom, already dismissable
   // via their own X button) intentionally don't participate.
   const [popupHidden, setPopupHidden] = useState(false);
+  // Priority banner (Ethereal Conjuring reactive window, state.reactiveWindow
+  // open for the human): "View board" collapses it to a small chip so the
+  // board underneath is visible; `autoPassTurn` holds the turnNumber the
+  // human chose "Pass priority until next turn" on — every window that opens
+  // for them until the turn number changes is passed automatically.
+  const [priorityHidden, setPriorityHidden] = useState(false);
+  const [autoPassTurn, setAutoPassTurn] = useState(null);
   // Same "peek without losing what's on screen" idea as popupHidden above,
   // for the win/lose screen specifically — that screen replaces the whole
   // match view outright (state.phase 'gameover' short-circuits the render
@@ -794,6 +801,17 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
   // down to 10s, until the human actually responds — casts, or hits Pass —
   // before time runs out, which resets it back to a fresh 20s baseline.
   const reactiveWindowOpenForHuman = state.reactiveWindow?.openFor === HUMAN;
+  const autoPassingPriority = reactiveWindowOpenForHuman && autoPassTurn === state.turnNumber;
+  useEffect(() => {
+    if (autoPassTurn !== null && autoPassTurn !== state.turnNumber) setAutoPassTurn(null);
+  }, [autoPassTurn, state.turnNumber]);
+  useEffect(() => {
+    if (autoPassingPriority) dispatch({ type: 'PASS_PRIORITY' });
+  }, [autoPassingPriority, state.reactiveWindow, dispatch]);
+  // Each newly opened window starts expanded.
+  useEffect(() => {
+    if (reactiveWindowOpenForHuman) setPriorityHidden(false);
+  }, [reactiveWindowOpenForHuman, state.reactiveWindow?.triggerDescription]);
   const reactiveTimeoutStreakRef = useRef(0);
   const reactiveAutoPassRef = useRef(false);
   const [reactiveSecondsLeft, setReactiveSecondsLeft] = useState(null);
@@ -1955,6 +1973,73 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
           </div>
         </div>
       )}
+      {reactiveWindowOpenForHuman && !autoPassingPriority && (priorityHidden ? (
+        // "View board" collapses the banner to one slim pill up in the header
+        // row, so the whole board is visible while the window stays open.
+        <div className="absolute left-[36%] top-1 z-40 flex items-center gap-1.5 px-2 py-1 bg-stone-900/95 border border-amber-400 rounded-full shadow-lg">
+          <span className="px-2 py-0.5 bg-amber-500 text-stone-900 rounded-full text-xs font-bold uppercase tracking-wide animate-pulse">
+            Priority
+            {competitiveMode && reactiveSecondsLeft !== null && <span className="tabular-nums"> {reactiveSecondsLeft}s</span>}
+          </span>
+          <button
+            onClick={() => setPriorityHidden(false)}
+            className="flex items-center gap-1 px-2 py-0.5 whitespace-nowrap bg-stone-800 border border-stone-600 text-white rounded-full text-xs font-semibold hover:bg-stone-700 transition"
+          >
+            <EyeOff className="w-3.5 h-3.5" />
+            Show prompt
+          </button>
+          <button
+            onClick={() => dispatch({ type: 'PASS_PRIORITY' })}
+            className="px-2 py-0.5 whitespace-nowrap bg-stone-700 text-white rounded-full text-xs font-bold hover:bg-stone-600 transition"
+          >
+            Pass priority
+          </button>
+        </div>
+      ) : (
+        <div className={`absolute left-1/2 -translate-x-1/2 z-40 max-w-[calc(100%-1rem)] ${compact ? 'top-9' : 'top-14'}`}>
+          <div className="priority-banner-pop flex flex-col items-center gap-2 px-5 py-3 sm:min-w-[36rem] max-w-full bg-stone-900/95 border-2 border-amber-400 rounded-2xl shadow-2xl">
+            <div className="flex items-center gap-2 flex-wrap justify-center">
+              <span className="flex items-center gap-1 px-2 py-0.5 bg-amber-500 text-stone-900 rounded text-sm font-bold animate-pulse uppercase tracking-wide">
+                Priority
+                {competitiveMode && reactiveSecondsLeft !== null && (
+                  <span className="tabular-nums">{reactiveSecondsLeft}s</span>
+                )}
+              </span>
+              {state.pendingResolution && (
+                <span className="px-2 py-0.5 bg-amber-900/60 text-amber-300 border border-amber-600 rounded text-[10px] font-bold uppercase tracking-wide">
+                  Pending
+                </span>
+              )}
+              {reactiveWindowBannerText(state) && (
+                <span className={`font-semibold text-stone-100 text-center ${compact ? 'text-base' : 'text-lg'}`}>
+                  {reactiveWindowBannerText(state)}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2 justify-center">
+              <button
+                onClick={() => setPriorityHidden(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 whitespace-nowrap bg-stone-800 border border-stone-600 text-white rounded-lg text-sm font-semibold hover:bg-stone-700 transition"
+              >
+                <Eye className="w-4 h-4" />
+                View board
+              </button>
+              <button
+                onClick={() => dispatch({ type: 'PASS_PRIORITY' })}
+                className="px-4 py-1.5 whitespace-nowrap bg-stone-700 text-white rounded-lg text-sm font-bold hover:bg-stone-600 transition"
+              >
+                Pass priority
+              </button>
+              <button
+                onClick={() => setAutoPassTurn(state.turnNumber)}
+                className="px-4 py-1.5 whitespace-nowrap bg-amber-600 text-white rounded-lg text-sm font-bold hover:bg-amber-700 transition"
+              >
+                Pass priority until next turn
+              </button>
+            </div>
+          </div>
+        </div>
+      ))}
       <div className="flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
           <button onClick={() => setShowExitConfirm(true)} className="text-sm text-stone-400 hover:text-stone-200">← Menu</button>
@@ -3200,55 +3285,9 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
                 </button>
               )}
             </div>
-            {/* Ethereal Conjuring reactive window (actions.js >
-                manageReactiveWindow) — a compact notification instead of a
-                full-width banner, sitting beside the human's own Deck/Hand
-                piles (right next to the board's own Effigy Zone corner,
-                r1c5 — board.js). The description line names exactly what
-                the opponent just did (reactiveWindow.triggerDescription —
-                the same log message that action's own reducer case
-                already wrote), so the player knows what they're being
-                asked to respond to instead of just seeing a bare "Respond"
-                pill. "Respond" itself is just a status pill, not a
-                dispatchable action — casting still happens by clicking a
-                highlighted card in Hand (onHandSelect's own gate already
-                covers this window), same as before. "Pass Priority" is the
-                one real button here, dispatching PASS_PRIORITY — a
-                genuinely different action from the "Pass turn" button
-                above (PASS_TURN, isHumanTurn-gated). */}
-            {state.reactiveWindow?.openFor === HUMAN && (
-              <div className={`${ROW_H} flex flex-col justify-center gap-1`}>
-                {reactiveWindowBannerText(state) && (
-                  <p className="text-lg font-semibold leading-snug text-stone-200 line-clamp-3">
-                    {reactiveWindowBannerText(state)}
-                  </p>
-                )}
-                <div className="flex items-center justify-start gap-1.5 flex-wrap">
-                  <span className="shrink-0 flex items-center gap-1 px-2 py-1 bg-amber-500 text-stone-900 rounded text-sm font-bold animate-pulse">
-                    Respond
-                    {competitiveMode && reactiveSecondsLeft !== null && (
-                      <span className="tabular-nums">{reactiveSecondsLeft}s</span>
-                    )}
-                  </span>
-                  {/* state.pendingResolution (Medium Mage's own "respond
-                      before the trigger lands" case) — this window is about
-                      something declared but not yet applied, distinct from
-                      the ordinary post-hoc "X already happened" window this
-                      banner otherwise always represents. */}
-                  {state.pendingResolution && (
-                    <span className="shrink-0 px-2 py-1 bg-amber-900/60 text-amber-300 border border-amber-600 rounded text-[10px] font-bold uppercase tracking-wide">
-                      Pending
-                    </span>
-                  )}
-                  <button
-                    onClick={() => dispatch({ type: 'PASS_PRIORITY' })}
-                    className="shrink-0 px-4 py-2 bg-stone-700 text-white rounded text-base font-bold hover:bg-stone-600 transition"
-                  >
-                    Pass Priority
-                  </button>
-                </div>
-              </div>
-            )}
+            {/* The Ethereal Conjuring priority prompt (Respond / View board / Pass
+                Priority / Pass until next turn) is a banner at the top of the
+                screen now — see priorityBanner below. */}
           </div>
           </div>
         </div>

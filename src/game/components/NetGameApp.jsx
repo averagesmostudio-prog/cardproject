@@ -88,7 +88,7 @@ export default function NetGameApp({ onExitToMenu }) {
     const effigyDeckA = buildEffigyDeckList(myDeck.effigyCounts);
     const mainDeckB = buildMainDeckList(peerDeck.entries);
     const effigyDeckB = buildEffigyDeckList(peerDeck.effigyCounts);
-    const initialState = createInitialState({ mainDeckA, effigyDeckA, mainDeckB, effigyDeckB, startingPlayer });
+    const initialState = createInitialState({ mainDeckA, effigyDeckA, mainDeckB, effigyDeckB, startingPlayer, alwaysOfferPriorityTo: ['A', 'B'] });
     net.gameChannel.send({ kind: 'match-start', state: initialState });
     setMatchState(initialState);
     setScreen('match');

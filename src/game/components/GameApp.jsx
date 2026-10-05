@@ -65,7 +65,7 @@ export default function GameApp({ onExitToMenu }) {
     const mainDeckB = buildMainDeckList(aiEntries);
     const effigyDeckB = buildEffigyDeckList(aiEffigyCounts);
 
-    setMatchState(createInitialState({ mainDeckA, effigyDeckA, mainDeckB, effigyDeckB, startingPlayer }));
+    setMatchState(createInitialState({ mainDeckA, effigyDeckA, mainDeckB, effigyDeckB, startingPlayer, alwaysOfferPriorityTo: ['A'] }));
     setMatchKey(k => k + 1);
     setScreen('match');
   };

@@ -501,3 +501,17 @@ html, body {
   }
   canvas, img { -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
 }
+
+/* Priority banner (Match.jsx): slides in from the top when an Ethereal
+   Conjuring reactive window opens for the human, and stays until it's
+   answered — unlike the turn banner, which fades out on its own. */
+@keyframes priority-banner-pop {
+  0% { opacity: 0; transform: translateY(-16px) scale(0.96); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+.priority-banner-pop {
+  animation: priority-banner-pop 220ms ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .priority-banner-pop { animation: none; }
+}
