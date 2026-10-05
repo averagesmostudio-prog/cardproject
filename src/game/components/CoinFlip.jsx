@@ -44,7 +44,7 @@ export default function CoinFlip({ onResolved }) {
   const label = (side) => (side === 'heads' ? 'Heads' : 'Tails');
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-black p-8">
+    <div className="min-h-dvh flex items-center justify-center bg-black p-8 short:p-2">
       <div className="max-w-md w-full text-center bg-white rounded-lg shadow p-8">
         <h2 className="text-lg font-bold text-stone-800 mb-1">Coin flip</h2>
         <p className="text-sm text-stone-500 mb-6">The winner decides who goes first.</p>

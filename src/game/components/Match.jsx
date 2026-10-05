@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { History, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Flag, Eye, EyeOff, Sun, Moon } from 'lucide-react';
+import { History, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Flag, Eye, EyeOff, Sun, Moon, RotateCw } from 'lucide-react';
 import { useGameEngine } from '../state/useGameEngine.js';
 import { useStagedBoard, useStagedLife, useTurnBanner, useJustDrawn, useShiftVortex, useDepartFlash, useDeitySummonCinematic, useOpenLaneStrike, useFeatherMove, usePurgatoryArrivals } from '../state/useStagedBoard.js';
 import { getLegalActions, effectiveEngage, animatedTopEntry, effectiveCastingCost, faithlessPaymentNeedsChoice, faithlessPaymentCandidates, searchZoneCandidates } from '../engine/actions.js';
@@ -15,6 +15,7 @@ import ActionLog from './ActionLog.jsx';
 import CardPile from './CardPile.jsx';
 import CardTile from './CardTile.jsx';
 import CardThumbnail from './CardThumbnail.jsx';
+import { useCompactLandscape, useRotateNeeded } from '../../lib/useDeviceMode.js';
 
 // Board.jsx renders rows top-to-bottom as Row 5 -> Row 1; a rail beside the
 // board reuses the same row heights (Mortal Realm cells, and the shorter
@@ -404,7 +405,7 @@ function RevealPopup({ revealPopup, dispatch, cardArtProps, human }) {
   }, [revealPopup, dispatch]);
   const drawn = revealPopup.outcome === 'drawn';
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1">
       <div className="bg-white rounded-lg shadow-2xl p-4 flex flex-col items-center gap-3">
         <div className="font-semibold text-stone-800 text-center">
           {revealPopup.cardName}'s {revealPopup.label} reveals {revealPopup.playerId === human ? 'your' : "the opponent's"} top card
@@ -552,6 +553,8 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
   }
   const [handViewOpen, setHandViewOpen] = useState(false);
   const [handMinimized, setHandMinimized] = useState(false);
+  const compact = useCompactLandscape();
+  const rotateNeeded = useRotateNeeded();
   // Scales the board + side-panel group to whatever space is actually left
   // between the header and the Hand row, so it's never cut off/scrolled
   // behind the Hand on a shorter or narrower window — see the ResizeObserver
@@ -1683,17 +1686,46 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
     const MULLIGAN_PREVIEW_WIDTH = 260;
     const MULLIGAN_PREVIEW_HEIGHT = Math.round(MULLIGAN_PREVIEW_WIDTH * 7 / 5);
     return (
-      <div className="min-h-screen flex items-center justify-center bg-black p-8">
-        <div className="relative max-w-3xl w-full text-center bg-white rounded-lg shadow p-6">
+      <div className={`min-h-dvh flex items-center justify-center bg-black ${compact ? 'p-2' : 'p-8 short:p-2'}`}>
+        <div className={`relative max-w-3xl w-full text-center bg-white rounded-lg shadow ${compact ? 'p-3' : 'p-6'}`}>
           {mulliganSecondsLeft !== null && (
             <div className="absolute top-3 right-4 text-sm font-mono tabular-nums text-stone-400">
               {mulliganSecondsLeft}s
             </div>
           )}
-          <h2 className="text-lg font-bold text-stone-800 mb-1">Your opening hand</h2>
-          <p className="text-sm text-stone-500 mb-2">
+          <h2 className={`font-bold text-stone-800 ${compact ? 'text-base' : 'text-lg mb-1'}`}>Your opening hand</h2>
+          <p className={`text-sm text-stone-500 ${compact ? 'mb-0' : 'mb-2'}`}>
             {state.turnPlayer === HUMAN ? 'You go first.' : 'Opponent goes first.'}
           </p>
+          {compact ? (
+            <>
+              <div className="flex items-center justify-center gap-2 py-1">
+                {human.hand.map((card) => (
+                  <CardTile
+                    key={card.instanceId}
+                    card={card}
+                    size="md"
+                    onboard
+                    hoverDelayMs={0}
+                    borderImages={borderImages}
+                    borderImagesLoaded={borderImagesLoaded}
+                    artImages={artImages}
+                    artBorderImages={artBorderImages}
+                    artImagesLoaded={artImagesLoaded}
+                    fontLoaded={fontLoaded}
+                  />
+                ))}
+              </div>
+              {!human.keptHand && (
+                <button
+                  onClick={() => dispatch({ type: 'KEEP_HAND', player: HUMAN })}
+                  className="mt-1 px-6 py-2.5 bg-stone-800 text-white rounded-full shadow-lg font-semibold text-sm hover:bg-stone-700 transition"
+                >
+                  Keep
+                </button>
+              )}
+            </>
+          ) : (
           <div className="relative mx-auto" style={{ width: 'min(100%, 540px)', aspectRatio: '700 / 760' }}>
             {human.hand.map((card, i) => {
               const pos = STAR_POSITIONS[i] || STAR_POSITIONS[STAR_POSITIONS.length - 1];
@@ -1757,13 +1789,14 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
               </div>
             )}
           </div>
+          )}
           {human.keptHand ? (
             <p className="text-sm text-stone-500 mt-2">Waiting on the opponent…</p>
           ) : (
             <button
               onClick={() => { dispatch({ type: 'MULLIGAN', player: HUMAN }); setMulliganCount(c => c + 1); }}
               disabled={human.lifespan - 5 <= 0}
-              className="mt-2 px-4 py-2 border border-stone-300 rounded-lg disabled:opacity-30"
+              className={`px-4 py-2 border border-stone-300 rounded-lg disabled:opacity-30 ${compact ? 'mt-1 ml-2' : 'mt-2'}`}
             >
               Mulligan (−5 Lifespan)
             </button>
@@ -1792,7 +1825,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
     // (the match is already over; nothing here is actionable).
     if (showBoardOnGameOver) {
       return (
-        <div className="min-h-screen flex flex-col items-center bg-black p-4 gap-3">
+        <div className="min-h-dvh flex flex-col items-center bg-black p-4 gap-3">
           <button
             onClick={() => setShowBoardOnGameOver(false)}
             className="self-start flex items-center gap-1.5 text-xs bg-white/90 border border-stone-300 rounded px-3 py-1.5 shadow hover:bg-white"
@@ -1822,7 +1855,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       );
     }
     return (
-      <div className="min-h-screen flex items-center justify-center bg-black p-8">
+      <div className="min-h-dvh flex items-center justify-center bg-black p-8 short:p-2">
         <div className="text-center bg-white rounded-lg shadow p-8 max-w-lg">
           <h2 className="text-2xl font-bold text-stone-800 mb-2">
             {state.loopWin
@@ -1873,7 +1906,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
   // Short-circuits the render the same way the gameover branch above does.
   if (opponentGone) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-black p-8">
+      <div className="min-h-dvh flex items-center justify-center bg-black p-8 short:p-2">
         <div className="text-center bg-white rounded-lg shadow p-8 max-w-lg">
           <h2 className="text-2xl font-bold text-stone-800 mb-2">Opponent disconnected</h2>
           <p className="text-sm text-stone-500 mb-4">The connection to your opponent was lost.</p>
@@ -1884,7 +1917,14 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
   }
 
   return (
-    <div className="h-screen bg-black p-4 flex flex-col gap-3 relative overflow-hidden">
+    <div className={`h-dvh bg-black flex flex-col relative overflow-hidden ${compact ? 'p-1 gap-1' : 'p-4 gap-3'}`}>
+      {rotateNeeded && (
+        <div className="fixed inset-0 z-[100] bg-black flex flex-col items-center justify-center gap-4 text-center p-8">
+          <RotateCw className="w-16 h-16 text-amber-500" aria-hidden="true" />
+          <div className="text-xl font-bold text-white">Rotate your phone</div>
+          <div className="text-sm text-stone-400">Scripturas plays in landscape. Turn your device sideways to continue.</div>
+        </div>
+      )}
       {/* "View Board" — lets the player peek at the board without losing
           (or resolving) whatever choice popup is currently open. `fixed`
           (not `absolute`) and z-[60] so it stays clickable above every
@@ -1945,7 +1985,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       </div>
 
       {showExitConfirm && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1">
           <div className="bg-white rounded-lg shadow-2xl p-6 flex flex-col items-center gap-4 max-w-sm text-center">
             <h3 className="text-lg font-bold text-stone-800">Leave the match?</h3>
             <p className="text-sm text-stone-600">
@@ -2008,8 +2048,8 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
           });
         };
         return (
-          <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`} onClick={() => setPendingPaymentAction(null)}>
-            <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+          <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1 ${popupHidden ? 'hidden' : ''}`} onClick={() => setPendingPaymentAction(null)}>
+            <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75dvh] short:max-h-[94dvh] flex flex-col" onClick={(e) => e.stopPropagation()}>
               <div className="font-semibold text-stone-800 mb-1">
                 {pendingPaymentAction.cardName}: choose {needed} Effigy{needed === 1 ? '' : 's'} to spend
               </div>
@@ -2069,8 +2109,8 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
         const legalIds = new Set(pendingChoiceCandidates.map(c => c.instanceId));
         const shownCards = searchShowAll ? pendingChoiceAllInZone : pendingChoiceCandidates;
         return (
-          <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
-            <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
+          <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1 ${popupHidden ? 'hidden' : ''}`}>
+            <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75dvh] short:max-h-[94dvh] flex flex-col">
               <div className="flex items-center justify-between gap-2 mb-1">
                 <div className="font-semibold text-stone-800">
                   {state.pendingChoice.cardName}: choose a card
@@ -2111,8 +2151,8 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       })()}
 
       {pendingInvokeCardCandidates.length > 0 && (
-        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
-          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1 ${popupHidden ? 'hidden' : ''}`}>
+          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75dvh] short:max-h-[94dvh] flex flex-col">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose which to invoke
             </div>
@@ -2133,8 +2173,8 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
 
       {pendingCreateTokenChoiceCandidates.length > 0 && (
-        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
-          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1 ${popupHidden ? 'hidden' : ''}`}>
+          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75dvh] short:max-h-[94dvh] flex flex-col">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose a token to create
             </div>
@@ -2163,8 +2203,8 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
 
       {pendingBottomOfDeckCandidates.length > 0 && (
-        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
-          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1 ${popupHidden ? 'hidden' : ''}`}>
+          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75dvh] short:max-h-[94dvh] flex flex-col">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose a card
             </div>
@@ -2185,8 +2225,8 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
 
       {pendingDiscardKindDrawCandidates.length > 0 && (
-        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
-          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1 ${popupHidden ? 'hidden' : ''}`}>
+          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75dvh] short:max-h-[94dvh] flex flex-col">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose a card to discard
             </div>
@@ -2207,8 +2247,8 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
 
       {pendingDiscardTypedCandidates.length > 0 && (
-        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
-          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1 ${popupHidden ? 'hidden' : ''}`}>
+          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75dvh] short:max-h-[94dvh] flex flex-col">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose a {state.pendingChoice.typing} to discard
             </div>
@@ -2228,8 +2268,8 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
 
       {pendingDiscardOneCardCandidates.length > 0 && (
-        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
-          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1 ${popupHidden ? 'hidden' : ''}`}>
+          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75dvh] short:max-h-[94dvh] flex flex-col">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose a card to discard
             </div>
@@ -2249,8 +2289,8 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
 
       {pendingDiscardCostReductionCandidates.length > 0 && (
-        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
-          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1 ${popupHidden ? 'hidden' : ''}`}>
+          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75dvh] short:max-h-[94dvh] flex flex-col">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose a card to discard
             </div>
@@ -2273,8 +2313,8 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       {pendingDiscardXNamedCandidates.length > 0 && (() => {
         const selected = state.pendingChoice.selected;
         return (
-          <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
-            <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col gap-2">
+          <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1 ${popupHidden ? 'hidden' : ''}`}>
+            <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75dvh] short:max-h-[94dvh] flex flex-col gap-2">
               <div className="font-semibold text-stone-800 mb-1">
                 {state.pendingChoice.cardName}: choose how many {state.pendingChoice.name} to discard
               </div>
@@ -2308,7 +2348,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       })()}
 
       {state.pendingChoice?.kind === 'shuffle-or-keep' && state.pendingChoice.playerId === HUMAN && (
-        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1 ${popupHidden ? 'hidden' : ''}`}>
           <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full flex flex-col gap-3">
             <div>
               <div className="font-semibold text-stone-800 mb-1">{state.pendingChoice.cardName}</div>
@@ -2333,7 +2373,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
 
       {state.pendingChoice?.kind === 'teeth-bounds-tie-choice' && state.pendingChoice.playerId === HUMAN && (
-        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1 ${popupHidden ? 'hidden' : ''}`}>
           <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full flex flex-col gap-3">
             <div>
               <div className="font-semibold text-stone-800 mb-1">{state.pendingChoice.cardName}</div>
@@ -2362,7 +2402,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
         const max = state.pendingChoice[numericChoice.max] ?? 0;
         const options = Array.from({ length: max + 1 }, (_, n) => n);
         return (
-          <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
+          <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1 ${popupHidden ? 'hidden' : ''}`}>
             <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full flex flex-col gap-3">
               <p className="text-xs text-stone-500">{numericChoice.prompt(state.pendingChoice)}</p>
               <div className="flex items-center gap-2">
@@ -2386,8 +2426,8 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       })()}
 
       {pendingSacrificeArmamentCandidates.length > 0 && (
-        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
-          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1 ${popupHidden ? 'hidden' : ''}`}>
+          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75dvh] short:max-h-[94dvh] flex flex-col">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose an Armament to sacrifice
             </div>
@@ -2410,8 +2450,8 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       {pendingShufflePurgatoryToggleCandidates.length > 0 && (() => {
         const { selected, maxCount } = state.pendingChoice;
         return (
-          <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
-            <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
+          <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1 ${popupHidden ? 'hidden' : ''}`}>
+            <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75dvh] short:max-h-[94dvh] flex flex-col">
               <div className="font-semibold text-stone-800 mb-1">
                 {state.pendingChoice.cardName}: choose up to {maxCount} to shuffle in
               </div>
@@ -2451,8 +2491,8 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       })()}
 
       {pendingMoveArmamentSourceCandidates.length > 0 && (
-        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
-          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1 ${popupHidden ? 'hidden' : ''}`}>
+          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75dvh] short:max-h-[94dvh] flex flex-col">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose an Armament to move
             </div>
@@ -2472,8 +2512,8 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
 
       {pendingSacrificeArmamentDamageCandidates.length > 0 && (
-        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
-          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1 ${popupHidden ? 'hidden' : ''}`}>
+          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75dvh] short:max-h-[94dvh] flex flex-col">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose an Armament to sacrifice
             </div>
@@ -2495,8 +2535,8 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
 
       {pendingDestroyArmamentCandidates.length > 0 && (
-        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
-          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1 ${popupHidden ? 'hidden' : ''}`}>
+          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75dvh] short:max-h-[94dvh] flex flex-col">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose an Armament to destroy
             </div>
@@ -2516,8 +2556,8 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
 
       {pendingDestroyRelicCandidates.length > 0 && (
-        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
-          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1 ${popupHidden ? 'hidden' : ''}`}>
+          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75dvh] short:max-h-[94dvh] flex flex-col">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose a Relic to destroy
             </div>
@@ -2537,8 +2577,8 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
 
       {pendingSacrificeRelicCostCandidates.length > 0 && (
-        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
-          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1 ${popupHidden ? 'hidden' : ''}`}>
+          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75dvh] short:max-h-[94dvh] flex flex-col">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose a Relic to sacrifice
             </div>
@@ -2558,8 +2598,8 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
 
       {(pendingSacrificeDestroyCandidates.length > 0 || (pendingChoiceIsOptional && state.pendingChoice.kind === 'sacrifice-destroy')) && (
-        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
-          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col gap-2">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1 ${popupHidden ? 'hidden' : ''}`}>
+          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75dvh] short:max-h-[94dvh] flex flex-col gap-2">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: sacrifice a Prophecy to destroy a Being?
             </div>
@@ -2586,7 +2626,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
 
 
       {state.pendingChoice?.kind === 'shuffle-or-draw' && state.pendingChoice.playerId === HUMAN && (
-        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1 ${popupHidden ? 'hidden' : ''}`}>
           <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full flex flex-col gap-3">
             <div className="font-semibold text-stone-800 mb-1">{state.pendingChoice.cardName}</div>
             <div className="flex gap-2">
@@ -2608,7 +2648,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
 
       {state.pendingChoice?.kind === 'restore-or-summon-vine' && state.pendingChoice.playerId === HUMAN && (
-        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1 ${popupHidden ? 'hidden' : ''}`}>
           <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full flex flex-col gap-3">
             <div className="font-semibold text-stone-800 mb-1">{state.pendingChoice.cardName}</div>
             <div className="flex gap-2">
@@ -2630,7 +2670,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
 
       {state.pendingChoice?.kind === 'choose-essence-color' && state.pendingChoice.playerId === HUMAN && (
-        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1 ${popupHidden ? 'hidden' : ''}`}>
           <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full flex flex-col gap-3">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose a color of Essence
@@ -2767,8 +2807,8 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       })()}
 
       {pendingShufflePurgatoryCandidates.length > 0 && (
-        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
-          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1 ${popupHidden ? 'hidden' : ''}`}>
+          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75dvh] short:max-h-[94dvh] flex flex-col">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose a card to shuffle into {state.pendingChoice.anyOwner ? "its owner's" : 'your'} deck
             </div>
@@ -2788,8 +2828,8 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
 
       {pendingSummonFromPurgatoryCandidates.length > 0 && (
-        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
-          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1 ${popupHidden ? 'hidden' : ''}`}>
+          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75dvh] short:max-h-[94dvh] flex flex-col">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose a Being to summon
             </div>
@@ -2812,8 +2852,8 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
 
       {pendingSummonFromPurgatoryCostCandidates.length > 0 && (
-        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
-          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1 ${popupHidden ? 'hidden' : ''}`}>
+          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75dvh] short:max-h-[94dvh] flex flex-col">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose a Being to summon
             </div>
@@ -2836,8 +2876,8 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
       )}
 
       {pendingSummonDifferentTypedCandidates.length > 0 && (
-        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 ${popupHidden ? 'hidden' : ''}`}>
-          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col">
+        <div className={`fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1 ${popupHidden ? 'hidden' : ''}`}>
+          <div className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75dvh] short:max-h-[94dvh] flex flex-col">
             <div className="font-semibold text-stone-800 mb-1">
               {state.pendingChoice.cardName}: choose a different {state.pendingChoice.typing} to summon
             </div>
@@ -2858,11 +2898,11 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
 
       {(expandedOccupant?.armaments?.length > 0 || expandedOccupant?.dryadAttached || expandedGroundRelic) && (
         <div
-          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1"
           onClick={() => setExpandedCell(null)}
         >
           <div
-            className="bg-white rounded-lg shadow-2xl p-4 max-w-3xl w-full max-h-[85vh] flex flex-col relative"
+            className="bg-white rounded-lg shadow-2xl p-4 max-w-3xl w-full max-h-[85dvh] short:max-h-[94dvh] flex flex-col relative"
             onClick={(e) => e.stopPropagation()}
           >
             <button
@@ -3030,7 +3070,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
         </div>
       )}
 
-      <div ref={boardAreaRef} className="flex-1 min-h-0 overflow-auto pt-2">
+      <div ref={boardAreaRef} className={`flex-1 min-h-0 overflow-auto ${compact ? 'pt-0 pb-1' : 'pt-2'}`}>
         <div
           className="mx-auto"
           style={{ width: boardNaturalSize.width ? boardNaturalSize.width * boardScale : undefined, height: boardNaturalSize.height ? boardNaturalSize.height * boardScale : undefined }}
@@ -3594,6 +3634,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
             </div>
           );
         })()}
+        {!compact && (
         <button
           onClick={() => setHandMinimized(m => !m)}
           className="flex items-center gap-1 text-xs text-stone-300 uppercase tracking-wide mb-1 hover:text-white transition"
@@ -3601,7 +3642,8 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
           {handMinimized ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
           Hand
         </button>
-        {!handMinimized && (
+        )}
+        {!compact && !handMinimized && (
           <Hand
             cards={state.players[HUMAN].hand}
             playableIds={playableIds}
@@ -3621,11 +3663,11 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
 
       {handViewOpen && (
         <div
-          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1"
           onClick={() => setHandViewOpen(false)}
         >
           <div
-            className="bg-white rounded-lg shadow-2xl p-4 max-w-4xl w-full max-h-[85vh] flex flex-col relative"
+            className="bg-white rounded-lg shadow-2xl p-4 max-w-4xl w-full max-h-[85dvh] short:max-h-[94dvh] flex flex-col relative"
             onClick={(e) => e.stopPropagation()}
           >
             <button
@@ -3659,11 +3701,11 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
 
       {altarsOwner && (
         <div
-          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1"
           onClick={() => setAltarsOwner(null)}
         >
           <div
-            className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col relative"
+            className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75dvh] short:max-h-[94dvh] flex flex-col relative"
             onClick={(e) => e.stopPropagation()}
           >
             <button
@@ -3716,11 +3758,11 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
 
       {purgatoryOwner && purgatoryPreviewIndex === null && (
         <div
-          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1"
           onClick={closePurgatory}
         >
           <div
-            className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75vh] flex flex-col relative"
+            className="bg-white rounded-lg shadow-2xl p-4 max-w-sm w-full max-h-[75dvh] short:max-h-[94dvh] flex flex-col relative"
             onClick={(e) => e.stopPropagation()}
           >
             <button
@@ -3781,7 +3823,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
 
       {purgatoryOwner && purgatoryPreviewIndex !== null && purgatoryCards[purgatoryPreviewIndex] && (
         <div
-          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 short:p-1"
           onClick={() => setPurgatoryPreviewIndex(null)}
         >
           <div
@@ -3809,7 +3851,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
               </button>
               <canvas
                 ref={previewCanvasRef}
-                className="max-w-full max-h-[65vh] w-auto h-auto border border-stone-300 mx-auto block"
+                className="max-w-full max-h-[65dvh] short:max-h-[94dvh] w-auto h-auto border border-stone-300 mx-auto block"
               />
               <button
                 onClick={() => setPurgatoryPreviewIndex(i => Math.min(purgatoryCards.length - 1, i + 1))}

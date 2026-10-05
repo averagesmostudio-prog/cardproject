@@ -222,7 +222,7 @@ export default function Landing({ onSelectLibrary, onSelectGame, onSelectNetGame
 
   return (
     <div
-      className="min-h-screen flex items-center justify-center p-8 relative"
+      className="min-h-dvh flex items-center justify-center p-8 short:p-3 relative"
       style={{
         background:
           'radial-gradient(circle at 12% 18%, rgba(0,0,0,0.4), transparent 35%),' +
@@ -248,40 +248,40 @@ export default function Landing({ onSelectLibrary, onSelectGame, onSelectNetGame
         <BookOpen className="w-5 h-5 text-stone-300" />
       </button>
 
-      <div className="max-w-3xl w-full text-center">
-        <h1 className="text-3xl font-bold text-white mb-2">Scripturas Alpha</h1>
-        <p className="text-stone-300 mb-10">Design cards, open a pack, or play the game.</p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="max-w-3xl short:max-w-none w-full text-center">
+        <h1 className="text-3xl short:text-xl font-bold text-white mb-2 short:mb-0">Scripturas Alpha</h1>
+        <p className="text-stone-300 mb-10 short:mb-3 short:text-sm">Design cards, open a pack, or play the game.</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 short:!grid-cols-4 gap-6 short:gap-2">
           <button
             onClick={onSelectPack}
-            className="flex flex-col items-center justify-center gap-3 p-8 bg-white rounded-xl shadow hover:shadow-lg transition-shadow border border-stone-200"
+            className="flex flex-col items-center justify-center gap-3 p-8 short:p-2 bg-white rounded-xl shadow hover:shadow-lg transition-shadow border border-stone-200"
           >
-            <OpenPackIcon className="h-24 w-auto" />
-            <span className="text-lg font-semibold text-stone-800">Open a Pack!</span>
+            <OpenPackIcon className="h-24 short:h-12 w-auto" />
+            <span className="text-lg short:text-sm font-semibold text-stone-800">Open a Pack!</span>
           </button>
           <button
             onClick={onSelectGame}
-            className="flex flex-col items-center gap-3 p-8 bg-white rounded-xl shadow hover:shadow-lg transition-shadow border border-stone-200"
+            className="flex flex-col items-center gap-3 p-8 short:p-2 bg-white rounded-xl shadow hover:shadow-lg transition-shadow border border-stone-200"
           >
-            <PlayIcon className="h-24 w-auto" />
-            <span className="text-lg font-semibold text-stone-800">Play a Game</span>
-            <span className="text-xs text-stone-400">Build a deck and play against the AI</span>
+            <PlayIcon className="h-24 short:h-12 w-auto" />
+            <span className="text-lg short:text-sm font-semibold text-stone-800">Play a Game</span>
+            <span className="text-xs short:hidden text-stone-400">Build a deck and play against the AI</span>
           </button>
           <button
             onClick={onSelectNetGame}
-            className="flex flex-col items-center gap-3 p-8 bg-white rounded-xl shadow hover:shadow-lg transition-shadow border border-stone-200"
+            className="flex flex-col items-center gap-3 p-8 short:p-2 bg-white rounded-xl shadow hover:shadow-lg transition-shadow border border-stone-200"
           >
-            <Globe className="h-24 w-auto text-stone-700" strokeWidth={1.25} />
-            <span className="text-lg font-semibold text-stone-800">Play Online</span>
-            <span className="text-xs text-stone-400">Host or join a match with another player</span>
+            <Globe className="h-24 short:h-12 w-auto text-stone-700" strokeWidth={1.25} />
+            <span className="text-lg short:text-sm font-semibold text-stone-800">Play Online</span>
+            <span className="text-xs short:hidden text-stone-400">Host or join a match with another player</span>
           </button>
           <button
             onClick={onSelectLibrary}
-            className="flex flex-col items-center gap-3 p-8 bg-white rounded-xl shadow hover:shadow-lg transition-shadow border border-stone-200"
+            className="flex flex-col items-center gap-3 p-8 short:p-2 bg-white rounded-xl shadow hover:shadow-lg transition-shadow border border-stone-200"
           >
-            <InkwellQuillIcon className="h-24 w-auto" />
-            <span className="text-lg font-semibold text-stone-800">Library</span>
-            <span className="text-xs text-stone-400">Manage decks, browse precons, and design card art</span>
+            <InkwellQuillIcon className="h-24 short:h-12 w-auto" />
+            <span className="text-lg short:text-sm font-semibold text-stone-800">Library</span>
+            <span className="text-xs short:hidden text-stone-400">Manage decks, browse precons, and design card art</span>
           </button>
         </div>
       </div>

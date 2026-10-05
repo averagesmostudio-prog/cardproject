@@ -273,7 +273,7 @@ export default function DeckBuilder({ pool, seedDeck, onStart, onSaveComplete, o
 
   if (eligible.length === 0) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-black p-8">
+      <div className="min-h-dvh flex items-center justify-center bg-black p-8 short:p-2">
         <div className="max-w-md text-center">
           <p className="text-stone-300 mb-4">
             That CSV has no Being, Deity, or Prophecy cards (the only types this
@@ -288,7 +288,7 @@ export default function DeckBuilder({ pool, seedDeck, onStart, onSaveComplete, o
   }
 
   return (
-    <div className="min-h-screen bg-black p-6">
+    <div className="min-h-dvh bg-black p-6 short:p-2">
       <div className="max-w-4xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-xl font-bold text-white">Build your deck</h1>
@@ -620,7 +620,7 @@ export default function DeckBuilder({ pool, seedDeck, onStart, onSaveComplete, o
                 </button>
                 <canvas
                   ref={previewCanvasRef}
-                  className="max-w-full max-h-[65vh] w-auto h-auto border border-stone-300 mx-auto block"
+                  className="max-w-full max-h-[65dvh] w-auto h-auto border border-stone-300 mx-auto block"
                 />
                 <button
                   onClick={() => {

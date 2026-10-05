@@ -252,7 +252,7 @@ export default function PackOpener({ onBack }) {
   };
 
   return (
-    <div className="min-h-screen bg-black p-6">
+    <div className="min-h-dvh bg-black p-6 short:p-2">
       <div className="max-w-2xl mx-auto">
         <div className="flex items-center gap-3 mb-6">
           <button
