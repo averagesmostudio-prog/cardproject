@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { pickAiAction, pickAiReaction, bestFirst, opponentReplyValue, evaluateState, synergyValue, knownComboValue } from './ai.js';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { pickAiAction, pickAiReaction, resetAiRepeatTracker, REPEAT_ACTION_LIMIT, bestFirst, opponentReplyValue, evaluateState, synergyValue, knownComboValue } from './ai.js';
 import { getLegalActions, gameReducer } from './actions.js';
 
 const player = (overrides = {}) => ({
@@ -16,6 +16,44 @@ const being = (ownerId, strength = 3, arrows = [1, 3, 7]) => ({
   type: 'being', ownerId,
   card: { name: 'B', kind: 'being', strength, lifespan: 5, arrows },
   currentLifespan: 5, engaged: false,
+});
+
+beforeEach(() => resetAiRepeatTracker());
+
+describe('pickAiAction repeat guard', () => {
+  it('stops re-picking the exact same action once it has been chosen REPEAT_ACTION_LIMIT times in one turn', () => {
+    // The state never changes between picks, simulating a repeatable action
+    // the greedy score can't tell is already spent.
+    const state = baseState({ board: { r4c2: being('B', 4) } });
+    const attack = { type: 'MOVE_OR_ATTACK', fromCellId: 'r4c2', toCellId: 'r2c2', isAttack: true };
+    for (let i = 0; i < REPEAT_ACTION_LIMIT; i++) expect(pickAiAction(state, 'B')).toEqual(attack);
+    const next = pickAiAction(state, 'B');
+    expect(next).not.toEqual(attack);
+  });
+
+  it('eventually falls all the way back to PASS_TURN when every other option has worn out', () => {
+    const state = baseState({ board: { r4c2: being('B', 4) } });
+    const seen = new Set();
+    let last;
+    for (let i = 0; i < 500; i++) {
+      last = pickAiAction(state, 'B');
+      seen.add(JSON.stringify(last));
+      if (last.type === 'PASS_TURN') break;
+    }
+    expect(last).toEqual({ type: 'PASS_TURN' });
+  });
+
+  it('counts per turn — a new turn starts fresh', () => {
+    const state = baseState({ board: { r4c2: being('B', 4) } });
+    for (let i = 0; i < REPEAT_ACTION_LIMIT + 3; i++) pickAiAction(state, 'B');
+    const nextTurn = baseState({ turnNumber: 7, board: { r4c2: being('B', 4) } });
+    expect(pickAiAction(nextTurn, 'B')).toEqual({ type: 'MOVE_OR_ATTACK', fromCellId: 'r4c2', toCellId: 'r2c2', isAttack: true });
+  });
+
+  it('keeps a lone forced choice even once it is saturated', () => {
+    const state = baseState();
+    for (let i = 0; i < REPEAT_ACTION_LIMIT + 5; i++) expect(pickAiAction(state, 'B')).toEqual({ type: 'PASS_TURN' });
+  });
 });
 
 describe('pickAiAction', () => {

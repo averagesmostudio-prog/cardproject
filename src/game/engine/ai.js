@@ -906,9 +906,34 @@ const pickHardAction = (state, playerId) => {
 // only steers Hard onto the search above; Easy and Standard are otherwise
 // identical today (Easy's own distinction is entirely in which precon deck
 // pickAiDeck draws for it, not how it plays — see precons.js).
+// Any one exact action (type + target, JSON-compared) chosen this many
+// times by the same player within a single turn is treated as a loop: a
+// repeatable action whose effect the greedy score can't tell is already
+// spent (an Armament Engage that something re-opens, a free Pay ability,
+// a back-and-forth move) would otherwise be re-picked forever over
+// PASS_TURN's last-resort score. Self-play kept finding new shapes of this
+// one by one; this bounds every shape at once. No legitimate turn repeats
+// one identical action this often (even an Effigy-pool-limited Pay ability
+// tops out around ten).
+export const REPEAT_ACTION_LIMIT = 20;
+let repeatTracker = { turnKey: null, counts: new Map() };
+export const resetAiRepeatTracker = () => { repeatTracker = { turnKey: null, counts: new Map() }; };
+
 export const pickAiAction = (state, playerId, aiDifficulty = 'standard') => {
-  if (aiDifficulty === 'hard') return pickHardAction(state, playerId);
-  return pickGreedyAction(state, playerId);
+  const turnKey = `${playerId}:${state.turnNumber}:${state.turnPlayer}`;
+  if (repeatTracker.turnKey !== turnKey) repeatTracker = { turnKey, counts: new Map() };
+  const { counts } = repeatTracker;
+  let action = aiDifficulty === 'hard' ? pickHardAction(state, playerId) : pickGreedyAction(state, playerId);
+  if (!action) return action;
+  if ((counts.get(JSON.stringify(action)) || 0) >= REPEAT_ACTION_LIMIT) {
+    // Fall back to the best option not yet worn out; if every legal action
+    // is saturated (a lone forced choice), keep the original pick.
+    const fresh = getLegalActions(state, playerId).filter(a => (counts.get(JSON.stringify(a)) || 0) < REPEAT_ACTION_LIMIT);
+    if (fresh.length > 0) action = bestFirst(state, playerId, fresh)[0];
+  }
+  const key = JSON.stringify(action);
+  counts.set(key, (counts.get(key) || 0) + 1);
+  return action;
 };
 
 // Ethereal Conjuring reactive timing (actions.js's manageReactiveWindow) —

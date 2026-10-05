@@ -4222,7 +4222,35 @@ describe('"Negate the Summoning of target Being, it conjures as a face up Prophe
       expect(resolved.board.r3c5).toMatchObject({ type: 'prophecy', ownerId: 'A', timer: 2, returnsAsSummon: true });
     });
 
-    it('the return trip is a genuine re-summon — When Summoned fires for real once its Time Counters run out', () => {
+  it('Delay can negate a token-summoned Being too — any summoning mechanism opens the same window a normal summon does', () => {
+    const attacker = { type: 'being', ownerId: 'A', card: beingCard({ strength: 10, lifespan: 10 }), currentLifespan: 10, engaged: false };
+    const defender = {
+      type: 'being', ownerId: 'B',
+      card: beingCard({ instanceId: 'vv#0', name: 'Vessel', strength: 1, lifespan: 3, keywords: { depart: 'Summon a Scā-vuhk Hunger token.' } }),
+      currentLifespan: 3, engaged: false,
+    };
+    const state = baseState({
+      board: { ...fillFourEthereal, r2c1: attacker, r4c1: defender },
+      players: { A: player({ hand: [delay()] }), B: player({ lifespan: 50 }) },
+    });
+    let s = gameReducer(state, { type: 'MOVE_OR_ATTACK', fromCellId: 'r2c1', toCellId: 'r4c1', isAttack: true });
+    while (s.pendingChoice?.kind === 'token-location') {
+      s = gameReducer(s, getLegalActions(s, 'B').find(a => a.type === 'RESOLVE_TOKEN_LOCATION'));
+    }
+    // The token Being landed, and A (the opponent) now holds a real window to respond.
+    const tokenCell = Object.keys(s.board).find(c => s.board[c]?.card?.name === 'Scā-vuhk Hunger');
+    expect(tokenCell).toBeDefined();
+    expect(s.pendingResolution).toMatchObject({ kind: 'summon-being', cardName: 'Scā-vuhk Hunger' });
+    expect(getLegalActions(s, 'A').some(a => a.type === 'CAST_CONJURING')).toBe(true);
+    const negated = gameReducer(s, { type: 'CAST_CONJURING', instanceId: 'delay#0' });
+    expect(negated.board[tokenCell]).toBeUndefined();
+    expect(negated.board.r3c5).toMatchObject({ type: 'prophecy', ownerId: 'B', timer: 2, returnsAsSummon: true });
+    expect(negated.board.r3c5.shiftedFromCard.name).toBe('Scā-vuhk Hunger');
+    // A token never enters Purgatory.
+    expect(negated.players.B.purgatory.some(c => c.isToken)).toBe(false);
+  });
+
+  it('the return trip is a genuine re-summon — When Summoned fires for real once its Time Counters run out', () => {
       const shiftedProphecy = {
         type: 'prophecy', ownerId: 'A',
         card: { ...whenSummonedBeing(), textBox: '', typing: '', keywords: {} },
@@ -4282,7 +4310,46 @@ describe('"Negate the Summoning of target Being, it conjures as a face up Prophe
       expect(next.pendingResolution).toBeNull();
     });
 
-    it('does not affect a Martyr-reanimated or Invoked Being — only a real SUMMON_BEING consumes it', () => {
+    it('also redirects a token-summoned Being into a face up Prophecy (any summoning mechanism), consuming the flag', () => {
+      const attacker = { type: 'being', ownerId: 'A', card: beingCard({ strength: 10, lifespan: 10 }), currentLifespan: 10, engaged: false };
+      const defender = {
+        type: 'being', ownerId: 'B',
+        card: beingCard({ instanceId: 'vv#0', name: 'Vessel', strength: 1, lifespan: 3, keywords: { depart: 'Summon a Scā-vuhk Hunger token.' } }),
+        currentLifespan: 3, engaged: false,
+      };
+      const state = baseState({
+        board: { ...fillFourEthereal, r2c1: attacker, r4c1: defender },
+        nextBeingSummonedAsProphecy: { ownerId: 'B', timeCounters: 2 },
+        players: { A: player(), B: player({ lifespan: 50 }) },
+      });
+      let s = gameReducer(state, { type: 'MOVE_OR_ATTACK', fromCellId: 'r2c1', toCellId: 'r4c1', isAttack: true });
+      while (s.pendingChoice?.kind === 'token-location') {
+        s = gameReducer(s, getLegalActions(s, 'B').find(a => a.type === 'RESOLVE_TOKEN_LOCATION'));
+      }
+      expect(Object.values(s.board).some(o => o?.type === 'being' && o.card.name === 'Scā-vuhk Hunger')).toBe(false);
+      expect(s.nextBeingSummonedAsProphecy).toBeNull();
+      expect(s.board.r3c5).toMatchObject({ type: 'prophecy', ownerId: 'B', timer: 2, returnsAsSummon: true });
+      expect(s.board.r3c5.shiftedFromCard.name).toBe('Scā-vuhk Hunger');
+    });
+
+    it('does not re-Prophesize a Delay/Prophesize return trip — that finishes a summon, it does not start a new one', () => {
+      const original = beingCard({ instanceId: 'ret#0', name: 'Returning Being', castingCost: { faithless: 0, colored: {} } });
+      const returning = { type: 'prophecy', ownerId: 'A', card: { ...original, textBox: '', typing: '', keywords: {} }, timer: 1, faceDown: false, shiftedFromCard: original, returnsAsSummon: true };
+      const state = baseState({
+        turnPlayer: 'A',
+        nextBeingSummonedAsProphecy: { ownerId: 'A', timeCounters: 2 },
+        board: { r3c1: returning },
+        players: { A: player(), B: player() },
+      });
+      let s = beginTurn(state);
+      while (s.pendingChoice?.kind === 'delay-return-summon') {
+        s = gameReducer(s, getLegalActions(s, 'A').find(a => a.type === 'RESOLVE_DELAY_RETURN_SUMMON'));
+      }
+      expect(Object.values(s.board).some(o => o?.type === 'being' && o.card.name === 'Returning Being')).toBe(true);
+      expect(s.nextBeingSummonedAsProphecy).toEqual({ ownerId: 'A', timeCounters: 2 }); // untouched
+    });
+
+    it('is not consumed by a Martyr that merely adds a card to hand — only an actual summon uses it up', () => {
       const reanimator = {
         type: 'being', ownerId: 'A',
         card: beingCard({ instanceId: 'rean#0', keywords: { martyr: 'Add Test Whensummoned Being from deck to hand.' } }),

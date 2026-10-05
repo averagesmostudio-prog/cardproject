@@ -2016,6 +2016,24 @@ const placeTokenOnBoard = (state, playerId, tokenCard, cellId) => {
     return { ...state, board: { ...state.board, [cellId]: { type: 'prophecy', ownerId: playerId, card: tokenCard, timer: tokenCard.timerMax, faceDown: false } } };
   }
   // Being (the only other kind any current token uses).
+  //
+  // Prophesize ("The next Being you summon is conjured as a face up
+  // Prophecy...") applies to a token-summoned Being too (confirmed with the
+  // user — any summoning mechanism). Picks the first empty Ethereal Realm
+  // tile instead of offering a choice: token placement runs inside
+  // multi-token flows that set their own pendingChoice right after, which
+  // would silently clobber (and so lose this token behind) a choice opened
+  // here. The flag is consumed either way.
+  const prophesize = state.nextBeingSummonedAsProphecy;
+  if (prophesize?.ownerId === playerId) {
+    const cleared = { ...state, nextBeingSummonedAsProphecy: null };
+    const emptyEthereal = ETHEREAL_CELLS.filter(c => !cleared.board[c]);
+    const intercepted = addLog(cleared, `${tokenCard.name} conjures as a face up Prophecy instead of being summoned (Prophesize).`);
+    if (emptyEthereal.length === 0) {
+      return addLog(intercepted, `${tokenCard.name} has no empty tile in the Ethereal Realm to Shift onto.`);
+    }
+    return shiftFromPurgatory(intercepted, playerId, tokenCard, emptyEthereal[0], prophesize.timeCounters, true);
+  }
   const next = {
     ...state,
     board: {
@@ -2038,7 +2056,16 @@ const placeTokenOnBoard = (state, playerId, tokenCard, cellId) => {
   // as a real one drawn from hand would). Every other placeBeingOnBoard-only
   // trigger (whenSummoned, the legend rule, etc.) stays out of scope here —
   // no current token prints any of those, so there's nothing yet to wire.
-  return triggerTypedSummonReactions(next, playerId, cellId, tokenCard);
+  //
+  // Opens the same declare-window a normal summon does, so Delay ("Negate
+  // the Summoning of target Being") can target a token-summoned Being too —
+  // confirmed with the user: Delay answers any summoning mechanism, tokens
+  // included. whenSummonedText stays null (no current token prints one).
+  const reacted = triggerTypedSummonReactions(next, playerId, cellId, tokenCard);
+  return {
+    ...reacted,
+    pendingResolution: { kind: 'summon-being', declaringPlayer: playerId, cellId, cardName: tokenCard.name, whenSummonedText: null, instanceId: tokenCard.instanceId },
+  };
 };
 
 // Empty Mortal Realm cells `playerId` controls — the default destination
@@ -2385,7 +2412,8 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
       const purged = { ...state, players: { ...state.players, [playerId]: { ...state.players[playerId], purgatory } } };
       let next = placeBeingOnBoard(purged, playerId, candidates[0], found);
       const occ = next.board[candidates[0]];
-      next = { ...next, board: { ...next.board, [candidates[0]]: { ...occ, engaged: true } } };
+      // Absent if Prophesize conjured it as a Prophecy instead.
+      if (occ) next = { ...next, board: { ...next.board, [candidates[0]]: { ...occ, engaged: true } } };
       return addLog(next, `${cardName}'s ${label} summons ${found.name} back onto the Mortal Realm, engaged.`);
     }
     // Left in Purgatory until a tile is actually chosen — RESOLVE_TOKEN_LOCATION's
@@ -6442,7 +6470,7 @@ const returnAsSummon = (state, cellId, duringEndStep = false) => {
   const placeAt = (s, toCellId) => {
     const board = { ...s.board };
     delete board[cellId];
-    return placeBeingOnBoard({ ...s, board }, ownerId, toCellId, card);
+    return placeBeingOnBoard({ ...s, board }, ownerId, toCellId, card, { skipProphesize: true });
   };
   if (emptyCells.length === 1 || duringEndStep) {
     return placeAt(state, emptyCells[0]);
@@ -8611,7 +8639,22 @@ const beingsEnterDisengagedActive = (state) =>
     o?.type === 'prophecy' && !o.faceDown && (o.timer || 0) > 0 && o.card.keywords?.beingsEnterDisengaged
   );
 
-const placeBeingOnBoard = (state, playerId, cellId, card) => {
+const placeBeingOnBoard = (state, playerId, cellId, card, { skipProphesize = false } = {}) => {
+  // Prophesize ("The next Being you summon is conjured as a face up
+  // Prophecy...") applies to ANY summoning mechanism — confirmed with the
+  // user: Invoke, Purgatory reanimation, Martyr, a hand cast, and tokens
+  // (see placeTokenOnBoard), same scope as Delay. Skipped only by the
+  // return trips of an already-negated/converted summon (Delay/Prophesize's
+  // own return, and "return to hand then summon" effects whose summon is
+  // ruled unstoppable), which finish a summon rather than begin a new one.
+  if (!skipProphesize) {
+    const prophesize = state.nextBeingSummonedAsProphecy;
+    if (prophesize?.ownerId === playerId) {
+      const cleared = { ...state, nextBeingSummonedAsProphecy: null };
+      const intercepted = addLog(cleared, `${card.name} conjures as a face up Prophecy instead of being summoned (Prophesize).`);
+      return offerOrShiftFromPurgatory(intercepted, playerId, card, prophesize.timeCounters, true);
+    }
+  }
   const waiting = state.board[cellId];
   // Lesser Summoning Circle: "...Summon a Demon, Imp or Null Being
   // directly on this tile, when you do sacrifice Lesser Summoning
@@ -8731,25 +8774,10 @@ const placeBeingOnBoard = (state, playerId, cellId, card) => {
   return next;
 };
 
-// Prophesize: "The next Being you summon is conjured as a face up
-// Prophecy with (N) Time Counters..." — checked at every placeBeingOnBoard
-// call site reachable from a real SUMMON_BEING dispatch (the main
-// case's own 3 placements, plus RESOLVE_SUMMON_SACRIFICE_COST's deferred
-// one for Immen Gorta) — never Martyr-reanimation, Invoke, or token
-// placement, which are not "summoning" in this engine's own established
-// terminology (see NEXT_BEING_COST_REDUCTION_RE's own identical scoping).
-// The flag is consumed (cleared) the moment a real summon reaches this
-// point, whether or not the summon's own destination even matters
-// afterward — same "used regardless" rule nextBeingCostReduction follows.
-const placeSummonedBeing = (state, playerId, cellId, card) => {
-  const prophesize = state.nextBeingSummonedAsProphecy;
-  if (prophesize?.ownerId === playerId) {
-    const cleared = { ...state, nextBeingSummonedAsProphecy: null };
-    let next = addLog(cleared, `${card.name} conjures as a face up Prophecy instead of being summoned (Prophesize).`);
-    return offerOrShiftFromPurgatory(next, playerId, card, prophesize.timeCounters, true);
-  }
-  return placeBeingOnBoard(state, playerId, cellId, card);
-};
+// A real SUMMON_BEING dispatch's own placement. Prophesize is handled
+// inside placeBeingOnBoard itself (every summoning mechanism, not just this
+// one), so this is just the named entry point those call sites use.
+const placeSummonedBeing = (state, playerId, cellId, card) => placeBeingOnBoard(state, playerId, cellId, card);
 
 // -- Invoke keyword ------------------------------------------------------
 // RULES.md > Keywords > Invoke: "Add to hand, then summon/conjure" (Classic
@@ -12944,7 +12972,7 @@ const gameReducerCore = (state, action) => {
       const board = { ...state.board };
       delete board[cellId];
       const next = { ...state, board, pendingChoice: null };
-      return placeBeingOnBoard(next, occupant.ownerId, action.cellId, occupant.shiftedFromCard);
+      return placeBeingOnBoard(next, occupant.ownerId, action.cellId, occupant.shiftedFromCard, { skipProphesize: true });
     }
 
     case 'RESOLVE_GIVE_DIFFERENT_TYPED_BUFF': {
@@ -13060,7 +13088,7 @@ const gameReducerCore = (state, action) => {
       // resolution"), on the exact same tile it just left. Reuses
       // placeBeingOnBoard so When Summoned retriggers exactly like any
       // other real summon (also the user's ruling).
-      return placeBeingOnBoard(next, playerId, cellId, targetCard);
+      return placeBeingOnBoard(next, playerId, cellId, targetCard, { skipProphesize: true });
     }
 
     case 'RESOLVE_SUMMON_SACRIFICE_COST': {
