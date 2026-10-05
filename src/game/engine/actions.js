@@ -6360,6 +6360,24 @@ const placeReturnedFromShift = (state, cellId, toCellId, duringEndStep = false, 
   return retryStuckShiftReturns(next, landDisengaged);
 };
 
+// A shifted Being whose return trip finds no empty Mortal Realm tile
+// fizzles: it never lands, and goes to its owner's Purgatory (a token just
+// ceases to exist — purgatoryAfterAdding).
+const fizzleShiftReturn = (state, cellId) => {
+  const occupant = state.board[cellId];
+  const card = occupant.shiftedFromCard;
+  const board = { ...state.board };
+  delete board[cellId];
+  const owner = state.players[occupant.ownerId];
+  const next = {
+    ...state,
+    board,
+    players: { ...state.players, [occupant.ownerId]: { ...owner, purgatory: purgatoryAfterAdding(owner.purgatory, card) } },
+  };
+  // Another shifted Being may have been waiting behind this one's slot.
+  return retryStuckShiftReturns(addLog(next, `${card.name} has no empty tile in the Mortal Realm to return to — it fizzles and is sent to Purgatory.`));
+};
+
 // Shift's own return trip, fired from resolveProphecyModulateHitZero below
 // once a shifted Prophecy's Time Counters reach 0 — same free-choice-
 // among-empty-tiles precedent as SUMMON_BEING/token placement (auto-place
@@ -6383,7 +6401,7 @@ const returnFromShift = (state, cellId, duringEndStep = false, bounceCount = 0, 
   const card = occupant.shiftedFromCard;
   const emptyCells = emptyMortalCellsFor(state.board, occupant.ownerId);
   if (emptyCells.length === 0) {
-    return addLog(state, `${card.name} has no empty tile in the Mortal Realm to return to.`);
+    return fizzleShiftReturn(state, cellId);
   }
   if (emptyCells.length === 1 || duringEndStep) {
     return placeReturnedFromShift(state, cellId, emptyCells[0], duringEndStep, bounceCount, disengageOnReturn, landDisengaged);
@@ -6419,7 +6437,7 @@ const returnAsSummon = (state, cellId, duringEndStep = false) => {
   const ownerId = occupant.ownerId;
   const emptyCells = emptyMortalCellsFor(state.board, ownerId);
   if (emptyCells.length === 0) {
-    return addLog(state, `${card.name} has no empty tile in the Mortal Realm to be summoned onto.`);
+    return fizzleShiftReturn(state, cellId);
   }
   const placeAt = (s, toCellId) => {
     const board = { ...s.board };
@@ -6480,7 +6498,12 @@ const retryStuckShiftReturns = (state, landDisengaged = true) => {
   const stuckCellId = Object.entries(state.board).find(([, o]) =>
     o?.type === 'prophecy' && !o.faceDown && o.shiftedFromCard && (o.timer || 0) <= 0
   )?.[0];
-  return stuckCellId ? returnFromShift(state, stuckCellId, false, 0, false, landDisengaged) : state;
+  if (!stuckCellId) return state;
+  const stuck = state.board[stuckCellId];
+  if (stuck.resolvesAsConjuring) return reopenConjuringResolution(state, stuckCellId);
+  return stuck.returnsAsSummon
+    ? returnAsSummon(state, stuckCellId, false)
+    : returnFromShift(state, stuckCellId, false, 0, false, landDisengaged);
 };
 
 // A Prophecy's own two-phase Time Counter lifecycle (RULES.md >
@@ -15117,6 +15140,18 @@ export const gameReducer = (state, action) => {
   // dispatch pays no extra cost.
   if (afterWindow.board !== recomputed.board || afterWindow.players !== recomputed.players) {
     afterWindow = recomputeLiveAuras(afterWindow);
+  }
+  // A Shifted Being returning at the start of a turn can be left waiting
+  // behind another one's open choice (returnFromShift's one-choice-at-a-time
+  // rule). placeReturnedFromShift retries those itself, but only when the
+  // choice that was blocking them was a shift-return — if the first Being's
+  // own reaction opened a different choice instead (Scā-vuhk Hunger's token
+  // placement), nothing would retry the rest once that resolved and they'd
+  // sit in the Ethereal Realm until next turn. Retried here, the moment
+  // every open choice/resolution has just cleared.
+  if ((state.pendingChoice || state.pendingResolution) && !afterWindow.pendingChoice && !afterWindow.pendingResolution && !afterWindow.winner) {
+    const retried = retryStuckShiftReturns(afterWindow);
+    if (retried !== afterWindow) afterWindow = recomputeLiveAuras(retried);
   }
   return clearStuckPendingChoice(afterWindow);
 };

@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { gameReducer, getLegalActions, createInitialState, canPayCost, resolveOrLogEffect, faithlessPaymentNeedsChoice, faithlessPaymentCandidates, resolveProphecyModulateHitZero, dealDamageToBeing, effectiveCastingCost } from './actions.js';
 import { beginTurn, endTurn } from './turn.js';
 import { effectiveStrength, deathDamageFor } from './combat.js';
-import { computeMoveDestination } from './board.js';
+import { computeMoveDestination, mortalCellsFor } from './board.js';
 import { toGameCard } from '../../lib/cardData.js';
 
 const player = (overrides = {}) => ({
@@ -13987,6 +13987,179 @@ describe('Nineteenth wave: user-reported bug sweep', () => {
       expect(state.board.r2c1.engaged).toBe(true);
       const legal = getLegalActions(state, 'A').filter(a => a.type === 'RESOLVE_MODULATE');
       expect(legal.some(a => a.cellId === 'r3c1')).toBe(false);
+    });
+  });
+});
+
+describe('Shift — several shifted Beings returning at the start of the same turn', () => {
+  const shiftedHunger = (id, timer = 1, extra = {}) => {
+    const original = beingCard({ instanceId: id, name: `Hunger ${id}`, typing: 'Hunger, Being', keywords: { shift: { amount: 1, effect: null }, ...extra } });
+    return { type: 'prophecy', ownerId: 'A', card: { ...original, textBox: '', typing: '', keywords: {} }, timer, faceDown: false, shiftedFromCard: original };
+  };
+  const hungersOnBoard = (state) => Object.values(state.board).filter(o => o?.type === 'being' && o.card.name.startsWith('Hunger '));
+  // Resolve every open shift-return choice, always taking the first option.
+  const resolveAllReturns = (start) => {
+    let s = start;
+    for (let i = 0; i < 10 && s.pendingChoice?.kind === 'shift-return'; i++) {
+      const opts = getLegalActions(s, s.pendingChoice.playerId).filter(a => a.type === 'RESOLVE_SHIFT_RETURN');
+      s = gameReducer(s, opts[0]);
+    }
+    return s;
+  };
+
+  it('three Shifted Beings on a wide-open board all return, one choice at a time, with none stranded', () => {
+    const state = baseState({
+      turnPlayer: 'A',
+      board: { r3c1: shiftedHunger('h1#0'), r3c2: shiftedHunger('h2#0'), r3c3: shiftedHunger('h3#0') },
+      players: { A: player(), B: player() },
+    });
+    const afterTick = beginTurn(state);
+    expect(afterTick.pendingChoice?.kind).toBe('shift-return');
+    const done = resolveAllReturns(afterTick);
+    expect(done.pendingChoice).toBeNull();
+    expect(hungersOnBoard(done)).toHaveLength(3);
+    expect(Object.values(done.board).filter(o => o?.type === 'prophecy')).toHaveLength(0);
+  });
+
+  it('a Shifted Being that is not yet at 0 keeps ticking down while the others return', () => {
+    const state = baseState({
+      turnPlayer: 'A',
+      board: { r3c1: shiftedHunger('h1#0'), r3c2: shiftedHunger('h2#0', 2), r3c3: shiftedHunger('h3#0') },
+      players: { A: player(), B: player() },
+    });
+    const done = resolveAllReturns(beginTurn(state));
+    expect(hungersOnBoard(done)).toHaveLength(2);
+    const remaining = Object.values(done.board).filter(o => o?.type === 'prophecy');
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].timer).toBe(1);
+  });
+
+  it('three returning with only enough room for all of them still land every one', () => {
+    const filler = (id) => ({ type: 'being', ownerId: 'A', card: beingCard({ instanceId: id, name: 'Filler', strength: 0, lifespan: 1 }), currentLifespan: 1, engaged: false });
+    const state = baseState({
+      turnPlayer: 'A',
+      board: {
+        r3c1: shiftedHunger('h1#0'), r3c2: shiftedHunger('h2#0'), r3c3: shiftedHunger('h3#0'),
+        r1c2: filler('f1#0'), r1c3: filler('f2#0'), r1c4: filler('f3#0'),
+        r2c1: filler('f4#0'), r2c2: filler('f5#0'),
+      },
+      players: { A: player(), B: player() },
+    });
+    const done = resolveAllReturns(beginTurn(state));
+    expect(done.pendingChoice).toBeNull();
+    expect(hungersOnBoard(done)).toHaveLength(3);
+  });
+
+  it('every returning Being fires its own "moves into the Mortal Realm" reaction', () => {
+    const reaction = { onMovedIntoMortalRealm: 'Draw (1) card.' };
+    const state = baseState({
+      turnPlayer: 'A',
+      board: { r3c1: shiftedHunger('h1#0', 1, reaction), r3c2: shiftedHunger('h2#0', 1, reaction), r3c3: shiftedHunger('h3#0', 1, reaction) },
+      players: { A: player({ mainDeck: [1, 2, 3, 4, 5].map(n => beingCard({ instanceId: `d${n}#0` })) }), B: player() },
+    });
+    const done = resolveAllReturns(beginTurn(state));
+    expect(hungersOnBoard(done)).toHaveLength(3);
+    expect(done.players.A.hand).toHaveLength(4); // the turn's own draw + one per returning Being
+  });
+
+  it('endTurn: several Scā-vuhk-style end-of-turn decays all return in the same End Step', () => {
+    const decay = { endOfTurnRemoveOwnTimeCounters: 1 };
+    const shifted = (id) => {
+      const s = shiftedHunger(id);
+      return { ...s, card: { ...s.card, keywords: decay } };
+    };
+    const state = baseState({
+      turnPlayer: 'A',
+      board: { r3c1: shifted('h1#0'), r3c2: shifted('h2#0'), r3c3: shifted('h3#0') },
+      players: { A: player({ mainDeck: [beingCard({ instanceId: 'draw#0' })] }), B: player({ mainDeck: [beingCard({ instanceId: 'drawb#0' })] }) },
+    });
+    const next = endTurn(state);
+    expect(hungersOnBoard(next)).toHaveLength(3);
+    expect(Object.values(next.board).filter(o => o?.type === 'prophecy' && o.ownerId === 'A')).toHaveLength(0);
+  });
+
+  it('two returning Beings whose own reaction opens a choice (Scā-vuhk Hunger tokens) both still return and resolve — the second isn\'t stranded behind the first\'s token choice', () => {
+    const svuhk = (id) => {
+      const original = beingCard({
+        instanceId: id, name: 'Scā-vuhk Hunger', typing: 'Hunger, Being',
+        keywords: { shift: { amount: 1, effect: null }, onMovedIntoMortalRealm: 'sacrifice this and create (2) Scā-vuhk Hunger tokens.' },
+      });
+      return { type: 'prophecy', ownerId: 'A', card: { ...original, textBox: '', typing: '', keywords: {} }, timer: 1, faceDown: false, shiftedFromCard: original };
+    };
+    const state = baseState({
+      turnPlayer: 'A',
+      board: { r3c1: svuhk('sv1#0'), r3c2: svuhk('sv2#0') },
+      players: { A: player(), B: player() },
+    });
+    let s = beginTurn(state);
+    const resolveAny = () => {
+      const ch = s.pendingChoice;
+      const kinds = { 'shift-return': 'RESOLVE_SHIFT_RETURN', 'token-location': 'RESOLVE_TOKEN_LOCATION' };
+      const opts = getLegalActions(s, ch.playerId).filter(a => a.type === kinds[ch.kind]);
+      s = gameReducer(s, opts[0]);
+    };
+    for (let i = 0; i < 20 && s.pendingChoice; i++) resolveAny();
+    expect(s.pendingChoice).toBeNull();
+    // Nothing is left sitting in the Ethereal Realm waiting for a later turn.
+    expect(Object.values(s.board).filter(o => o?.type === 'prophecy')).toHaveLength(0);
+    // Each Scā-vuhk returned, sacrificed itself, and made 2 tokens.
+    expect(Object.values(s.board).filter(o => o?.type === 'being')).toHaveLength(4);
+  });
+
+  describe('with no empty Mortal Realm tile to return to — it fizzles and goes to Purgatory', () => {
+    const fullBoard = () => {
+      const board = {};
+      mortalCellsFor('A').forEach((cell, i) => {
+        board[cell] = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: `full${i}#0`, name: 'Filler', strength: 0, lifespan: 1 }), currentLifespan: 1, engaged: false };
+      });
+      return board;
+    };
+
+    it('a returning Being with a full Mortal Realm is sent to its owner\'s Purgatory instead of waiting', () => {
+      const state = baseState({ turnPlayer: 'A', board: { ...fullBoard(), r3c1: shiftedHunger('h1#0') }, players: { A: player(), B: player() } });
+      const next = beginTurn(state);
+      expect(next.board.r3c1).toBeUndefined();
+      expect(next.players.A.purgatory.map(c => c.instanceId)).toEqual(['h1#0']);
+      expect(next.log.some(e => e.message.includes('fizzles and is sent to Purgatory'))).toBe(true);
+    });
+
+    it('several Beings returning into a full Mortal Realm all fizzle in the same turn', () => {
+      const state = baseState({
+        turnPlayer: 'A',
+        board: { ...fullBoard(), r3c1: shiftedHunger('h1#0'), r3c2: shiftedHunger('h2#0'), r3c3: shiftedHunger('h3#0') },
+        players: { A: player(), B: player() },
+      });
+      const next = beginTurn(state);
+      expect(Object.values(next.board).filter(o => o?.type === 'prophecy')).toHaveLength(0);
+      expect(next.players.A.purgatory.map(c => c.instanceId).sort()).toEqual(['h1#0', 'h2#0', 'h3#0']);
+    });
+
+    it('with room for only one of two, one lands and the other fizzles', () => {
+      const board = fullBoard();
+      const [free] = Object.keys(board);
+      delete board[free];
+      const state = baseState({ turnPlayer: 'A', board: { ...board, r3c1: shiftedHunger('h1#0'), r3c2: shiftedHunger('h2#0') }, players: { A: player(), B: player() } });
+      const next = beginTurn(state);
+      expect(hungersOnBoard(next)).toHaveLength(1);
+      expect(next.players.A.purgatory).toHaveLength(1);
+      expect(Object.values(next.board).filter(o => o?.type === 'prophecy')).toHaveLength(0);
+    });
+
+    it('a shifted token just ceases to exist rather than entering Purgatory', () => {
+      const token = shiftedHunger('tok#0');
+      token.shiftedFromCard = { ...token.shiftedFromCard, isToken: true };
+      const state = baseState({ turnPlayer: 'A', board: { ...fullBoard(), r3c1: token }, players: { A: player(), B: player() } });
+      const next = beginTurn(state);
+      expect(next.board.r3c1).toBeUndefined();
+      expect(next.players.A.purgatory).toHaveLength(0);
+    });
+
+    it('a Delay/Prophesize-style return-as-summon also fizzles', () => {
+      const delayed = { ...shiftedHunger('dl#0'), returnsAsSummon: true };
+      const state = baseState({ turnPlayer: 'A', board: { ...fullBoard(), r3c1: delayed }, players: { A: player(), B: player() } });
+      const next = beginTurn(state);
+      expect(next.board.r3c1).toBeUndefined();
+      expect(next.players.A.purgatory.map(c => c.instanceId)).toEqual(['dl#0']);
     });
   });
 });

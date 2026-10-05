@@ -379,6 +379,8 @@ const modulate = (state) => {
   let board = { ...next.board };
   Object.entries(board).forEach(([cell, occupant]) => {
     if (!occupant || occupant.type !== 'prophecy' || occupant.ownerId !== state.turnPlayer) return;
+    // An earlier iteration's return/fizzle chain can already have resolved this one.
+    if (!board[cell] || board[cell].type !== 'prophecy') return;
     const timer = occupant.timer - 1;
     next = triggerZealotProphecyEssence({ ...next, board }, occupant.ownerId);
     next = triggerHourglassCollection(next, occupant.ownerId);
