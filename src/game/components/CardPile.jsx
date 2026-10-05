@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useCompactLandscape } from '../../lib/useDeviceMode.js';
 
 // Purgatory's own "a card was milled or discarded" flourish
 // (useStagedBoard.js > usePurgatoryArrivals, the `swirl` signal) — a
@@ -37,6 +38,9 @@ function Tombstone({ seq }) {
 // contents (Decks stay closed — their contents/order are hidden information).
 export default function CardPile({ label, count, clickable, onClick, tone = 'stone', highlight = false, swirlSeq, tombstoneSeq }) {
   const [hover, setHover] = useState(false);
+  // The board is scaled down hard on a phone held sideways, so the pile
+  // cards are drawn larger in their own natural size to stay readable/tappable.
+  const compact = useCompactLandscape();
   const toneClasses = tone === 'purple'
     ? { back: 'bg-purple-950 border-purple-800', front: 'bg-purple-900 border-purple-700' }
     : tone === 'amber'
@@ -51,7 +55,7 @@ export default function CardPile({ label, count, clickable, onClick, tone = 'sto
     >
       <div
         onClick={clickable ? onClick : undefined}
-        className={`relative w-20 h-28 ${clickable ? 'cursor-pointer' : ''}`}
+        className={`relative ${compact ? 'w-32 h-40' : 'w-20 h-28'} ${clickable ? 'cursor-pointer' : ''}`}
       >
         {count > 0 && (
           <div className={`absolute inset-0 translate-x-1 translate-y-1 rounded border-2 ${toneClasses.back}`} />
@@ -60,8 +64,8 @@ export default function CardPile({ label, count, clickable, onClick, tone = 'sto
           className={`relative w-full h-full rounded border-2 flex flex-col items-center justify-center gap-1 text-white transition
             ${toneClasses.front} ${clickable ? 'hover:brightness-125' : ''} ${highlight ? 'ring-2 ring-amber-400 animate-pulse' : ''}`}
         >
-          <span className="text-xs uppercase tracking-wide opacity-80">{label}</span>
-          <span className="text-2xl font-extrabold">{count}</span>
+          <span className={`${compact ? 'text-base' : 'text-xs'} uppercase tracking-wide opacity-80`}>{label}</span>
+          <span className={`${compact ? 'text-5xl' : 'text-2xl'} font-extrabold`}>{count}</span>
         </div>
         <BlackHoleSwirl seq={swirlSeq} />
         <Tombstone seq={tombstoneSeq} />

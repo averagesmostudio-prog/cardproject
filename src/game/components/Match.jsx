@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { History, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Flag, Eye, EyeOff, Sun, Moon, RotateCw } from 'lucide-react';
+import { History, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Flag, Eye, EyeOff, Sun, Moon, RotateCw, Maximize, Minimize } from 'lucide-react';
 import { useGameEngine } from '../state/useGameEngine.js';
 import { useStagedBoard, useStagedLife, useTurnBanner, useJustDrawn, useShiftVortex, useDepartFlash, useDeitySummonCinematic, useOpenLaneStrike, useFeatherMove, usePurgatoryArrivals } from '../state/useStagedBoard.js';
 import { getLegalActions, effectiveEngage, animatedTopEntry, effectiveCastingCost, faithlessPaymentNeedsChoice, faithlessPaymentCandidates, searchZoneCandidates } from '../engine/actions.js';
@@ -16,6 +16,7 @@ import CardPile from './CardPile.jsx';
 import CardTile from './CardTile.jsx';
 import CardThumbnail from './CardThumbnail.jsx';
 import { useCompactLandscape, useRotateNeeded } from '../../lib/useDeviceMode.js';
+import { useFullscreen } from '../../lib/useFullscreen.js';
 
 // Board.jsx renders rows top-to-bottom as Row 5 -> Row 1; a rail beside the
 // board reuses the same row heights (Mortal Realm cells, and the shorter
@@ -57,6 +58,7 @@ const lifeColor = (value) => {
 // badge becomes a clickable, highlighted target instead of the separate
 // "A's Lifespan" / "B's Lifespan" buttons this used to need.
 function LifeBadge({ value, flash, strike, targetAction, onSelectTarget }) {
+  const compact = useCompactLandscape();
   return (
     <div
       className={`relative text-center leading-tight rounded-lg transition ${targetAction ? 'cursor-pointer ring-2 ring-green-400 ring-offset-2 ring-offset-black animate-pulse hover:bg-green-400/10' : ''}`}
@@ -83,12 +85,12 @@ function LifeBadge({ value, flash, strike, targetAction, onSelectTarget }) {
       )}
       <div
         key={strike ? `num-${strike}` : undefined}
-        className={`relative z-10 text-5xl font-extrabold ${strike ? 'life-direct-hit-shake' : ''}`}
+        className={`relative z-10 ${compact ? 'text-8xl' : 'text-5xl'} font-extrabold ${strike ? 'life-direct-hit-shake' : ''}`}
         style={{ color: lifeColor(value) }}
       >
         {value}
       </div>
-      <div className="relative z-10 text-xs text-stone-400 uppercase tracking-wide">Life</div>
+      <div className={`relative z-10 ${compact ? 'text-lg' : 'text-xs'} text-stone-400 uppercase tracking-wide`}>Life</div>
     </div>
   );
 }
@@ -555,6 +557,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
   const [handMinimized, setHandMinimized] = useState(false);
   const compact = useCompactLandscape();
   const rotateNeeded = useRotateNeeded();
+  const fullscreen = useFullscreen();
   // Scales the board + side-panel group to whatever space is actually left
   // between the header and the Hand row, so it's never cut off/scrolled
   // behind the Hand on a shorter or narrower window — see the ResizeObserver
@@ -1958,6 +1961,16 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
         </div>
         <div className="flex items-center gap-3">
           <div className="text-sm text-stone-400">Turn {state.turnNumber} — {state.turnPlayer === HUMAN ? 'Your turn' : `${opponentLabel}'s turn`}</div>
+          {fullscreen.supported && compact && (
+            <button
+              onClick={fullscreen.toggle}
+              title={fullscreen.active ? 'Exit full screen' : 'Full screen'}
+              aria-label={fullscreen.active ? 'Exit full screen' : 'Full screen'}
+              className="flex items-center gap-1 text-xs px-2 py-1 rounded border border-stone-700 text-stone-400 hover:text-stone-200 hover:border-stone-500 transition"
+            >
+              {fullscreen.active ? <Minimize className="w-3.5 h-3.5" /> : <Maximize className="w-3.5 h-3.5" />}
+            </button>
+          )}
           <button
             onClick={toggleBoardTheme}
             title={boardTheme === 'dark' ? 'Switch to light board' : 'Switch to dark board'}
@@ -3080,7 +3093,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
             className="flex items-start gap-1 w-fit"
             style={{ transform: `scale(${boardScale})`, transformOrigin: 'top left' }}
           >
-          <div className="flex flex-col gap-1 p-2 w-56">
+          <div className={`flex flex-col gap-1 p-2 ${compact ? 'w-[25rem]' : 'w-56'}`}>
             <div className={`${ROW_H} flex items-center justify-start gap-2`}>
               <CardPile label="Hand" count={state.players[AI].hand.length} tone="amber" />
               <CardPile label="Deck" count={state.players[AI].mainDeck.length} tone="stone" />
@@ -3137,7 +3150,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
             boardTheme={boardTheme}
           />
 
-          <div className="flex flex-col gap-1 p-2 w-56">
+          <div className={`flex flex-col gap-1 p-2 ${compact ? 'w-[25rem]' : 'w-56'}`}>
             <div className={ROW_H} />
             {/* Ability-activation banners (Martyr/Engage/etc.) used to live
                 here, floating beside the board. Moved below the board,
@@ -3179,7 +3192,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
               {isHumanTurn && (
                 <button
                   onClick={() => dispatch({ type: 'PASS_TURN' })}
-                  className="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-semibold hover:bg-amber-700 transition"
+                  className={`bg-amber-600 text-white rounded-lg font-semibold hover:bg-amber-700 transition ${compact ? 'px-5 py-3 text-lg' : 'px-3 py-1.5 text-xs'}`}
                 >
                   Pass turn
                 </button>
