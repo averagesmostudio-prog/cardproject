@@ -17,6 +17,7 @@ import CardTile from './CardTile.jsx';
 import CardThumbnail from './CardThumbnail.jsx';
 import { useCompactLandscape, useRotateNeeded } from '../../lib/useDeviceMode.js';
 import { useFullscreen } from '../../lib/useFullscreen.js';
+import FullscreenHint from './FullscreenHint.jsx';
 
 // Board.jsx renders rows top-to-bottom as Row 5 -> Row 1; a rail beside the
 // board reuses the same row heights (Mortal Realm cells, and the shorter
@@ -1961,7 +1962,8 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
         </div>
         <div className="flex items-center gap-3">
           <div className="text-sm text-stone-400">Turn {state.turnNumber} — {state.turnPlayer === HUMAN ? 'Your turn' : `${opponentLabel}'s turn`}</div>
-          {fullscreen.supported && compact && (
+          <FullscreenHint open={fullscreen.hintOpen} onClose={fullscreen.closeHint} />
+          {fullscreen.available && (
             <button
               onClick={fullscreen.toggle}
               title={fullscreen.active ? 'Exit full screen' : 'Full screen'}

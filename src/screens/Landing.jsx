@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Settings, X, BookOpen, Globe, Maximize, Minimize } from 'lucide-react';
 import { useFullscreen } from '../lib/useFullscreen.js';
-import { useCompactLandscape } from '../lib/useDeviceMode.js';
+import FullscreenHint from '../game/components/FullscreenHint.jsx';
 import { getCustomCsvName, setCustomCsv, clearCustomCsv, CSV_PASSCODE } from '../lib/csvSource.js';
 
 // A closed leather-bound journal — a worn leather cover wrapped with a tied
@@ -222,7 +222,6 @@ function SettingsModal({ onClose }) {
 export default function Landing({ onSelectLibrary, onSelectGame, onSelectNetGame, onSelectPack, onSelectHowToPlay }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const fullscreen = useFullscreen();
-  const phoneLandscape = useCompactLandscape();
 
   return (
     <div
@@ -244,7 +243,7 @@ export default function Landing({ onSelectLibrary, onSelectGame, onSelectNetGame
       >
         <Settings className="w-5 h-5 text-stone-300" />
       </button>
-      {fullscreen.supported && phoneLandscape && (
+      {fullscreen.available && (
         <button
           onClick={fullscreen.toggle}
           className="fixed top-4 right-16 z-40 p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors"
@@ -253,6 +252,7 @@ export default function Landing({ onSelectLibrary, onSelectGame, onSelectNetGame
           {fullscreen.active ? <Minimize className="w-5 h-5 text-stone-300" /> : <Maximize className="w-5 h-5 text-stone-300" />}
         </button>
       )}
+      <FullscreenHint open={fullscreen.hintOpen} onClose={fullscreen.closeHint} />
       <button
         onClick={onSelectHowToPlay}
         className="fixed top-4 left-4 z-40 p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors"
