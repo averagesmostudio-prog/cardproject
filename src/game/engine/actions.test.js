@@ -14257,3 +14257,21 @@ describe('priority windows for human seats (alwaysOfferPriorityTo) — never aut
   });
 });
 
+describe('prophecy flips are recorded for the full-screen reveal', () => {
+  const prophecy = (id) => ({ type: 'prophecy', ownerId: 'A', card: { name: `Prophecy ${id}`, instanceId: `${id}#0`, textBox: '', keywords: {} }, timer: 1, faceDown: true });
+
+  it('records the flipping card, its owner, and a distinct seq for each flip', () => {
+    const state = baseState({ turnPlayer: 'A', board: { r3c1: prophecy('p1'), r3c2: prophecy('p2') }, players: { A: player(), B: player() } });
+    const next = beginTurn(state);
+    expect(next.prophecyFlips.map(f => f.card.name).sort()).toEqual(['Prophecy p1', 'Prophecy p2']);
+    expect(next.prophecyFlips.every(f => f.ownerId === 'A')).toBe(true);
+    expect(new Set(next.prophecyFlips.map(f => f.seq)).size).toBe(2);
+    expect(next.prophecyFlipSeq).toBe(2);
+  });
+
+  it('a Prophecy still counting down records nothing', () => {
+    const state = baseState({ turnPlayer: 'A', board: { r3c1: { ...prophecy('p1'), timer: 3 } }, players: { A: player(), B: player() } });
+    expect(beginTurn(state).prophecyFlips).toBeUndefined();
+  });
+});
+

@@ -515,3 +515,26 @@ html, body {
 @media (prefers-reduced-motion: reduce) {
   .priority-banner-pop { animation: none; }
 }
+
+/* Match.jsx > prophecyReveal: the full-screen "this Prophecy is flipping up"
+   overlay — fades the backdrop in and flips the card in from edge-on. */
+@keyframes prophecy-reveal-fade {
+  0% { opacity: 0; }
+  12% { opacity: 1; }
+  88% { opacity: 1; }
+  100% { opacity: 0; }
+}
+.prophecy-reveal-fade { animation: prophecy-reveal-fade 2400ms ease-in-out both; }
+@keyframes prophecy-reveal-flip {
+  0% { transform: perspective(900px) rotateY(90deg) scale(0.85); }
+  35% { transform: perspective(900px) rotateY(0deg) scale(1.04); }
+  50% { transform: perspective(900px) rotateY(0deg) scale(1); }
+  100% { transform: perspective(900px) rotateY(0deg) scale(1); }
+}
+.prophecy-reveal-card {
+  animation: prophecy-reveal-flip 2400ms ease-out both;
+  filter: drop-shadow(0 0 28px rgba(251, 191, 36, 0.55));
+}
+@media (prefers-reduced-motion: reduce) {
+  .prophecy-reveal-card { animation: none; }
+}

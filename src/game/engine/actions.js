@@ -6596,7 +6596,18 @@ export const resolveProphecyModulateHitZero = (state, cellId, duringEndStep = fa
     return sendToPurgatory(state);
   }
 
-  let next = { ...state, board: { ...state.board, [cellId]: { ...occupant, faceDown: false } } };
+  // Recorded for the UI's full-screen "this Prophecy is flipping" reveal
+  // (Match.jsx > useProphecyReveal): both players see which card flipped,
+  // including one that resolves and leaves the board in this same step
+  // (where the board alone never shows it face up). `seq` makes every flip
+  // distinct; only the latest few are kept.
+  const flipSeq = (state.prophecyFlipSeq || 0) + 1;
+  let next = {
+    ...state,
+    prophecyFlipSeq: flipSeq,
+    prophecyFlips: [...(state.prophecyFlips || []).slice(-4), { seq: flipSeq, card: occupant.card, ownerId: occupant.ownerId }],
+    board: { ...state.board, [cellId]: { ...occupant, faceDown: false } },
+  };
   const lines = stripFlavorText(occupant.card.textBox || '').split('\n').map(l => l.trim()).filter(Boolean);
   lines.forEach(line => {
     if (occupant.card.keywords?.skipsControllerDraw && /do not draw during the start of your turn/i.test(line)) return;

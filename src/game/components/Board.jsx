@@ -340,31 +340,96 @@ function DeitySummonCinematic({ seq, card, borderImages, borderImagesLoaded, art
   );
 }
 
-function EffigyZoneBreakdown({ pool, theme }) {
+// Hover (desktop) or click/tap (touch) on the Effigy Zone to see exactly which
+// Effigies are available: every color with how many are ready to spend, and
+// any that are temporary Essence (expires at end of turn) or Engaged (tapped
+// by an effect, so not spendable until the next Disengage Step). The tile
+// itself only shows the bare per-color numbers.
+const EFFIGY_ZONE_COLORS = [...EFFIGY_COLORS, 'faithless'];
+
+function EffigyZonePopover({ pool, own }) {
+  const rows = EFFIGY_ZONE_COLORS.map(color => {
+    const ofColor = pool.filter(e => e.effigyType === color);
+    const ready = ofColor.filter(e => !e.engaged);
+    return {
+      color,
+      ready: ready.length,
+      temporary: ready.filter(e => e.temporary).length,
+      engaged: ofColor.length - ready.length,
+    };
+  }).filter(r => r.ready > 0 || r.engaged > 0 || r.color !== 'faithless');
+  const totalReady = rows.reduce((n, r) => n + r.ready, 0);
+  return (
+    <div
+      className={`absolute z-[60] w-52 rounded-lg bg-stone-900 border border-stone-600 shadow-2xl p-2.5 text-left pointer-events-none ${own ? 'bottom-full mb-1 right-0' : 'top-full mt-1 left-0'}`}
+    >
+      <div className="text-xs font-semibold text-stone-200 mb-1.5">
+        {own ? 'Your Effigies' : "Opponent's Effigies"} — {totalReady} available
+      </div>
+      <div className="space-y-0.5">
+        {rows.map(({ color, ready, temporary, engaged }) => (
+          <div key={color} className={`flex items-center gap-2 text-xs ${ready > 0 ? 'text-stone-100' : 'text-stone-500'}`}>
+            <span className="inline-block w-2.5 h-2.5 rounded-full border border-stone-500" style={{ backgroundColor: EFFIGY_TYPE_COLORS[color] }} />
+            <span className="capitalize">{color}</span>
+            <span className="ml-auto tabular-nums font-bold">{ready}</span>
+            {(temporary > 0 || engaged > 0) && (
+              <span className="text-[10px] text-stone-400">
+                {[temporary > 0 ? `${temporary} temp` : null, engaged > 0 ? `${engaged} engaged` : null].filter(Boolean).join(', ')}
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+      {totalReady === 0 && <div className="text-[11px] text-stone-400 mt-1.5">None available.</div>}
+    </div>
+  );
+}
+
+function EffigyZoneBreakdown({ pool, theme, own }) {
+  const [open, setOpen] = React.useState(false);
+  // Touch screens fire mouseenter right before click on a tap, which would
+  // open then immediately toggle shut — so hover only drives it where a real
+  // hover exists; everywhere else a tap toggles it, and a tap anywhere else
+  // closes it.
+  const canHover = typeof window !== 'undefined' && window.matchMedia('(hover: hover)').matches;
+  React.useEffect(() => {
+    if (!open || canHover) return undefined;
+    const close = () => setOpen(false);
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [open, canHover]);
   const counts = {};
   pool.forEach(e => { counts[e.effigyType] = (counts[e.effigyType] || 0) + 1; });
   const present = EFFIGY_COLORS.filter(color => counts[color] > 0);
-
-  if (present.length === 0) {
-    return <span className="text-[10px] text-stone-400 uppercase tracking-wide px-1 text-center">Effigy Zone</span>;
-  }
 
   // Available (crafted) Effigies really are a small stack of face-up cards
   // sitting in the Zone — same card-stack illustration as the Effigy Deck,
   // just with the per-color counts overlaid instead of a single total.
   return (
-    <div className="relative w-24 h-24 sm:w-28 sm:h-28">
-      <StackBacking theme={theme} />
-      <div
-        className="absolute inset-x-0 grid grid-cols-2 gap-x-3 gap-y-1 justify-items-center"
-        style={{ bottom: (STACK_LAYERS - 1) * 2 + 28 }}
-      >
-        {present.map(color => (
-          <span key={color} className="text-2xl font-extrabold" style={{ color: EFFIGY_TYPE_COLORS[color] }}>
-            {counts[color]}
-          </span>
-        ))}
-      </div>
+    <div
+      className="relative"
+      onMouseEnter={canHover ? () => setOpen(true) : undefined}
+      onMouseLeave={canHover ? () => setOpen(false) : undefined}
+      onClick={(e) => { e.stopPropagation(); if (!canHover) setOpen(o => !o); }}
+    >
+      {present.length === 0 ? (
+        <span className="text-[10px] text-stone-400 uppercase tracking-wide px-1 text-center">Effigy Zone</span>
+      ) : (
+        <div className="relative w-24 h-24 sm:w-28 sm:h-28">
+          <StackBacking theme={theme} />
+          <div
+            className="absolute inset-x-0 grid grid-cols-2 gap-x-3 gap-y-1 justify-items-center"
+            style={{ bottom: (STACK_LAYERS - 1) * 2 + 28 }}
+          >
+            {present.map(color => (
+              <span key={color} className="text-2xl font-extrabold" style={{ color: EFFIGY_TYPE_COLORS[color] }}>
+                {counts[color]}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+      {open && <EffigyZonePopover pool={pool} own={own} />}
     </div>
   );
 }
@@ -650,7 +715,7 @@ export default function Board({ state, displayBoard, flashes, lastAttack, lastMa
             <EffigyDeckStack count={state.players[effigyDeckOwner].effigyDeck.length} theme={theme} />
           )}
           {!occupant && effigyZoneOwner && (
-            <EffigyZoneBreakdown pool={state.players[effigyZoneOwner].effigyPool} theme={theme} />
+            <EffigyZoneBreakdown pool={state.players[effigyZoneOwner].effigyPool} theme={theme} own={effigyZoneOwner === viewerId} />
           )}
           {!occupant && groundRelic && (
             <div className="relative">

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 const DAMAGE_ANIMATION_MS = 700;
 
@@ -693,4 +693,39 @@ export const useDeitySummonCinematic = (board) => {
   useEffect(() => () => { Object.values(timersRef.current).forEach(clearTimeout); }, []);
 
   return deityCells;
+};
+
+// How long each Prophecy flip's full-screen reveal stays up.
+export const PROPHECY_REVEAL_MS = 2400;
+
+// Full-screen "this Prophecy is flipping up" reveal, for BOTH players: the
+// engine records every face-down -> face-up flip on `state.prophecyFlips`
+// (actions.js > resolveProphecyModulateHitZero), so it also catches a
+// Prophecy that resolves and leaves the board in the same step, which a
+// board diff alone would never see face up. Several flips in one step (two
+// Prophecies ticking to 0 at the start of a turn) queue and show one after
+// another. A flip already on the state when the hook mounts is ignored — a
+// reload mid-game shouldn't replay an old reveal.
+export const useProphecyReveal = (state) => {
+  const flips = state.prophecyFlips;
+  const seenSeqRef = useRef(state.prophecyFlipSeq || 0);
+  const [queue, setQueue] = useState([]);
+
+  useEffect(() => {
+    if (!flips || flips.length === 0) return;
+    const fresh = flips.filter(f => f.seq > seenSeqRef.current);
+    if (fresh.length === 0) return;
+    seenSeqRef.current = Math.max(...fresh.map(f => f.seq));
+    setQueue(prev => [...prev, ...fresh]);
+  }, [flips]);
+
+  const current = queue[0] || null;
+  useEffect(() => {
+    if (!current) return undefined;
+    const timer = setTimeout(() => setQueue(prev => prev.slice(1)), PROPHECY_REVEAL_MS);
+    return () => clearTimeout(timer);
+  }, [current]);
+
+  const dismiss = useCallback(() => setQueue(prev => prev.slice(1)), []);
+  return { current, dismiss };
 };

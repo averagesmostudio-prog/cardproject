@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { History, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Flag, Eye, EyeOff, Sun, Moon, RotateCw, Maximize, Minimize } from 'lucide-react';
 import { useGameEngine } from '../state/useGameEngine.js';
-import { useStagedBoard, useStagedLife, useTurnBanner, useJustDrawn, useShiftVortex, useDepartFlash, useDeitySummonCinematic, useOpenLaneStrike, useFeatherMove, usePurgatoryArrivals } from '../state/useStagedBoard.js';
+import { useStagedBoard, useStagedLife, useTurnBanner, useJustDrawn, useShiftVortex, useDepartFlash, useDeitySummonCinematic, useOpenLaneStrike, useFeatherMove, usePurgatoryArrivals, useProphecyReveal } from '../state/useStagedBoard.js';
 import { getLegalActions, effectiveEngage, animatedTopEntry, effectiveCastingCost, faithlessPaymentNeedsChoice, faithlessPaymentCandidates, searchZoneCandidates } from '../engine/actions.js';
 import { effectiveStrength } from '../engine/combat.js';
 import { STARTING_LIFESPAN } from '../engine/constants.js';
@@ -519,6 +519,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
   const { displayBoard, flashes } = useStagedBoard(state.board);
   const { displayLifespans, lifeFlashes } = useStagedLife(state.players);
   const turnBanner = useTurnBanner(state);
+  const prophecyReveal = useProphecyReveal(state);
   const justDrawnIds = useJustDrawn(state.players[HUMAN].hand);
   const vortexCells = useShiftVortex(state.board);
   const departCells = useDepartFlash(state.board, state.log);
@@ -2024,6 +2025,32 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
           {popupHidden ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
           {popupHidden ? 'Show Choice' : 'View Board'}
         </button>
+      )}
+      {prophecyReveal.current && (
+        // Both players see which Prophecy is flipping up — click anywhere to
+        // dismiss early; otherwise it clears itself (PROPHECY_REVEAL_MS).
+        <div
+          key={`prophecy-${prophecyReveal.current.seq}`}
+          className="fixed inset-0 z-[55] flex flex-col items-center justify-center gap-3 bg-black/70 prophecy-reveal-fade cursor-pointer"
+          onClick={prophecyReveal.dismiss}
+        >
+          <div className="text-xl font-extrabold tracking-wide text-amber-300 uppercase">
+            {prophecyReveal.current.ownerId === HUMAN ? 'Your Prophecy flips up' : "Opponent's Prophecy flips up"}
+          </div>
+          <div className="prophecy-reveal-card" style={{ width: 'min(60vw, 52dvh)' }}>
+            <CardThumbnail
+              card={prophecyReveal.current.card}
+              borderImages={borderImages}
+              borderImagesLoaded={borderImagesLoaded}
+              artImages={artImages}
+              artBorderImages={artBorderImages}
+              artImagesLoaded={artImagesLoaded}
+              fontLoaded={fontLoaded}
+              width={600}
+              height={840}
+            />
+          </div>
+        </div>
       )}
       {turnBanner && (
         <div
