@@ -13711,7 +13711,7 @@ describe('Eighteenth wave: Ethereal Conjuring reactive timing (priority window)'
       expect(next.board.r2c1.engaged).toBe(false); // NOT yet engaged
       expect(next.players.A.effigyPool).toHaveLength(0); // effect not yet applied either
       expect(next.pendingResolution).toEqual({
-        kind: 'activate-engage', declaringPlayer: 'A', cellId: 'r2c1', cardName: 'Arbosalis Zealot',
+        kind: 'activate-engage', declaringPlayer: 'A', cellId: 'r2c1', cardName: 'Arbosalis Zealot', instanceId: 'az#0',
         engageEffect: 'Add (1) Living Essence.', context: { selfCellId: 'r2c1' },
       });
       expect(next.reactiveWindow).toEqual(expect.objectContaining({ openFor: 'B' }));
@@ -13724,6 +13724,31 @@ describe('Eighteenth wave: Ethereal Conjuring reactive timing (priority window)'
       expect(next.board.r2c1.engaged).toBe(true);
       expect(next.players.A.effigyPool).toHaveLength(1);
       expect(next.players.A.effigyPool[0].effigyType).toBe('living');
+    });
+
+    it('fizzles instead of crashing when the engager is replaced on its tile during the window (a dying Being leaves an Armament pile there)', () => {
+      // Found by a 4-hour self-play run: Venomous Viper's Engage read its own
+      // Strength off whatever was on its tile when the window closed — a
+      // card-less Armament pile after the Viper died in response.
+      const viper = {
+        type: 'being', ownerId: 'A',
+        card: beingCard({ instanceId: 'vv#0', name: 'Venomous Viper', strength: 0, lifespan: 2, keywords: { engage: 'Target Being has (-X/-0) strength until end of turn where (X) is Venomous Viper\'s Strength.' } }),
+        currentLifespan: 2, engaged: false,
+      };
+      const state = baseState({ board: { r2c1: viper }, players: { A: player(), B: player({ hand: [boknean()], lifespan: 50 }) } });
+      const declared = gameReducer(state, { type: 'ACTIVATE_ENGAGE', cellId: 'r2c1' });
+      expect(declared.pendingResolution).toMatchObject({ kind: 'activate-engage', instanceId: 'vv#0' });
+      // Mid-window, the Viper is gone and an Armament pile sits on its tile.
+      const replaced = {
+        ...declared,
+        board: { ...declared.board, r2c1: { type: 'armament-stack', ownerId: 'A', armaments: [{ card: { name: 'Leftover Sword', instanceId: 'ls#0', kind: 'relic-armament', strength: 1, lifespan: 1 }, engaged: false }] } },
+      };
+      let resolved;
+      expect(() => { resolved = gameReducer(replaced, { type: 'PASS_PRIORITY' }); }).not.toThrow();
+      expect(resolved.pendingResolution).toBeNull();
+      expect(resolved.board.r2c1.type).toBe('armament-stack'); // untouched, not "engaged"
+      expect(resolved.board.r2c1.engaged).toBeUndefined();
+      expect(resolved.log.some(e => e.message.includes('fails to resolve'))).toBe(true);
     });
 
     it('the user\'s own example: Boknean Wine engages the Zealot FIRST, negating the original Engage attempt entirely', () => {

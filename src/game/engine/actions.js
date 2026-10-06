@@ -14447,7 +14447,7 @@ const gameReducerCore = (state, action) => {
         ...next,
         pendingResolution: {
           kind: 'activate-engage', declaringPlayer: playerId, cellId: action.cellId,
-          cardName: occupant.card.name, engageEffect, context: engageContext,
+          cardName: occupant.card.name, instanceId: occupant.card.instanceId, engageEffect, context: engageContext,
         },
       };
     }
@@ -14884,7 +14884,7 @@ const resolvePendingResolution = (state) => {
     return endTurn(cleared);
   }
   if (pendingResolution.kind === 'activate-engage') {
-    const { declaringPlayer, cellId, cardName, engageEffect, context } = pendingResolution;
+    const { declaringPlayer, cellId, cardName, instanceId, engageEffect, context } = pendingResolution;
     const occupant = cleared.board[cellId];
     // Re-validated fresh, per the design fork this whole kind exists for:
     // a response (Boknean Wine et al.) may have engaged this same
@@ -14893,7 +14893,16 @@ const resolvePendingResolution = (state) => {
     // snapshot is still true. The costs already paid at declare time are
     // NOT refunded (same "sunk cost" precedent this engine already
     // follows everywhere else a cost is paid before a fizzled effect).
-    if (!occupant) {
+    // "Still there" means the SAME permanent, not just an occupied cell: a
+    // response can kill the engager and leave something else on its tile (an
+    // Armament pile a dying Being drops, a freshly summoned token...), and
+    // resolving the effect against that — a Strength read off a card-less
+    // pile — crashed self-play (found in a 4-hour run). Older declares
+    // without an instanceId fall back to the name check.
+    const sameCard = !occupant ? false
+      : instanceId ? occupant.card?.instanceId === instanceId
+      : occupant.card?.name === cardName;
+    if (!occupant || !sameCard) {
       return addLog(cleared, `${cardName}'s Engage ability fails to resolve — it's no longer on the battlefield.`);
     }
     if (occupant.engaged) {
