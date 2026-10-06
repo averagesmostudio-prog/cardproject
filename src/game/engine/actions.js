@@ -1,7 +1,7 @@
 import { cellId, parseCellId, ROWS, COLS, ETHEREAL_ROW, SUMMON_CELLS, mortalCellsFor, isMortalRealm, opponentOf, computeMoveDestination, computeAttackCell, owningPlayerOfRow } from './board.js';
 import { STARTING_LIFESPAN } from './constants.js';
 import { STARTING_HAND_SIZE, MULLIGAN_COST, drawCard } from './deck.js';
-import { addLog, beginTurn, endTurn, checkWin, controlsOnlyFaithlessPermanents, triggerZealotProphecyEssence, triggerHourglassCollection, resolveEndOfTurnDamageNamedFamilyQueue } from './turn.js';
+import { addLog, beginTurn, finishBeginTurn, endTurn, checkWin, controlsOnlyFaithlessPermanents, triggerZealotProphecyEssence, triggerHourglassCollection, resolveEndOfTurnDamageNamedFamilyQueue } from './turn.js';
 import { resolveMutualCombat, deathDamageFor, effectiveStrength } from './combat.js';
 import { stripFlavorText, EFFIGY_COLORS, makeTemporaryEssence, totalCastingCost, createTokenCard, isFaithlessTypedCard, parseKeywords } from '../../lib/cardData.js';
 
@@ -6561,7 +6561,7 @@ const retryStuckShiftReturns = (state, landDisengaged = true) => {
 //     cleanup: straight to Purgatory, no further effect.
 // A Prophecy still above 0 either way is a no-op (the caller already wrote
 // its new timer onto the board).
-export const resolveProphecyModulateHitZero = (state, cellId, duringEndStep = false, bounceCount = 0, disengageOnReturn = false, landDisengaged = true) => {
+export const resolveProphecyModulateHitZero = (state, cellId, duringEndStep = false, bounceCount = 0, disengageOnReturn = false, landDisengaged = true, immediateFlip = false) => {
   const occupant = state.board[cellId];
   if (!occupant || occupant.type !== 'prophecy' || (occupant.timer || 0) > 0) return state;
 
@@ -6598,16 +6598,37 @@ export const resolveProphecyModulateHitZero = (state, cellId, duringEndStep = fa
     return sendToPurgatory(state);
   }
 
+  // A face-down Prophecy hitting 0 is "revealed" — and the opponent (and
+  // the owner) must get a chance to respond BEFORE its text resolves (Rewrite
+  // the Past: "Negate a Prophecy and flip it face down..." only means
+  // anything if it can land between the reveal and the effect). In a real
+  // game (`prophecyFlipWindows`, set by createInitialState) this just QUEUES
+  // the flip; advanceProphecyFlips (below) later declares it — reveal +
+  // priority window — and the flip itself runs when that window closes
+  // (resolvePendingResolution's 'prophecy-flip', which calls back in here
+  // with `immediateFlip`). A bare state without the flag (most direct unit
+  // tests of beginTurn/modulate) keeps the old atomic flip.
+  if (state.prophecyFlipWindows && !immediateFlip) {
+    return {
+      ...state,
+      pendingProphecyFlips: [...(state.pendingProphecyFlips || []), { cellId, instanceId: occupant.card.instanceId, ownerId: occupant.ownerId }],
+    };
+  }
+
   // Recorded for the UI's full-screen "this Prophecy is flipping" reveal
   // (Match.jsx > useProphecyReveal): both players see which card flipped,
   // including one that resolves and leaves the board in this same step
   // (where the board alone never shows it face up). `seq` makes every flip
-  // distinct; only the latest few are kept.
+  // distinct; only the latest few are kept. With flip windows on, the reveal
+  // was already recorded when the flip was DECLARED (advanceProphecyFlips) —
+  // that's the moment responders need to see the card — so it isn't repeated.
   const flipSeq = (state.prophecyFlipSeq || 0) + 1;
   let next = {
     ...state,
-    prophecyFlipSeq: flipSeq,
-    prophecyFlips: [...(state.prophecyFlips || []).slice(-4), { seq: flipSeq, card: occupant.card, ownerId: occupant.ownerId }],
+    ...(state.prophecyFlipWindows ? {} : {
+      prophecyFlipSeq: flipSeq,
+      prophecyFlips: [...(state.prophecyFlips || []).slice(-4), { seq: flipSeq, card: occupant.card, ownerId: occupant.ownerId }],
+    }),
     board: { ...state.board, [cellId]: { ...occupant, faceDown: false } },
   };
   const lines = stripFlavorText(occupant.card.textBox || '').split('\n').map(l => l.trim()).filter(Boolean);
@@ -9238,6 +9259,9 @@ export const createInitialState = ({ mainDeckA, effigyDeckA, mainDeckB, effigyDe
   // they hold something. AI seats (and the headless self-play harness, which
   // leaves this empty) keep the instant auto-skip.
   alwaysOfferPriorityTo,
+  // A Prophecy's flip gets its own reveal + priority window before its text
+  // resolves (see resolveProphecyModulateHitZero). Off in bare test states.
+  prophecyFlipWindows: true,
   turnPlayer: startingPlayer,
   turnNumber: 1,
   winner: null,
@@ -14843,6 +14867,17 @@ const resolvePendingResolution = (state) => {
     let next = addLog(cleared, `${cardName}'s When Summoned triggers.`);
     return resolveOrLogEffect(next, declaringPlayer, cardName, whenSummonedText, 'When Summoned', { selfCellId: cellId });
   }
+  if (pendingResolution.kind === 'prophecy-flip') {
+    const { cellId, instanceId, cardName } = pendingResolution;
+    const occ = cleared.board[cellId];
+    // Re-validated fresh, same "never trust stale data across a window"
+    // discipline as every other kind: a response (Rewrite the Past) may have
+    // flipped it back down with fresh Time Counters, or removed it outright.
+    if (!occ || occ.type !== 'prophecy' || occ.card?.instanceId !== instanceId || !occ.faceDown || (occ.timer || 0) > 0) {
+      return addLog(cleared, `${cardName}'s flip is negated — it does not resolve.`);
+    }
+    return resolveProphecyModulateHitZero(cleared, cellId, false, 0, false, true, true);
+  }
   if (pendingResolution.kind === 'pass-turn') {
     // Re-validated: a response could in principle have ended the game.
     if (cleared.phase !== 'playing' || cleared.turnPlayer !== pendingResolution.declaringPlayer) return cleared;
@@ -15026,6 +15061,36 @@ const passReactiveWindowPriority = (state) => {
   return { ...state, reactiveWindow: { openFor: opponentOf(openFor), triggerDescription, everResponded, passedOnce: true } };
 };
 
+// Auto-skips the current reactive window's holder whenever they have nothing
+// real to cast, until a window needs a real decision (or none is left) —
+// the shared tail of manageReactiveWindow and advanceProphecyFlips. Also
+// re-arms a fresh window for the Boundless Hunger chain's next link.
+const REACTIVE_RESPONSE_TYPES = new Set(['CAST_CONJURING', 'ACTIVATE_ENGAGE', 'ACTIVATE_GROUND_RELIC_ENGAGE', 'ACTIVATE_ARMAMENT_ENGAGE']);
+const BOUNDLESS_HUNGER_KINDS = new Set(['boundless-hunger-return', 'boundless-hunger-reshift', 'boundless-hunger-terranean-gates']);
+const settleReactiveWindow = (state) => {
+  let next = state;
+  while (true) {
+    if (!next.reactiveWindow && next.pendingResolution && BOUNDLESS_HUNGER_KINDS.has(next.pendingResolution.kind)) {
+      const chainedLogMessage = next.log.length > 0 ? next.log[next.log.length - 1].message : null;
+      next = {
+        ...next,
+        reactiveWindow: {
+          openFor: opponentOf(next.pendingResolution.ownerId),
+          triggerDescription: chainedLogMessage, everResponded: false, passedOnce: false,
+        },
+      };
+    }
+    if (!next.reactiveWindow) break;
+    const { openFor } = next.reactiveWindow;
+    const hasRealOption = getLegalActions(next, openFor).some(a => REACTIVE_RESPONSE_TYPES.has(a.type));
+    // A person is always given the chance to pass explicitly, even with
+    // nothing to respond with — see createInitialState's alwaysOfferPriorityTo.
+    if (hasRealOption || next.alwaysOfferPriorityTo?.includes(openFor)) break;
+    next = passReactiveWindowPriority(next);
+  }
+  return next;
+};
+
 const manageReactiveWindow = (prevState, state, action) => {
   if (state.phase !== 'playing' || state.winner) {
     // Always explicitly null (never left undefined) — createInitialState
@@ -15063,7 +15128,6 @@ const manageReactiveWindow = (prevState, state, action) => {
   // FRESH pendingResolution on their way out — every other kind is
   // terminal. Scoped by name (not "any pendingResolution") since no other
   // kind is designed to chain like this — see the two uses below.
-  const BOUNDLESS_HUNGER_PENDING_KINDS = new Set(['boundless-hunger-return', 'boundless-hunger-reshift', 'boundless-hunger-terranean-gates']);
   // The whole point of the window is "someone else just did something you
   // might want to respond to" — so it carries a human-readable description
   // of exactly what that was, shown above the Pass Priority button
@@ -15157,24 +15221,56 @@ const manageReactiveWindow = (prevState, state, action) => {
   // while a real response at any link still stops the cascade right there.
   // Every other pendingResolution kind is terminal, so this only ever
   // fires for these three.
-  while (true) {
-    if (!next.reactiveWindow && next.pendingResolution && BOUNDLESS_HUNGER_PENDING_KINDS.has(next.pendingResolution.kind)) {
-      const chainedLogMessage = next.log.length > 0 ? next.log[next.log.length - 1].message : null;
-      next = {
-        ...next,
-        reactiveWindow: {
-          openFor: opponentOf(next.pendingResolution.ownerId),
-          triggerDescription: chainedLogMessage, everResponded: false, passedOnce: false,
-        },
-      };
+  return settleReactiveWindow(next);
+};
+
+// Drains the queue of Prophecies that just hit 0 (resolveProphecyModulateHitZero's
+// `prophecyFlipWindows` path): one at a time it DECLARES the flip — records the
+// reveal for the UI, logs it, parks a 'prophecy-flip' pendingResolution — and
+// opens a priority window for the owner's opponent, so a response (Rewrite the
+// Past) can land between the reveal and the Prophecy's text. The flip itself
+// runs when that window closes (resolvePendingResolution). Waits while
+// anything else is open (a choice a previous flip raised, another window).
+// Once the queue is empty and a turn start was parked behind it
+// (`resumeTurnStart`, beginTurn), finishes that turn start.
+const advanceProphecyFlips = (state) => {
+  let next = state;
+  // Bounded: every pass either declares a flip (shrinking the queue) or stops.
+  for (let guard = 0; guard < 50; guard += 1) {
+    if (next.phase !== 'playing' || next.winner) {
+      return (next.pendingProphecyFlips?.length || next.resumeTurnStart)
+        ? { ...next, pendingProphecyFlips: [], resumeTurnStart: false }
+        : next;
     }
-    if (!next.reactiveWindow) break;
-    const { openFor } = next.reactiveWindow;
-    const hasRealOption = getLegalActions(next, openFor).some(a => REACTIVE_RESPONSE_ACTION_TYPES.has(a.type));
-    // A person is always given the chance to pass explicitly, even with
-    // nothing to respond with — see createInitialState's alwaysOfferPriorityTo.
-    if (hasRealOption || next.alwaysOfferPriorityTo?.includes(openFor)) break;
-    next = passReactiveWindowPriority(next);
+    if (next.pendingChoice || next.pendingResolution || next.reactiveWindow) return next;
+    const queue = next.pendingProphecyFlips || [];
+    if (queue.length === 0) {
+      if (!next.resumeTurnStart) return next;
+      return finishBeginTurn({ ...next, resumeTurnStart: false });
+    }
+    const [head, ...rest] = queue;
+    next = { ...next, pendingProphecyFlips: rest };
+    const occ = next.board[head.cellId];
+    // Dropped silently if it is no longer the same face-down, spent Prophecy
+    // (something already removed or reset it before its turn came up).
+    if (!occ || occ.type !== 'prophecy' || occ.card?.instanceId !== head.instanceId || !occ.faceDown || (occ.timer || 0) > 0) continue;
+    const flipSeq = (next.prophecyFlipSeq || 0) + 1;
+    next = {
+      ...next,
+      prophecyFlipSeq: flipSeq,
+      prophecyFlips: [...(next.prophecyFlips || []).slice(-4), { seq: flipSeq, card: occ.card, ownerId: occ.ownerId }],
+      pendingResolution: { kind: 'prophecy-flip', cellId: head.cellId, instanceId: head.instanceId, ownerId: occ.ownerId, cardName: occ.card.name },
+    };
+    next = addLog(next, `${occ.ownerId}'s ${occ.card.name} is revealed — its Prophecy is about to resolve.`);
+    next = {
+      ...next,
+      reactiveWindow: {
+        openFor: opponentOf(occ.ownerId),
+        triggerDescription: `${occ.card.name} (${occ.ownerId}'s Prophecy) is flipping face up.`,
+        everResponded: false, passedOnce: false,
+      },
+    };
+    next = settleReactiveWindow(next);
   }
   return next;
 };
@@ -15215,6 +15311,12 @@ export const gameReducer = (state, action) => {
   if ((state.pendingChoice || state.pendingResolution) && !afterWindow.pendingChoice && !afterWindow.pendingResolution && !afterWindow.winner) {
     const retried = retryStuckShiftReturns(afterWindow);
     if (retried !== afterWindow) afterWindow = recomputeLiveAuras(retried);
+  }
+  // Prophecy flips queued by this action (or by the turn start it triggered)
+  // get their reveal + response window now — see advanceProphecyFlips.
+  if (afterWindow.pendingProphecyFlips?.length > 0 || afterWindow.resumeTurnStart) {
+    const advanced = advanceProphecyFlips(afterWindow);
+    if (advanced !== afterWindow) afterWindow = recomputeLiveAuras(advanced);
   }
   return clearStuckPendingChoice(afterWindow);
 };

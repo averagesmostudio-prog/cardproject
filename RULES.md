@@ -1723,10 +1723,23 @@ Rulings confirmed with the user after the earlier waves, now built:
   actually ends; the end-of-turn / start-of-next-turn pipeline runs when the
   window closes. With nobody able to respond it auto-closes in the same
   dispatch, so the net effect is unchanged.
-- **Prophecy flips are announced.** Each face-down -> face-up flip is
-  recorded on `state.prophecyFlips` and shown as a brief full-screen reveal
-  to both players, including a Prophecy that resolves and leaves the board
-  in the same step.
+- **Prophecy flips are announced, and respondable before they resolve.** A
+  face-down Prophecy hitting 0 is *revealed* first: the card is recorded on
+  `state.prophecyFlips` (shown as a brief full-screen reveal to both
+  players, including a Prophecy that resolves and leaves the board in the
+  same step) and a priority window opens for the owner's opponent, with the
+  Prophecy still face down at 0 Time Counters. Only when that window closes
+  does the flip and its printed text resolve (`pendingResolution`
+  `kind: 'prophecy-flip'`, re-validated fresh) — so **Rewrite the Past**
+  ("Negate a Prophecy and flip it face down, then add (2) Time Counters")
+  cast in the window puts it back at 2 and the flip fizzles. Several flips
+  in one Modulate Step queue (`pendingProphecyFlips`) and each gets its own
+  reveal + window. The rest of the turn start (Disengage, Craft, Draw) is
+  parked until the queue drains (`resumeTurnStart`), so a flipped "you do
+  not draw" Prophecy is already face up when the Draw Step reads it. This is
+  on for real games (`prophecyFlipWindows`, set by `createInitialState`);
+  bare test states without the flag keep the old atomic flip. Human seats
+  are always offered the window (`alwaysOfferPriorityTo`).
 - **UI coverage:** every `pendingChoice` kind the engine can open must be
   answerable in the UI (a kind with no screen freezes the game behind the
   open choice — Animate with 2+ Relics did). A test

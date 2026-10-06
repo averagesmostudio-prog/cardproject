@@ -14309,3 +14309,110 @@ describe('prophecy flips are recorded for the full-screen reveal', () => {
   });
 });
 
+describe('Prophecy flips get a reveal + response window before their text resolves (prophecyFlipWindows)', () => {
+  const rewriteThePast = (overrides = {}) => ({
+    id: 'rtp', instanceId: 'rtp#0', name: 'Rewrite the Past', kind: 'ethereal-conjuring',
+    castingCost: { faithless: 0, colored: {} },
+    textBox: 'Negate a Prophecy and flip it face down, then add (2) Time Counters to it.',
+    ...overrides,
+  });
+  const faceDown = (id = 'p1', overrides = {}) => ({
+    type: 'prophecy', ownerId: 'A', faceDown: true, timer: 1,
+    card: { name: `Prophecy ${id}`, instanceId: `${id}#0`, kind: 'prophecy', textBox: '', keywords: {} },
+    ...overrides,
+  });
+  // B passes the turn; A's turn starts and A's Prophecy ticks 1 -> 0.
+  const aboutToFlip = (extra = {}) => baseState({
+    turnPlayer: 'B', prophecyFlipWindows: true,
+    board: { r3c1: faceDown() },
+    players: {
+      A: player({ mainDeck: [{ instanceId: 'draw#0', kind: 'being', castingCost: { faithless: 0, colored: {} } }] }),
+      B: player({ mainDeck: [] }),
+    },
+    ...extra,
+  });
+
+  it('with nobody able to respond, the flip still resolves in the same dispatch and the turn start finishes (draw happens)', () => {
+    const next = gameReducer(aboutToFlip(), { type: 'PASS_TURN' });
+    expect(next.turnPlayer).toBe('A');
+    expect(next.reactiveWindow).toBeNull();
+    expect(next.pendingResolution).toBeNull();
+    expect(next.pendingProphecyFlips).toEqual([]);
+    expect(next.resumeTurnStart).toBeFalsy();
+    expect(next.board.r3c1).toBeUndefined(); // resolved and spent
+    expect(next.players.A.purgatory.map(c => c.name)).toContain('Prophecy p1');
+    expect(next.players.A.hand).toHaveLength(1); // the turn's draw ran, after the flip
+    expect(next.prophecyFlips.map(f => f.card.name)).toEqual(['Prophecy p1']); // revealed once
+  });
+
+  it('the opponent gets a real window BEFORE the text resolves, with the Prophecy already revealed and the turn start parked', () => {
+    const state = aboutToFlip({ players: {
+      A: player({ mainDeck: [{ instanceId: 'draw#0', kind: 'being', castingCost: { faithless: 0, colored: {} } }] }),
+      B: player({ hand: [rewriteThePast()] }),
+    } });
+    const declared = gameReducer(state, { type: 'PASS_TURN' });
+    expect(declared.reactiveWindow).toMatchObject({ openFor: 'B' });
+    expect(declared.pendingResolution).toMatchObject({ kind: 'prophecy-flip', cellId: 'r3c1', ownerId: 'A' });
+    expect(declared.prophecyFlips.map(f => f.card.name)).toEqual(['Prophecy p1']); // revealed now, for the responder
+    expect(declared.board.r3c1).toMatchObject({ faceDown: true, timer: 0 }); // NOT yet flipped
+    expect(declared.players.A.hand).toHaveLength(0); // draw step is waiting behind the flip
+    expect(declared.resumeTurnStart).toBe(true);
+    expect(getLegalActions(declared, 'B').map(a => a.type)).toEqual(expect.arrayContaining(['CAST_CONJURING', 'PASS_PRIORITY']));
+  });
+
+  it('Rewrite the Past cast in that window negates the flip: the Prophecy goes back to 2 Time Counters and its text never resolves', () => {
+    const state = aboutToFlip({ players: {
+      A: player({ mainDeck: [{ instanceId: 'draw#0', kind: 'being', castingCost: { faithless: 0, colored: {} } }] }),
+      B: player({ hand: [rewriteThePast()] }),
+    } });
+    const declared = gameReducer(state, { type: 'PASS_TURN' });
+    const negated = gameReducer(declared, { type: 'CAST_CONJURING', instanceId: 'rtp#0' });
+    // Everyone is out of responses by now, so the window collapses and the
+    // (now fizzled) flip + the parked turn start finish in that dispatch.
+    expect(negated.board.r3c1).toMatchObject({ type: 'prophecy', faceDown: true, timer: 2 });
+    expect(negated.players.A.purgatory.map(c => c.name)).not.toContain('Prophecy p1');
+    expect(negated.log.some(e => e.message.includes('flip is negated'))).toBe(true);
+    expect(negated.pendingResolution).toBeNull();
+    expect(negated.resumeTurnStart).toBeFalsy();
+    expect(negated.players.A.hand).toHaveLength(1); // the turn start still completed
+  });
+
+  it('a human seat is offered the window even with nothing to respond with, and passing it resolves the flip', () => {
+    const declared = gameReducer(aboutToFlip({ alwaysOfferPriorityTo: ['B'] }), { type: 'PASS_TURN' });
+    expect(declared.reactiveWindow).toMatchObject({ openFor: 'B' });
+    expect(declared.board.r3c1).toMatchObject({ faceDown: true });
+    const passed = gameReducer(declared, { type: 'PASS_PRIORITY' });
+    expect(passed.board.r3c1).toBeUndefined();
+    expect(passed.players.A.hand).toHaveLength(1);
+  });
+
+  it('two Prophecies hitting 0 together each get their own reveal and window, one after another', () => {
+    const state = aboutToFlip({ alwaysOfferPriorityTo: ['B'], board: { r3c1: faceDown('p1'), r3c2: faceDown('p2') } });
+    const first = gameReducer(state, { type: 'PASS_TURN' });
+    expect(first.pendingResolution.cardName).toBe('Prophecy p1');
+    const second = gameReducer(first, { type: 'PASS_PRIORITY' });
+    expect(second.pendingResolution.cardName).toBe('Prophecy p2');
+    expect(second.board.r3c1).toBeUndefined(); // the first one resolved
+    expect(second.board.r3c2).toMatchObject({ faceDown: true });
+    const done = gameReducer(second, { type: 'PASS_PRIORITY' });
+    expect(done.board.r3c2).toBeUndefined();
+    expect(done.prophecyFlips.map(f => f.card.name)).toEqual(['Prophecy p1', 'Prophecy p2']);
+    expect(done.players.A.hand).toHaveLength(1);
+  });
+
+  it('a flipped "you do not draw" Prophecy is face up before the draw step reads it, so that turn\'s draw is skipped', () => {
+    const daylight = { type: 'prophecy', ownerId: 'A', faceDown: true, timer: 1, card: { name: 'Daylight Savings', instanceId: 'ds#0', kind: 'prophecy', textBox: 'Gain (3) Time Counters. \nYou do not draw during the start of your turn.', keywords: { skipsControllerDraw: true } } };
+    const state = aboutToFlip({ alwaysOfferPriorityTo: ['B'], board: { r3c1: daylight } });
+    const declared = gameReducer(state, { type: 'PASS_TURN' });
+    const done = gameReducer(declared, { type: 'PASS_PRIORITY' });
+    expect(done.players.A.hand).toHaveLength(0); // draw skipped by the Prophecy that just flipped
+  });
+
+  it('without the flag (a bare test state) the flip stays atomic, exactly as before', () => {
+    const next = gameReducer(aboutToFlip({ prophecyFlipWindows: undefined }), { type: 'PASS_TURN' });
+    expect(next.pendingProphecyFlips).toBeUndefined();
+    expect(next.board.r3c1).toBeUndefined();
+    expect(next.players.A.hand).toHaveLength(1);
+  });
+});
+

@@ -356,7 +356,8 @@ const modulateProphecyLookaheadValue = (state, playerId, cellId) => {
       if (occupant?.type === 'prophecy') {
         const timer = Math.max(0, (occupant.timer || 0) - 1);
         next = { ...next, board: { ...next.board, [cellId]: { ...occupant, timer } } };
-        next = resolveProphecyModulateHitZero(next, cellId, true, 0);
+        // immediateFlip: this look-ahead wants the flip's real outcome, not a queued flip window.
+        next = resolveProphecyModulateHitZero(next, cellId, true, 0, false, true, true);
       }
     }
     total += evaluateState(next, playerId) * weight;

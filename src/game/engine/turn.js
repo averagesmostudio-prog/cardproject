@@ -716,6 +716,24 @@ export const beginTurn = (state) => {
     next = modulate(next);
     next = modulateAltarTimeCounters(next);
   }
+  // A Prophecy that just hit 0 in the Modulate Step is queued, not yet
+  // flipped (resolveProphecyModulateHitZero's `prophecyFlipWindows` path):
+  // each one gets a reveal + priority window first, and its text must
+  // resolve BEFORE the Disengage/Craft/Draw steps below (a flipped "do not
+  // draw" Prophecy has to be face up by the time drawStep reads it). So the
+  // rest of the turn start is parked until the queue drains —
+  // advanceProphecyFlips (actions.js) calls finishBeginTurn when it does.
+  if (next.pendingProphecyFlips?.length > 0) {
+    return { ...next, resumeTurnStart: true };
+  }
+  return finishBeginTurn(next);
+};
+
+// Everything in beginTurn after the Modulate Step: recompute the live auras,
+// Disengage, Craft Effigies, and the Draw Step. Split out so a Prophecy flip
+// window can pause the turn start between Modulate and Disengage.
+export const finishBeginTurn = (state) => {
+  let next = state;
   next = recomputeXBeings(next);
   next = recomputeDeathCountBonuses(next);
   next = recomputeConditionalBonuses(next);
