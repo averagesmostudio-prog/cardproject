@@ -48,6 +48,12 @@ const MAX_TURNS = 400; // a real game realistically ends well under this
 const MAX_ACTIONS = 4000; // guards a pendingChoice loop that never advances turnNumber
 const CHECKPOINT_EVERY_MS = 60_000;
 
+// See watchedCards' own comment below, near where this is consumed.
+const WATCHED_CARD_NAMES = new Set([
+  'Illegible Grimoire', 'Údarik Hunger', 'Onagīous Hunger', 'Crathean Cultivator',
+  'Planchette', 'Cursed Commission', 'Crawling Growth', 'Sporangium', 'Forge Master',
+]);
+
 fs.mkdirSync(OUT_DIR, { recursive: true });
 const gamesPath = path.join(OUT_DIR, 'games.jsonl');
 const crashesPath = path.join(OUT_DIR, 'crashes.jsonl');
@@ -501,6 +507,7 @@ const playOneGame = () => {
   });
 
   let actionCount = 0;
+  let lastAction = null;
   const start = Date.now();
   try {
     // Mulligan phase — always keep (a real mulligan-quality heuristic is a
@@ -517,6 +524,7 @@ const playOneGame = () => {
         const action = actionFor(state, p);
         if (!action) continue;
         trace.push({ p, action: action.type });
+        lastAction = action;
         state = gameReducer(state, action);
         actionCount++;
         acted = true;
@@ -541,6 +549,10 @@ const playOneGame = () => {
       error: { message: err.message, stack: err.stack },
       trace: trace.slice(-40), // last 40 actions leading up to the crash
       stateSnapshot: safeSnapshot(state),
+      // The action that threw and the occupant it addressed (state is still
+      // the pre-action state — the throw happened inside gameReducer).
+      lastAction,
+      lastActionOccupant: lastAction?.cellId ? JSON.stringify(state.board?.[lastAction.cellId], (k, v) => (k === 'raw' ? undefined : v))?.slice(0, 800) : null,
     }) + '\n');
     return { crashed: true };
   }
@@ -695,6 +707,12 @@ const writeSummary = () => {
     // plus the full per-color/hybrid/triple/faithless top-12 breakdowns.
     topCardsOverall: overallCardRows.slice(0, 30),
     worstCardsOverall: overallCardRows.slice(-10).reverse(),
+    // A fixed set of specific cards to track regardless of where they rank
+    // (the trimmed top-30/worst-10 lists above can silently drop a card
+    // between runs just from sample noise, making before/after comparisons
+    // for one specific card unreliable) — ad hoc, not meant to stay in the
+    // tracked harness long-term.
+    watchedCards: overallCardRows.filter((c) => WATCHED_CARD_NAMES.has(c.name)),
     topCardsByColor: topByColor,
     topCardsByHybridPair: topHybridDecks,
     topCardsByTriple: topTripleDecks,

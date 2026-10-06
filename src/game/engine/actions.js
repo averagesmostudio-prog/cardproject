@@ -305,8 +305,10 @@ export const hasOwnTyping = (board, playerId, typing) =>
 // "must already hold a Time Counter" rule applies to a Prophecy's own
 // `timer` too — merely being CAPABLE of holding Time Counters (i.e. being
 // a Prophecy at all) isn't enough on its own.
+// A card-less occupant (self-play once hit a RESOLVE_MODULATE crash reading
+// `.card.name` off one — cause never reproduced) is never a legal target.
 const isModulateTarget = (occupant) =>
-  !!occupant && (
+  !!occupant && !!occupant.card && (
     (occupant.type === 'prophecy' && (occupant.timer || 0) > 0)
     || occupant.card?.keywords?.collectsRemovedProphecyTimeCounters
     || (occupant.counters?.time !== undefined && occupant.counters.time > 0)
@@ -14733,9 +14735,19 @@ const gameReducerCore = (state, action) => {
       return continueModulateRepeat(next, playerId, cardName, label, action.delta, repeatsRemaining, thenDelta);
     }
 
+    // Passing the turn is itself something the opponent may respond to
+    // (confirmed with the user): it only DECLARES here, via a 'pass-turn'
+    // pendingResolution that manageReactiveWindow opens a window behind, and
+    // the actual end-of-turn / start-of-next-turn pipeline runs when that
+    // window closes (resolvePendingResolution). With nobody able to respond
+    // the window auto-closes within this same dispatch, so the net effect is
+    // unchanged; a human opponent always gets the chance to pass first.
     case 'PASS_TURN': {
       if (state.phase !== 'playing') return state;
-      return endTurn(state);
+      return addLog(
+        { ...state, pendingResolution: { kind: 'pass-turn', declaringPlayer: state.turnPlayer } },
+        `${state.turnPlayer} passes the turn.`
+      );
     }
 
     case 'CONCEDE': {
@@ -14830,6 +14842,11 @@ const resolvePendingResolution = (state) => {
     }
     let next = addLog(cleared, `${cardName}'s When Summoned triggers.`);
     return resolveOrLogEffect(next, declaringPlayer, cardName, whenSummonedText, 'When Summoned', { selfCellId: cellId });
+  }
+  if (pendingResolution.kind === 'pass-turn') {
+    // Re-validated: a response could in principle have ended the game.
+    if (cleared.phase !== 'playing' || cleared.turnPlayer !== pendingResolution.declaringPlayer) return cleared;
+    return endTurn(cleared);
   }
   if (pendingResolution.kind === 'activate-engage') {
     const { declaringPlayer, cellId, cardName, engageEffect, context } = pendingResolution;
@@ -15106,7 +15123,6 @@ const manageReactiveWindow = (prevState, state, action) => {
     if (state === prevState) return next;
     const NON_REACTIVE_ACTION_TYPES = new Set(['__TEST_RECOMPUTE_ONLY__', 'MULLIGAN', 'KEEP_HAND']);
     if (NON_REACTIVE_ACTION_TYPES.has(action.type)) return next;
-    if (action.type === 'PASS_TURN' && !BOUNDLESS_HUNGER_PENDING_KINDS.has(state.pendingResolution?.kind)) return next;
     // The real actor isn't always prevState.turnPlayer — a RESOLVE_*
     // finishing a multi-step pendingChoice chain can be dispatched by
     // EITHER player (getLegalActions' own pendingChoice branch already

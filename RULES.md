@@ -1042,7 +1042,8 @@ below) before they can actually run. Current implementation status:
       the still-open "negate a summon/Prophecy, convert it to/from a
       face-up Prophecy" conversion subsystem, alongside Delay, Waning
       Words, and Rewrite the Past (see "Second wave" and "Third wave"
-      below).
+      below). **Update: Delay and Prophesize are built since this was
+      written — see "Delay, Prophesize, and priority windows" below.**
 - **Shifting Sands** (the token Al khali creates, and a real drawable card
   in its own right) is the first "Beings may move across this" Relic
   (RULES.md > Keywords) to actually exist on the board, so it's also the
@@ -1220,8 +1221,10 @@ those rulings, and all 9 of the card-specific ones are now built. The 2
 subsystem questions (a continuous board-wide aura; a "becomes a face-up
 Prophecy" conversion) were still open as of this wave. **Update:** the
 board-wide aura primitive was built in the "Fifth wave" below and is fully
-closed; the face-up-Prophecy conversion is still the one open subsystem gap
-(Delay, Waning Words, Rewrite the Past, Prophesize).
+closed; the face-up-Prophecy conversion was still the one open subsystem gap
+(Delay, Waning Words, Rewrite the Past, Prophesize) as of this wave —
+**Delay and Prophesize have since been built** (see "Delay, Prophesize, and
+priority windows" below).
 
 - **Boknea Druid** — "Dryad. This may be summoned directly onto another
   TreeFolk, Vine, or Seed." Ruled: the same Dryad-attach a move onto one
@@ -1684,6 +1687,51 @@ redirect effect) is a separate, still-unbuilt mechanism.
   ("Craft (1) Effigy.") the normal way, same two-phase Prophecy lifecycle
   every other card already follows once a real starting timer is set.
 
+## Delay, Prophesize, and priority windows
+
+Rulings confirmed with the user after the earlier waves, now built:
+
+- **Delay** ("Negate the Summoning of target Being, it conjures as a face up
+  Prophecy instead...") answers **any summoning mechanism**: a hand cast,
+  Invoke, Purgatory reanimation, Martyr, and **token creation**. Every
+  summon opens the same `pendingResolution` (`kind: 'summon-being'`) window
+  — `placeBeingOnBoard` for real cards, `placeTokenOnBoard`'s Being branch
+  for tokens. A negated token becomes a face-up Prophecy that returns as a
+  summon; a token never enters Purgatory.
+- **Prophesize** ("The next Being you summon is conjured as a face up
+  Prophecy...") has the same scope: any summoning mechanism, tokens
+  included (`placeBeingOnBoard`'s `skipProphesize` option is the one opt-out).
+  It is **not** applied to the return trip of an already-negated/converted
+  summon (Delay/Prophesize's own return) or to the "return to hand, then
+  summon" effect, whose summon is ruled unstoppable — those finish a summon
+  rather than begin one. A token that Prophesize converts takes the first
+  empty Ethereal Realm tile automatically (no player choice), since token
+  placement runs inside multi-token flows that open their own choices.
+- **Shift returns:** several Shifted Beings returning in one tick all land,
+  one choice at a time; a Being whose return finds **no empty Mortal Realm
+  tile fizzles and goes to its owner's Purgatory** (a token just ceases to
+  exist — tokens never enter Purgatory). Tokens can Shift normally.
+- **Priority windows are always offered to human seats.** A window opened
+  for a seat in `state.alwaysOfferPriorityTo` (the human in single-player;
+  both players online) is never auto-skipped for lack of a response —
+  otherwise how fast it passed would reveal an empty hand. AI seats and the
+  headless self-play harness keep the instant auto-skip. The UI shows the
+  window as a top banner (View board / Pass priority / Pass priority until
+  next turn).
+- **`PASS_TURN` is respondable.** It only *declares* (`pendingResolution`
+  `kind: 'pass-turn'`) and the opponent gets a window before the turn
+  actually ends; the end-of-turn / start-of-next-turn pipeline runs when the
+  window closes. With nobody able to respond it auto-closes in the same
+  dispatch, so the net effect is unchanged.
+- **Prophecy flips are announced.** Each face-down -> face-up flip is
+  recorded on `state.prophecyFlips` and shown as a brief full-screen reveal
+  to both players, including a Prophecy that resolves and leaves the board
+  in the same step.
+- **UI coverage:** every `pendingChoice` kind the engine can open must be
+  answerable in the UI (a kind with no screen freezes the game behind the
+  open choice — Animate with 2+ Relics did). A test
+  (`pendingChoiceCoverage.test.js`) fails if a new kind has none.
+
 ## Being-Relic co-location ("Beings may move across this")
 
 - A Relic printing **"Beings may move across this"** (Shifting Sands,
@@ -1976,13 +2024,13 @@ real playable loop working first, then layer in the rest.
   dispatch whenever its current holder has nothing real to cast (mirrors
   `clearStuckPendingChoice`'s own "auto-resolve what nobody can act on"
   philosophy), so in the overwhelming majority of actions it's completely
-  invisible — it only surfaces when there's a real decision to make. Two
-  deliberate scope boundaries: a window never opens mid-`pendingChoice` (a
-  multi-step choice chain stays one atomic unit, same as today, until it
-  fully resolves), and `PASS_TURN`'s own `beginTurn`/`endTurn` pipeline
-  stays atomic too (no window opens around the draw/Modulate/craft/
-  disengage steps bundled into ending a turn) — a natural, separate future
-  task if windows around turn-transition steps themselves are ever wanted.
+  invisible — it only surfaces when there's a real decision to make. One
+  deliberate scope boundary remains: a window never opens mid-`pendingChoice`
+  (a multi-step choice chain stays one atomic unit until it fully resolves).
+  **Update:** `PASS_TURN` is now itself respondable, and human seats are
+  never auto-skipped — see "Delay, Prophesize, and priority windows" below.
+  (The draw/Modulate/craft/disengage steps bundled into ending a turn still
+  run atomically once the window closes; the window opens *before* them.)
 - **Altars** — implemented: placed into the player's own Effigy Zone cell
   only (`PLACE_ALTAR`), a single reserved slot per player. Its "Craft (N)
   additional Effigy on your turn" bonus (`card.keywords.craftBonus`) applies

@@ -16,6 +16,17 @@ import CardThumbnail from './CardThumbnail.jsx';
 // comparison) instead of substring-matching text. FIELD_GETTERS' keys are
 // every accepted spelling of a field; "cost" means total printed Effigy
 // cost (totalCastingCost), matching how DeckBuilder already sorts by cost.
+
+// Stepper (+/−) buttons and count inputs: comfortable on a desktop mouse, and
+// bumped to a full 44px tap target (16px+ input text, so iOS doesn't zoom on
+// focus) on touch screens, where the old 24px buttons were hard to hit.
+const STEP_BTN = 'inline-flex items-center justify-center shrink-0 rounded bg-stone-100 hover:bg-stone-200 disabled:opacity-30 transition-colors w-8 h-8 [@media(pointer:coarse)]:w-11 [@media(pointer:coarse)]:h-11';
+// Inside a narrow card tile (3 across on a phone) the two buttons share the bar
+// equally instead of overflowing it; from sm up they go back to fixed squares.
+const STEP_BTN_TILE = 'inline-flex items-center justify-center rounded bg-stone-200 hover:bg-stone-300 disabled:opacity-30 transition-colors flex-1 h-8 sm:flex-none sm:w-8 [@media(pointer:coarse)]:h-10 sm:[@media(pointer:coarse)]:w-10';
+const STEP_ICON = 'w-4 h-4 [@media(pointer:coarse)]:w-5 [@media(pointer:coarse)]:h-5';
+const STEP_INPUT = 'w-10 text-center text-sm border border-stone-200 rounded py-0.5 [@media(pointer:coarse)]:w-14 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:text-base';
+
 const FIELD_GETTERS = {
   strength: (card) => card.strength || 0,
   str: (card) => card.strength || 0,
@@ -381,8 +392,8 @@ export default function DeckBuilder({ pool, seedDeck, onStart, onSaveComplete, o
                         </div>
                       </button>
                       <div className="flex items-center gap-2 shrink-0">
-                        <button onClick={() => adjust(card, -1)} className="p-1 rounded bg-stone-100 hover:bg-stone-200">
-                          <Minus className="w-3 h-3" />
+                        <button onClick={() => adjust(card, -1)} className={STEP_BTN}>
+                          <Minus className={STEP_ICON} />
                         </button>
                         <input
                           type="number"
@@ -390,14 +401,14 @@ export default function DeckBuilder({ pool, seedDeck, onStart, onSaveComplete, o
                           max={limit}
                           value={count}
                           onChange={(e) => setCountDirect(card, e.target.value)}
-                          className="w-10 text-center text-sm border border-stone-200 rounded py-0.5"
+                          className={STEP_INPUT}
                         />
                         <button
                           onClick={() => adjust(card, 1)}
                           disabled={count >= limit}
-                          className="p-1 rounded bg-stone-100 hover:bg-stone-200 disabled:opacity-30"
+                          className={STEP_BTN}
                         >
-                          <Plus className="w-3 h-3" />
+                          <Plus className={STEP_ICON} />
                         </button>
                       </div>
                     </div>
@@ -423,8 +434,8 @@ export default function DeckBuilder({ pool, seedDeck, onStart, onSaveComplete, o
                       </div>
                     </button>
                     <div className="flex items-center gap-2 shrink-0">
-                      <button onClick={() => adjust(card, -1)} className="p-1 rounded bg-stone-100 hover:bg-stone-200">
-                        <Minus className="w-3 h-3" />
+                      <button onClick={() => adjust(card, -1)} className={STEP_BTN}>
+                        <Minus className={STEP_ICON} />
                       </button>
                       <input
                         type="number"
@@ -432,14 +443,14 @@ export default function DeckBuilder({ pool, seedDeck, onStart, onSaveComplete, o
                         max={limit}
                         value={count}
                         onChange={(e) => setCountDirect(card, e.target.value)}
-                        className="w-10 text-center text-sm border border-stone-200 rounded py-0.5"
+                        className={STEP_INPUT}
                       />
                       <button
                         onClick={() => adjust(card, 1)}
                         disabled={count >= limit}
-                        className="p-1 rounded bg-stone-100 hover:bg-stone-200 disabled:opacity-30"
+                        className={STEP_BTN}
                       >
-                        <Plus className="w-3 h-3" />
+                        <Plus className={STEP_ICON} />
                       </button>
                     </div>
                   </div>
@@ -465,19 +476,19 @@ export default function DeckBuilder({ pool, seedDeck, onStart, onSaveComplete, o
                       <button
                         onClick={() => adjust(card, -1)}
                         disabled={count === 0}
-                        className="p-0.5 rounded bg-stone-200 hover:bg-stone-300 transition-colors shrink-0 disabled:opacity-30"
+                        className={STEP_BTN_TILE}
                         aria-label={`Remove one copy of ${card.name}`}
                       >
-                        <Minus className="w-3 h-3" />
+                        <Minus className={STEP_ICON} />
                       </button>
-                      <span className="text-[10px] text-stone-600 truncate" title={card.name}>{card.name}</span>
+                      <span className="hidden sm:block text-[10px] text-stone-600 truncate" title={card.name}>{card.name}</span>
                       <button
                         onClick={() => adjust(card, 1)}
                         disabled={count >= limit}
-                        className="p-0.5 rounded bg-stone-200 hover:bg-stone-300 transition-colors shrink-0 disabled:opacity-30"
+                        className={STEP_BTN_TILE}
                         aria-label={`Add a copy of ${card.name}`}
                       >
-                        <Plus className="w-3 h-3" />
+                        <Plus className={STEP_ICON} />
                       </button>
                     </div>
                   </div>
@@ -504,18 +515,18 @@ export default function DeckBuilder({ pool, seedDeck, onStart, onSaveComplete, o
                   style={{ backgroundColor: EFFIGY_TYPE_COLORS[color] }}
                 />
                 <span className="text-sm capitalize w-20">{color}</span>
-                <button onClick={() => adjustEffigy(color, -1)} className="p-1 rounded bg-stone-100 hover:bg-stone-200">
-                  <Minus className="w-3 h-3" />
+                <button onClick={() => adjustEffigy(color, -1)} className={STEP_BTN}>
+                  <Minus className={STEP_ICON} />
                 </button>
                 <input
                   type="number"
                   min="0"
                   value={effigyCounts[color] || 0}
                   onChange={(e) => setEffigyDirect(color, e.target.value)}
-                  className="w-10 text-center text-sm border border-stone-200 rounded py-0.5"
+                  className={STEP_INPUT}
                 />
-                <button onClick={() => adjustEffigy(color, 1)} className="p-1 rounded bg-stone-100 hover:bg-stone-200">
-                  <Plus className="w-3 h-3" />
+                <button onClick={() => adjustEffigy(color, 1)} className={STEP_BTN}>
+                  <Plus className={STEP_ICON} />
                 </button>
               </div>
             ))}
@@ -638,19 +649,19 @@ export default function DeckBuilder({ pool, seedDeck, onStart, onSaveComplete, o
                 <button
                   onClick={() => adjust(card, -1)}
                   disabled={count === 0}
-                  className="p-2 rounded-full bg-stone-200 hover:bg-stone-300 disabled:opacity-30 transition-colors"
+                  className="p-2 [@media(pointer:coarse)]:p-3 rounded-full bg-stone-200 hover:bg-stone-300 disabled:opacity-30 transition-colors"
                   aria-label={`Remove one copy of ${card.name}`}
                 >
-                  <Minus className="w-4 h-4" />
+                  <Minus className="w-4 h-4 [@media(pointer:coarse)]:w-5 [@media(pointer:coarse)]:h-5" />
                 </button>
                 <span className="text-sm font-medium text-stone-700 w-16 text-center">{count} / {limit}</span>
                 <button
                   onClick={() => adjust(card, 1)}
                   disabled={count >= limit}
-                  className="p-2 rounded-full bg-stone-200 hover:bg-stone-300 disabled:opacity-30 transition-colors"
+                  className="p-2 [@media(pointer:coarse)]:p-3 rounded-full bg-stone-200 hover:bg-stone-300 disabled:opacity-30 transition-colors"
                   aria-label={`Add a copy of ${card.name}`}
                 >
-                  <Plus className="w-4 h-4" />
+                  <Plus className="w-4 h-4 [@media(pointer:coarse)]:w-5 [@media(pointer:coarse)]:h-5" />
                 </button>
               </div>
             </div>

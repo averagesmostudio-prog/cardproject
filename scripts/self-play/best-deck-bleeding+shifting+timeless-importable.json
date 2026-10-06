@@ -1,0 +1,70 @@
+{
+  "format": "tcg-deck",
+  "version": 1,
+  "note": "AI-evolved best-known Bleeding+Shifting+Timeless deck, 34340 focused self-play games",
+  "mainDeck": [
+    {
+      "name": "Kendasha",
+      "count": 3
+    },
+    {
+      "name": "Lingering Doubt",
+      "count": 3
+    },
+    {
+      "name": "Osteomancer",
+      "count": 3
+    },
+    {
+      "name": "Locust swarm",
+      "count": 3
+    },
+    {
+      "name": "Imp",
+      "count": 3
+    },
+    {
+      "name": "Crumbling Sphinx",
+      "count": 3
+    },
+    {
+      "name": "Fidian Nol",
+      "count": 3
+    },
+    {
+      "name": "Clock Tower Custodian",
+      "count": 3
+    },
+    {
+      "name": "Careless IkVarem",
+      "count": 3
+    },
+    {
+      "name": "Onoushara",
+      "count": 2
+    },
+    {
+      "name": "Cookie",
+      "count": 3
+    },
+    {
+      "name": "MetaToris",
+      "count": 2
+    },
+    {
+      "name": "E\u00f2nion Zealot",
+      "count": 3
+    },
+    {
+      "name": "Ritual Executioner",
+      "count": 3
+    }
+  ],
+  "effigyCounts": {
+    "bleeding": 1,
+    "timeless": 2,
+    "formless": 0,
+    "living": 0,
+    "shifting": 12
+  }
+}

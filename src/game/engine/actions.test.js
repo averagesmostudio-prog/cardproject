@@ -13382,14 +13382,48 @@ describe('Eighteenth wave: Ethereal Conjuring reactive timing (priority window)'
     expect(resolved.reactiveWindow).toEqual(expect.objectContaining({ openFor: 'B' })); // NOW it opens, for A's real opponent
   });
 
-  it('does not open around PASS_TURN — the begin/endTurn pipeline stays atomic', () => {
+  it('PASS_TURN is itself respondable: the opponent gets a window BEFORE the turn actually ends, and passing it lets the turn pass', () => {
     const state = baseState({
       turnPlayer: 'A',
       players: { A: player({ lifespan: 50, mainDeck: [] }), B: player({ hand: [etherealConjuring({ instanceId: 'ec-b#0' })], lifespan: 50 }) },
     });
+    const declared = gameReducer(state, { type: 'PASS_TURN' });
+    expect(declared.turnPlayer).toBe('A'); // not over yet
+    expect(declared.reactiveWindow).toEqual(expect.objectContaining({ openFor: 'B' }));
+    expect(declared.pendingResolution).toMatchObject({ kind: 'pass-turn', declaringPlayer: 'A' });
+    const passed = gameReducer(declared, { type: 'PASS_PRIORITY' });
+    expect(passed.turnPlayer).toBe('B');
+    expect(passed.reactiveWindow).toBeNull();
+    expect(passed.pendingResolution).toBeNull();
+  });
+
+  it('a response cast during the PASS_TURN window resolves first, then the turn passes once nobody has anything left', () => {
+    const state = baseState({
+      turnPlayer: 'A',
+      players: { A: player({ lifespan: 50, mainDeck: [] }), B: player({ hand: [etherealConjuring({ instanceId: 'ec-b#0' })], lifespan: 50 }) },
+    });
+    const declared = gameReducer(state, { type: 'PASS_TURN' });
+    const responded = gameReducer(declared, { type: 'CAST_CONJURING', instanceId: 'ec-b#0' });
+    expect(responded.players.B.hand).toHaveLength(0); // the response was cast
+    // Neither side holds anything further, so the window collapses and the
+    // turn passes in that same dispatch — after the response, not before it.
+    expect(responded.turnPlayer).toBe('B');
+    expect(responded.reactiveWindow).toBeNull();
+  });
+
+  it('with nobody able to respond, PASS_TURN still ends the turn instantly in the same dispatch', () => {
+    const state = baseState({ turnPlayer: 'A', players: { A: player({ mainDeck: [] }), B: player({ mainDeck: [{ instanceId: 'd#0', kind: 'being', castingCost: { faithless: 0, colored: {} } }] }) } });
     const next = gameReducer(state, { type: 'PASS_TURN' });
     expect(next.turnPlayer).toBe('B');
     expect(next.reactiveWindow).toBeNull();
+  });
+
+  it('a human seat (alwaysOfferPriorityTo) is offered the PASS_TURN window even with nothing to respond with', () => {
+    const state = baseState({ turnPlayer: 'A', alwaysOfferPriorityTo: ['B'], players: { A: player({ mainDeck: [] }), B: player({ mainDeck: [] }) } });
+    const declared = gameReducer(state, { type: 'PASS_TURN' });
+    expect(declared.turnPlayer).toBe('A');
+    expect(declared.reactiveWindow).toMatchObject({ openFor: 'B' });
+    expect(gameReducer(declared, { type: 'PASS_PRIORITY' }).turnPlayer).toBe('B');
   });
 
   it('a RESOLVE_* dispatched by the NON-turn-player (finishing their own pendingChoice) opens the window for the real opponent, not naively opponentOf(turnPlayer)', () => {

@@ -50,6 +50,30 @@ describe('pickAiAction repeat guard', () => {
     expect(pickAiAction(nextTurn, 'B')).toEqual({ type: 'MOVE_OR_ATTACK', fromCellId: 'r4c2', toCellId: 'r2c2', isAttack: true });
   });
 
+  it('also bounds pickAiReaction: a priority-window response chosen over and over falls back to PASS_PRIORITY', () => {
+    // An Engage that stays legal every time models an Armament Engage that
+    // re-arms itself — "respond, they pass, respond..." would never end.
+    const engageBeing = {
+      type: 'being', ownerId: 'B',
+      card: { name: 'B', kind: 'being', strength: 1, lifespan: 3, arrows: [1], keywords: { engage: 'Gain (1) Lifespan.' } },
+      currentLifespan: 3, engaged: false,
+    };
+    const state = baseState({ reactiveWindow: { openFor: 'B' }, board: { r4c1: engageBeing }, players: { A: player({ id: 'A' }), B: player({ id: 'B' }) } });
+    for (let i = 0; i < REPEAT_ACTION_LIMIT; i++) expect(pickAiReaction(state, 'B')).toEqual({ type: 'ACTIVATE_ENGAGE', cellId: 'r4c1' });
+    expect(pickAiReaction(state, 'B')).toEqual({ type: 'PASS_PRIORITY' });
+  });
+
+  it('counts per player — one AI\'s picks never reset the other\'s', () => {
+    const state = baseState({ board: { r4c2: being('B', 4) } });
+    const attack = { type: 'MOVE_OR_ATTACK', fromCellId: 'r4c2', toCellId: 'r2c2', isAttack: true };
+    const stateA = baseState({ turnPlayer: 'A', board: { r2c2: being('A', 4) } });
+    for (let i = 0; i < REPEAT_ACTION_LIMIT; i++) {
+      expect(pickAiAction(state, 'B')).toEqual(attack);
+      pickAiAction(stateA, 'A'); // the other seat acts in between
+    }
+    expect(pickAiAction(state, 'B')).not.toEqual(attack);
+  });
+
   it('keeps a lone forced choice even once it is saturated', () => {
     const state = baseState();
     for (let i = 0; i < REPEAT_ACTION_LIMIT + 5; i++) expect(pickAiAction(state, 'B')).toEqual({ type: 'PASS_TURN' });

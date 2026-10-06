@@ -914,26 +914,45 @@ const pickHardAction = (state, playerId) => {
 // PASS_TURN's last-resort score. Self-play kept finding new shapes of this
 // one by one; this bounds every shape at once. No legitimate turn repeats
 // one identical action this often (even an Effigy-pool-limited Pay ability
-// tops out around ten).
+// tops out around ten). Covers BOTH pickers — pickAiAction (own-turn
+// actions) and pickAiReaction (priority windows, where an Armament Engage
+// that re-arms itself can chain "respond, they pass, respond..." forever).
+// Tracked PER PLAYER: two AIs alternating picks must not reset each other's
+// counts.
 export const REPEAT_ACTION_LIMIT = 20;
-let repeatTracker = { turnKey: null, counts: new Map() };
-export const resetAiRepeatTracker = () => { repeatTracker = { turnKey: null, counts: new Map() }; };
+const repeatTrackers = new Map(); // playerId -> { turnKey, counts }
+export const resetAiRepeatTracker = () => { repeatTrackers.clear(); };
+
+const repeatCountsFor = (state, playerId) => {
+  const turnKey = `${state.turnNumber}:${state.turnPlayer}`;
+  let tracker = repeatTrackers.get(playerId);
+  if (!tracker || tracker.turnKey !== turnKey) {
+    tracker = { turnKey, counts: new Map() };
+    repeatTrackers.set(playerId, tracker);
+  }
+  return tracker.counts;
+};
+
+// Records `action` as chosen; if it has already hit the limit this turn,
+// swaps it for the best not-yet-worn-out legal alternative per `rank`
+// (a best-first sort over the legal actions). A lone saturated forced
+// choice is kept.
+const guardRepeatedAction = (state, playerId, action, rank) => {
+  const counts = repeatCountsFor(state, playerId);
+  let chosen = action;
+  if ((counts.get(JSON.stringify(chosen)) || 0) >= REPEAT_ACTION_LIMIT) {
+    const fresh = getLegalActions(state, playerId).filter(a => (counts.get(JSON.stringify(a)) || 0) < REPEAT_ACTION_LIMIT);
+    if (fresh.length > 0) chosen = rank(fresh)[0];
+  }
+  const key = JSON.stringify(chosen);
+  counts.set(key, (counts.get(key) || 0) + 1);
+  return chosen;
+};
 
 export const pickAiAction = (state, playerId, aiDifficulty = 'standard') => {
-  const turnKey = `${playerId}:${state.turnNumber}:${state.turnPlayer}`;
-  if (repeatTracker.turnKey !== turnKey) repeatTracker = { turnKey, counts: new Map() };
-  const { counts } = repeatTracker;
-  let action = aiDifficulty === 'hard' ? pickHardAction(state, playerId) : pickGreedyAction(state, playerId);
+  const action = aiDifficulty === 'hard' ? pickHardAction(state, playerId) : pickGreedyAction(state, playerId);
   if (!action) return action;
-  if ((counts.get(JSON.stringify(action)) || 0) >= REPEAT_ACTION_LIMIT) {
-    // Fall back to the best option not yet worn out; if every legal action
-    // is saturated (a lone forced choice), keep the original pick.
-    const fresh = getLegalActions(state, playerId).filter(a => (counts.get(JSON.stringify(a)) || 0) < REPEAT_ACTION_LIMIT);
-    if (fresh.length > 0) action = bestFirst(state, playerId, fresh)[0];
-  }
-  const key = JSON.stringify(action);
-  counts.set(key, (counts.get(key) || 0) + 1);
-  return action;
+  return guardRepeatedAction(state, playerId, action, (fresh) => bestFirst(state, playerId, fresh));
 };
 
 // Ethereal Conjuring reactive timing (actions.js's manageReactiveWindow) —
@@ -973,5 +992,5 @@ export const pickAiReaction = (state, playerId) => {
       best = action;
     }
   });
-  return best;
+  return guardRepeatedAction(state, playerId, best, (fresh) => [...fresh].sort((a, b) => scoreReaction(b) - scoreReaction(a)));
 };
