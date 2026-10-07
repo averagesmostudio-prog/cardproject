@@ -585,6 +585,14 @@ const playOneGame = () => {
     id, deckA: deckA.label, deckB: deckB.label, startingPlayer,
     winner: state.winner, stalled, turnNumber: state.turnNumber, actionCount, durationMs,
     lifespanA: state.players.A.lifespan, lifespanB: state.players.B.lifespan,
+    // Set when the game ended by the Boundless Hunger loop (Immen Gorta + Mouth of Madness + Terranean Gates).
+    ...(state.loopWin ? { loopWin: state.loopWin.winnerId } : {}),
+    // --record-decks: the card ids in each built deck (precons/uploaded decks
+    // have no entries and are skipped) — input for pair-synergy-analyze.mjs.
+    ...(args['record-decks'] && deckA.entries && deckB.entries ? {
+      pairKeyA: deckA.pairKey, pairKeyB: deckB.pairKey,
+      cardsA: deckA.entries.map((e) => e.card.id), cardsB: deckB.entries.map((e) => e.card.id),
+    } : {}),
   };
   fs.appendFileSync(gamesPath, JSON.stringify(record) + '\n');
   return record;

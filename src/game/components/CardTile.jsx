@@ -35,6 +35,10 @@ const HOVER_HEIGHT = Math.round(HOVER_WIDTH * 7 / 5);
 // from it — same computation showPreview already uses for the off-board
 // case below — needs no extra scale math; portaling to document.body is
 // what actually lets it escape the board area's own clipping.
+// Desktop hover previews dock in the left gutter beside the board — see showPreview.
+const SIDE_PREVIEW_MARGIN = 12;
+const TOUCH_PREVIEW_MARGIN = 8;
+const MIN_SIDE_PREVIEW_WIDTH = 200;
 const ONBOARD_HOVER_WIDTH = 340;
 const ONBOARD_HOVER_HEIGHT = Math.round(ONBOARD_HOVER_WIDTH * 7 / 5);
 
@@ -64,16 +68,35 @@ export default function CardTile({
     if (!rect) return;
     const width = onboard ? ONBOARD_HOVER_WIDTH : HOVER_WIDTH;
     const height = onboard ? ONBOARD_HOVER_HEIGHT : HOVER_HEIGHT;
-    let top = rect.top - height - 12;
-    if (top < 8) top = rect.bottom + 12; // not enough room above — show below instead
-    // Clamp to the real viewport on both axes — the flip-up-or-down above
-    // already handles the common case, but the onboard preview is tall
-    // enough (ONBOARD_HOVER_HEIGHT) that a tile near the top or bottom
-    // edge of the board can still overflow either direction otherwise.
-    top = Math.max(8, Math.min(top, window.innerHeight - height - 8));
-    let left = rect.left + rect.width / 2 - width / 2;
-    left = Math.max(8, Math.min(left, window.innerWidth - width - 8));
-    setHoverPos({ left, top });
+    // Desktop (mouse) hover: the enlarged card lives in the gutter to the LEFT
+    // of the battlefield, vertically centered, so the board stays fully visible
+    // while you read it. Sized to fit the space between the window edge and the
+    // board (never below MIN_SIDE_PREVIEW_WIDTH — in a very narrow window it may
+    // overlap the board's outer edge slightly rather than shrink to nothing).
+    // Touch (compact) keeps the near-tile placement below: a phone has no spare
+    // gutter and its preview is a deliberate long-press.
+    if (!compact) {
+      const boardLeft = document.querySelector('[data-board-grid]')?.getBoundingClientRect().left;
+      const room = boardLeft != null ? boardLeft - SIDE_PREVIEW_MARGIN * 2 : width;
+      const w = Math.round(Math.max(MIN_SIDE_PREVIEW_WIDTH, Math.min(width, room)));
+      const h = Math.round(w * 7 / 5);
+      const sideTop = Math.max(SIDE_PREVIEW_MARGIN, (window.innerHeight - h) / 2);
+      setHoverPos({ left: SIDE_PREVIEW_MARGIN, top: sideTop, width: w, height: h });
+      return;
+    }
+    // Touch (compact landscape phone): the screen is SHORTER than the preview
+    // (a 340px-wide card is 476px tall; a landscape phone is ~375-430px), so a
+    // fixed-size preview had its bottom — the text box — cut off. Fit it to the
+    // visible height instead (keeping the card's 5:7 shape), centered on the
+    // tapped tile horizontally and fully inside the screen vertically.
+    const viewH = window.visualViewport?.height ?? window.innerHeight;
+    const viewW = window.visualViewport?.width ?? window.innerWidth;
+    const h = Math.round(Math.min(height, viewH - 2 * TOUCH_PREVIEW_MARGIN));
+    const w = Math.round(h * 5 / 7);
+    const top = Math.max(TOUCH_PREVIEW_MARGIN, (viewH - h) / 2);
+    let left = rect.left + rect.width / 2 - w / 2;
+    left = Math.max(TOUCH_PREVIEW_MARGIN, Math.min(left, viewW - w - TOUCH_PREVIEW_MARGIN));
+    setHoverPos({ left, top, width: w, height: h });
   };
   const handleMouseEnter = () => {
     // The mulligan screen's star layout drives its own centered expand
@@ -160,7 +183,7 @@ export default function CardTile({
         {isOwn && hoverPos && (
           <div
             className="fixed z-[70] pointer-events-none drop-shadow-2xl"
-            style={{ left: hoverPos.left, top: hoverPos.top, width: HOVER_WIDTH }}
+            style={{ left: hoverPos.left, top: hoverPos.top, width: hoverPos.width ?? HOVER_WIDTH }}
           >
             <CardThumbnail
               card={card}
@@ -170,8 +193,8 @@ export default function CardTile({
               artBorderImages={artBorderImages}
               artImagesLoaded={artImagesLoaded}
               fontLoaded={fontLoaded}
-              width={HOVER_WIDTH}
-              height={HOVER_HEIGHT}
+              width={hoverPos.width ?? HOVER_WIDTH}
+              height={hoverPos.height ?? HOVER_HEIGHT}
             />
           </div>
         )}
@@ -241,8 +264,8 @@ export default function CardTile({
       )}
 
       {hoverPos && (() => {
-        const previewWidth = onboard ? ONBOARD_HOVER_WIDTH : HOVER_WIDTH;
-        const previewHeight = onboard ? ONBOARD_HOVER_HEIGHT : HOVER_HEIGHT;
+        const previewWidth = hoverPos.width ?? (onboard ? ONBOARD_HOVER_WIDTH : HOVER_WIDTH);
+        const previewHeight = hoverPos.height ?? (onboard ? ONBOARD_HOVER_HEIGHT : HOVER_HEIGHT);
         const previewInner = (
           <>
             <CardThumbnail

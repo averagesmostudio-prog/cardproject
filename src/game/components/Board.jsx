@@ -763,7 +763,9 @@ export default function Board({ state, displayBoard, flashes, lastAttack, lastMa
     // Give the board its own fixed background (per boardTheme) so it always
     // renders with the same tones regardless of the surrounding page's own
     // background color — see BOARD_THEME_CLASSES above for both looks.
-    <div className={`flex flex-col gap-1 items-center p-2 rounded-lg ${theme.container}`}>
+    // data-board-grid: CardTile's hover preview reads this element's left edge to
+    // park the enlarged card in the gutter beside the board, never over it.
+    <div data-board-grid className={`flex flex-col gap-1 items-center p-2 rounded-lg ${theme.container}`}>
       {rows}
     </div>
   );

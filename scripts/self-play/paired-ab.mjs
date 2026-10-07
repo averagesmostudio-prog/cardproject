@@ -34,6 +34,8 @@ const args = Object.fromEntries(process.argv.slice(2).map(a => {
 }));
 const GAMES = parseInt(args.games || '3000', 10);
 const DIFFICULTY = args.difficulty || 'standard';
+// --candidateDifficulty=hard measures how much Hard beats Standard with the same code on both sides.
+const CANDIDATE_DIFFICULTY = args.candidateDifficulty || DIFFICULTY;
 if (!args.candidate) {
   console.error('Usage: paired-ab.mjs --candidate=/abs/path/to/worktree [--games=N] [--difficulty=standard|hard]');
   process.exit(1);
@@ -50,14 +52,19 @@ const randomDeckFor = (color) => ({
 });
 
 // ai[seat] is whichever module decides for that seat this game.
-const actionFor = (state, playerId, ai) => {
+// `seat` is { mod, difficulty }: the AI module plus the difficulty that seat
+// plays at (tagged per seat, not inferred from the module, because a candidate
+// pointing at THIS checkout loads the very same module as the baseline).
+const actionFor = (state, playerId, seat) => {
+  const ai = seat.mod;
+  const difficulty = seat.difficulty;
   const owesChoice = state.pendingChoice?.playerId === playerId;
   const owesReaction = state.reactiveWindow?.openFor === playerId;
   const isTurn = (state.phase === 'mulligan' && !state.players[playerId].keptHand)
     || (state.phase === 'playing' && state.turnPlayer === playerId);
   if (state.pendingChoice && !owesChoice) return null;
   if (!owesChoice && !isTurn && !owesReaction) return null;
-  return owesReaction ? ai.pickAiReaction(state, playerId) : ai.pickAiAction(state, playerId, DIFFICULTY);
+  return owesReaction ? ai.pickAiReaction(state, playerId) : ai.pickAiAction(state, playerId, difficulty);
 };
 
 // Returns 'A' | 'B' | 'draw' | 'stall' | 'crash'.
@@ -111,8 +118,10 @@ for (let g = 0; g < GAMES; g++) {
   const deckB = randomDeckFor(randomEffigyColor());
   const startingPlayer = Math.random() < 0.5 ? 'A' : 'B';
   // Same decks and starter both times; only the AI-to-seat mapping swaps.
-  const r1 = play(deckA, deckB, startingPlayer, { A: candidate, B: baseline }); // candidate = A
-  const r2 = play(deckA, deckB, startingPlayer, { A: baseline, B: candidate }); // candidate = B
+  const cand = { mod: candidate, difficulty: CANDIDATE_DIFFICULTY };
+  const base = { mod: baseline, difficulty: DIFFICULTY };
+  const r1 = play(deckA, deckB, startingPlayer, { A: cand, B: base }); // candidate = A
+  const r2 = play(deckA, deckB, startingPlayer, { A: base, B: cand }); // candidate = B
   const candWon1 = r1 === 'A';
   const baseWon1 = r1 === 'B';
   const candWon2 = r2 === 'B';
@@ -134,7 +143,7 @@ for (let g = 0; g < GAMES; g++) {
 const decided = tally.candWins + tally.baseWins;
 const [lo, hi] = wilson(tally.candWins, decided);
 console.log('\n=== Paired A/B result ===');
-console.log(`Difficulty: ${DIFFICULTY}   Pairs: ${GAMES}   Games: ${GAMES * 2}   Undecided (draw/stall/crash): ${tally.other}`);
+console.log(`Difficulty: baseline ${DIFFICULTY}, candidate ${CANDIDATE_DIFFICULTY}   Pairs: ${GAMES}   Games: ${GAMES * 2}   Undecided (draw/stall/crash): ${tally.other}`);
 console.log(`Candidate wins: ${tally.candWins}   Baseline wins: ${tally.baseWins}`);
 console.log(`Candidate win rate: ${(100 * tally.candWins / decided).toFixed(2)}%   95% CI [${(100 * lo).toFixed(2)}%, ${(100 * hi).toFixed(2)}%]`);
 console.log(`Both-decided pairs: ${tally.pairs}  — candidate won both seats: ${tally.bothCand}, baseline won both: ${tally.bothBase}, split by seat: ${tally.split}`);

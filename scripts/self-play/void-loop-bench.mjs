@@ -34,9 +34,13 @@ const preconDeckFor = (precon) => {
 };
 const voidPrecon = PRECON_DECKS.find((p) => p.id === 'void');
 const opponentPrecons = PRECON_DECKS.filter((p) => p.id !== 'void');
-const voidDeck = preconDeckFor(voidPrecon);
-const opponentDecks = opponentPrecons.map(preconDeckFor);
-const randomOpponentDeck = () => opponentDecks[Math.floor(Math.random() * opponentDecks.length)];
+// Decks are rebuilt (and so RESHUFFLED) for every game: buildMainDeckList
+// shuffles once at build time and createInitialState deals the list as given,
+// so a deck built once at module load would hand every game the identical
+// draw order — the loop would then complete on the same turn every time (an
+// early version of this bench measured exactly that: 34 completions, all on
+// turn 33).
+const randomOpponentDeck = () => preconDeckFor(opponentPrecons[Math.floor(Math.random() * opponentPrecons.length)]);
 
 const actionFor = (state, playerId) => {
   const owesChoice = state.pendingChoice?.playerId === playerId;
@@ -55,8 +59,9 @@ const actionFor = (state, playerId) => {
 const playOneGame = () => {
   const startingPlayer = Math.random() < 0.5 ? 'A' : 'B';
   const opp = randomOpponentDeck();
+  const voidGameDeck = preconDeckFor(voidPrecon);
   let state = createInitialState({
-    mainDeckA: voidDeck.mainDeck, effigyDeckA: voidDeck.effigyDeck,
+    mainDeckA: voidGameDeck.mainDeck, effigyDeckA: voidGameDeck.effigyDeck,
     mainDeckB: opp.mainDeck, effigyDeckB: opp.effigyDeck,
     startingPlayer,
   });
@@ -106,6 +111,9 @@ for (let g = 0; g < GAMES; g++) {
     loopTurns.push(result.turnNumber);
   }
   stopReasonCounts[result.stopReason] = (stopReasonCounts[result.stopReason] || 0) + 1;
+  if ((g + 1) % 25 === 0) {
+    console.log(`[${((Date.now() - start) / 60000).toFixed(1)}m] ${g + 1}/${GAMES} games — Void ${winsVoid}-${winsOpp}, loop completions ${loopCompletions} (${loopCompletionsByVoid} by Void)`);
+  }
 }
 const elapsedS = (Date.now() - start) / 1000;
 
