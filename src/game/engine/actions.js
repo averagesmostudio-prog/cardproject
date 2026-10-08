@@ -15291,8 +15291,30 @@ const advanceProphecyFlips = (state) => {
 const recomputeLiveAuras = (state) =>
   recomputeKalmahkaOverrides(recomputeBoardWideAuraBonuses(recomputeConditionalBonuses(recomputeDeathCountBonuses(recomputeXBeings(state)))));
 
+// Records a Conjuring / Ethereal Conjuring that was just played from hand on
+// `state.conjuringCasts`, for the UI's full-screen card reveal (Match.jsx >
+// useCardReveal) — the same showcase a flipping Prophecy gets, so both
+// players always see exactly what was cast. Done here, once, rather than in
+// each of CAST_CONJURING's many early-return branches: a cast "went through"
+// when the card has left the caster's hand. A refused/no-op cast leaves the
+// state untouched (same reference, which several tests assert). The caster
+// is whoever holds an open window, else the turn player — the same rule the
+// reducer case itself uses.
+const recordConjuringCast = (prev, next, action) => {
+  if (action.type !== 'CAST_CONJURING' || next === prev) return next;
+  const caster = prev.reactiveWindow?.openFor ?? prev.turnPlayer;
+  const card = prev.players[caster]?.hand.find(c => c.instanceId === action.instanceId);
+  if (!card || next.players[caster]?.hand.some(c => c.instanceId === action.instanceId)) return next;
+  const seq = (next.conjuringCastSeq || 0) + 1;
+  return {
+    ...next,
+    conjuringCastSeq: seq,
+    conjuringCasts: [...(next.conjuringCasts || []).slice(-4), { seq, card, ownerId: caster }],
+  };
+};
+
 export const gameReducer = (state, action) => {
-  const recomputed = recomputeLiveAuras(gameReducerCore(state, action));
+  const recomputed = recomputeLiveAuras(recordConjuringCast(state, gameReducerCore(state, action), action));
   let afterWindow = manageReactiveWindow(state, recomputed, action);
   // manageReactiveWindow can itself apply a deferred effect
   // (resolvePendingResolution) when a pre-resolution priority window

@@ -14441,3 +14441,45 @@ describe('Prophecy flips get a reveal + response window before their text resolv
   });
 });
 
+describe('Conjurings played from hand are recorded for the full-screen card reveal', () => {
+  const conjuring = (overrides = {}) => ({
+    id: 'c1', instanceId: 'cj#0', name: 'Test Conjuring', kind: 'conjuring',
+    castingCost: { faithless: 0, colored: {} }, textBox: 'Gain (3) Lifespan.', ...overrides,
+  });
+
+  it('a main-phase Conjuring cast records the card, its caster, and a seq', () => {
+    const state = baseState({ turnPlayer: 'A', players: { A: player({ hand: [conjuring()] }), B: player() } });
+    const next = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'cj#0' });
+    expect(next.conjuringCasts).toHaveLength(1);
+    expect(next.conjuringCasts[0]).toMatchObject({ seq: 1, ownerId: 'A' });
+    expect(next.conjuringCasts[0].card.name).toBe('Test Conjuring');
+    expect(next.conjuringCastSeq).toBe(1);
+  });
+
+  it('an Ethereal Conjuring cast in response is attributed to whoever held the window, not the turn player', () => {
+    const ethereal = conjuring({ instanceId: 'ec#0', name: 'Reactive One', kind: 'ethereal-conjuring' });
+    const state = baseState({
+      turnPlayer: 'A', reactiveWindow: { openFor: 'B', triggerDescription: 'x', everResponded: false, passedOnce: false },
+      players: { A: player(), B: player({ hand: [ethereal] }) },
+    });
+    const next = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'ec#0' });
+    expect(next.conjuringCasts.at(-1)).toMatchObject({ ownerId: 'B' });
+    expect(next.conjuringCasts.at(-1).card.name).toBe('Reactive One');
+  });
+
+  it('a refused cast (card not in hand) records nothing and returns the exact same state', () => {
+    const state = baseState({ turnPlayer: 'A', players: { A: player(), B: player() } });
+    const next = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'missing#0' });
+    expect(next).toBe(state);
+    expect(next.conjuringCasts).toBeUndefined();
+  });
+
+  it('successive casts get distinct, increasing seqs, and only the latest few are kept', () => {
+    let state = baseState({ turnPlayer: 'A', players: { A: player({ hand: [1, 2, 3, 4, 5, 6].map(n => conjuring({ instanceId: `cj${n}#0`, name: `Spell ${n}` })) }), B: player() } });
+    for (let n = 1; n <= 6; n += 1) state = gameReducer(state, { type: 'CAST_CONJURING', instanceId: `cj${n}#0` });
+    expect(state.conjuringCastSeq).toBe(6);
+    expect(state.conjuringCasts).toHaveLength(5);
+    expect(state.conjuringCasts.map(c => c.seq)).toEqual([2, 3, 4, 5, 6]);
+  });
+});
+

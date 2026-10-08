@@ -695,29 +695,44 @@ export const useDeitySummonCinematic = (board) => {
   return deityCells;
 };
 
-// How long each Prophecy flip's full-screen reveal stays up.
+// How long each full-screen card reveal stays up (Prophecy flips and cast
+// Conjurings share the same showcase).
 export const PROPHECY_REVEAL_MS = 2400;
 
-// Full-screen "this Prophecy is flipping up" reveal, for BOTH players: the
-// engine records every face-down -> face-up flip on `state.prophecyFlips`
-// (actions.js > resolveProphecyModulateHitZero), so it also catches a
-// Prophecy that resolves and leaves the board in the same step, which a
-// board diff alone would never see face up. Several flips in one step (two
-// Prophecies ticking to 0 at the start of a turn) queue and show one after
-// another. A flip already on the state when the hook mounts is ignored — a
-// reload mid-game shouldn't replay an old reveal.
+// Full-screen card reveal, for BOTH players. Two things feed it, both
+// recorded by the engine so it works identically in a local game and online
+// (the other client simply adopts the state):
+//  - `state.prophecyFlips` — a Prophecy's flip (actions.js >
+//    resolveProphecyModulateHitZero / advanceProphecyFlips), including one
+//    that resolves and leaves the board in the same step;
+//  - `state.conjuringCasts` — a Conjuring or Ethereal Conjuring played from
+//    hand (actions.js > recordConjuringCast).
+// Several in one step queue and show one after another (entries carry
+// `kind: 'flip' | 'cast'` so the overlay can label them). Anything already on
+// the state when the hook mounts is ignored — a reload mid-game shouldn't
+// replay an old reveal.
 export const useProphecyReveal = (state) => {
   const flips = state.prophecyFlips;
-  const seenSeqRef = useRef(state.prophecyFlipSeq || 0);
+  const casts = state.conjuringCasts;
+  const seenFlipSeqRef = useRef(state.prophecyFlipSeq || 0);
+  const seenCastSeqRef = useRef(state.conjuringCastSeq || 0);
   const [queue, setQueue] = useState([]);
 
   useEffect(() => {
     if (!flips || flips.length === 0) return;
-    const fresh = flips.filter(f => f.seq > seenSeqRef.current);
+    const fresh = flips.filter(f => f.seq > seenFlipSeqRef.current);
     if (fresh.length === 0) return;
-    seenSeqRef.current = Math.max(...fresh.map(f => f.seq));
-    setQueue(prev => [...prev, ...fresh]);
+    seenFlipSeqRef.current = Math.max(...fresh.map(f => f.seq));
+    setQueue(prev => [...prev, ...fresh.map(f => ({ ...f, kind: 'flip' }))]);
   }, [flips]);
+
+  useEffect(() => {
+    if (!casts || casts.length === 0) return;
+    const fresh = casts.filter(c => c.seq > seenCastSeqRef.current);
+    if (fresh.length === 0) return;
+    seenCastSeqRef.current = Math.max(...fresh.map(c => c.seq));
+    setQueue(prev => [...prev, ...fresh.map(c => ({ ...c, kind: 'cast' }))]);
+  }, [casts]);
 
   const current = queue[0] || null;
   useEffect(() => {

@@ -2030,12 +2030,14 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
         // Both players see which Prophecy is flipping up — click anywhere to
         // dismiss early; otherwise it clears itself (PROPHECY_REVEAL_MS).
         <div
-          key={`prophecy-${prophecyReveal.current.seq}`}
+          key={`${prophecyReveal.current.kind}-${prophecyReveal.current.seq}`}
           className="fixed inset-0 z-[55] flex flex-col items-center justify-center gap-3 bg-black/70 prophecy-reveal-fade cursor-pointer"
           onClick={prophecyReveal.dismiss}
         >
           <div className="text-xl font-extrabold tracking-wide text-amber-300 uppercase">
-            {prophecyReveal.current.ownerId === HUMAN ? 'Your Prophecy flips up' : "Opponent's Prophecy flips up"}
+            {prophecyReveal.current.kind === 'cast'
+              ? (prophecyReveal.current.ownerId === HUMAN ? 'You cast' : 'Opponent casts')
+              : (prophecyReveal.current.ownerId === HUMAN ? 'Your Prophecy flips up' : "Opponent's Prophecy flips up")}
           </div>
           <div className="prophecy-reveal-card" style={{ width: 'min(60vw, 52dvh)' }}>
             <CardThumbnail
