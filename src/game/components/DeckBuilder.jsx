@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Minus, Upload, Search, X, ChevronLeft, ChevronRight, Save } from 'lucide-react';
+import { Plus, Minus, Upload, Download, Search, X, ChevronLeft, ChevronRight, Save } from 'lucide-react';
 import { EFFIGY_COLORS, EFFIGY_TYPE_COLORS, getBorderTypeForCard, resolveCardArt, totalCastingCost } from '../../lib/cardData.js';
-import { parseDeckImport } from '../../lib/deckExport.js';
+import { buildDeckExport, parseDeckImportFull } from '../../lib/deckExport.js';
 import { saveDeck, updateDeck } from '../../lib/deckLibrary.js';
 import { renderCardOnCanvas, DEFAULT_POSITIONS } from '../../lib/cardRender.js';
 import { useCardFont, useBorderImages, useCardArtImages } from '../../lib/useCardAssets.js';
@@ -122,8 +122,9 @@ export default function DeckBuilder({ pool, seedDeck, onStart, onSaveComplete, o
     const reader = new FileReader();
     reader.onload = (event) => {
       let parsed;
+      let importedEffigy = null;
       try {
-        parsed = parseDeckImport(event.target.result);
+        ({ entries: parsed, effigyCounts: importedEffigy } = parseDeckImportFull(event.target.result));
       } catch (err) {
         setImportWarnings([err.message]);
         return;
@@ -151,9 +152,35 @@ export default function DeckBuilder({ pool, seedDeck, onStart, onSaveComplete, o
       });
 
       setCounts(nextCounts);
+      // An export carries the Effigy Deck too — restore it (unknown colors are
+      // ignored). A main-deck-only file leaves the current Effigy counts alone.
+      if (importedEffigy) {
+        const nextEffigy = Object.fromEntries(EFFIGY_COLORS.map(color => [color, importedEffigy[color] || 0]));
+        const ignored = Object.keys(importedEffigy).filter(color => !EFFIGY_COLORS.includes(color));
+        if (ignored.length > 0) warnings.push(`Ignored unknown Effigy type(s): ${ignored.join(', ')}.`);
+        setEffigyCounts(nextEffigy);
+      }
       setImportWarnings(warnings);
     };
     reader.readAsText(file);
+  };
+
+  // Downloads the deck as a JSON file the importer above reads back: the Main
+  // Deck AND the Effigy Deck (a deck exported without its Effigies couldn't be
+  // played as exported).
+  const exportDeckList = () => {
+    const data = buildDeckExport(
+      entries.map(({ card, count }) => ({ name: card.name, count })),
+      { effigyCounts, name: deckName || null },
+    );
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const safeName = (deckName || 'deck').trim().replace(/[^a-z0-9 _-]+/gi, '').replace(/\s+/g, '-') || 'deck';
+    link.download = `${safeName}.json`;
+    link.href = url;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
   };
 
   const entries = useMemo(
@@ -337,6 +364,14 @@ export default function DeckBuilder({ pool, seedDeck, onStart, onSaveComplete, o
                 Import Deck List
                 <input type="file" accept=".json,.txt" onChange={importDeckList} className="hidden" />
               </label>
+              <button
+                onClick={exportDeckList}
+                disabled={entries.length === 0}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-stone-100 hover:bg-stone-200 rounded text-xs font-medium text-stone-700 transition-colors disabled:opacity-40"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Export Deck
+              </button>
             </div>
           </div>
 

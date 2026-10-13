@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import CoinToss, { COIN_FLIP_MS } from './CoinToss.jsx';
 
 // Net-mode counterpart to CoinFlip.jsx — NOT a retrofit of it. CoinFlip's
 // own state machine is tightly built around two independently-Math.random()'d
@@ -29,7 +30,10 @@ export default function NetCoinFlip({ netRole, mySeat, peerResult, onHostResolve
 
   const result = isHost ? hostResult : peerResult?.result ?? null;
   const startingPlayer = isHost ? hostStartingPlayer : peerResult?.startingPlayer ?? null;
-  const flipping = isHost && !!call && !hostResult;
+  // The coin has finished its toss. Text that states the result waits for this so it never spoils the toss.
+  const [landed, setLanded] = useState(false);
+  // The peer only learns the result after the host has already chosen who goes first, so it gets a quicker toss than the host's full one.
+  const tossMs = isHost ? COIN_FLIP_MS : 1800;
 
   // Host flips automatically, after a beat so it isn't instant.
   useEffect(() => {
@@ -50,10 +54,10 @@ export default function NetCoinFlip({ netRole, mySeat, peerResult, onHostResolve
   };
 
   useEffect(() => {
-    if (!startingPlayer) return;
+    if (!startingPlayer || !landed) return;
     const t = setTimeout(() => onResolved(startingPlayer), 900);
     return () => clearTimeout(t);
-  }, [startingPlayer, onResolved]);
+  }, [startingPlayer, landed, onResolved]);
 
   const label = (side) => (side === 'heads' ? 'Heads' : 'Tails');
   const meLabel = (player) => (player === mySeat ? 'You go' : 'Opponent goes');
@@ -64,18 +68,15 @@ export default function NetCoinFlip({ netRole, mySeat, peerResult, onHostResolve
         <h2 className="text-lg font-bold text-stone-800 mb-1">Coin flip</h2>
         <p className="text-sm text-stone-500 mb-6">The host's flip decides who goes first.</p>
 
-        <div
-          className={`mx-auto mb-6 w-24 h-24 rounded-full border-4 border-stone-800 flex items-center justify-center
-            text-2xl font-bold text-stone-800 bg-amber-100 transition-transform duration-300
-            ${flipping ? 'animate-spin' : ''}`}
-        >
-          {result ? label(result) : '?'}
+        <div className="mx-auto mb-3 flex justify-center overflow-hidden rounded-xl bg-stone-900">
+          <CoinToss result={result} size={140} duration={tossMs} onLanded={() => setLanded(true)} />
         </div>
 
-        {isHost && !result && <p className="text-sm text-stone-500 italic">Flipping…</p>}
+        {isHost && !landed && <p className="text-sm text-stone-500 italic">Flipping…</p>}
         {!isHost && !result && <p className="text-sm text-stone-500 italic">Waiting on the host's flip…</p>}
+        {!isHost && result && !landed && <p className="text-sm text-stone-500 italic">Flipping…</p>}
 
-        {result && !startingPlayer && isHost && (
+        {landed && result && !startingPlayer && isHost && (
           <>
             <p className="text-sm text-stone-700 mb-4 font-semibold">It's {label(result)} — who goes first?</p>
             <div className="flex gap-3 justify-center">
@@ -95,11 +96,11 @@ export default function NetCoinFlip({ netRole, mySeat, peerResult, onHostResolve
           </>
         )}
 
-        {result && !startingPlayer && !isHost && (
+        {landed && result && !startingPlayer && !isHost && (
           <p className="text-sm text-stone-500">It's {label(result)} — waiting on the host to choose who goes first…</p>
         )}
 
-        {startingPlayer && (
+        {landed && startingPlayer && (
           <p className="text-sm text-stone-700 font-semibold">
             It's {label(result)} — {meLabel(startingPlayer).toLowerCase()} first.
           </p>

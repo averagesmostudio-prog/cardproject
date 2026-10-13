@@ -552,6 +552,9 @@ const playOneGame = () => {
       // The action that threw and the occupant it addressed (state is still
       // the pre-action state — the throw happened inside gameReducer).
       lastAction,
+      // Any board occupant (or Armament) whose card has no name — what name-reading AI/engine code trips over.
+      namelessOccupants: Object.entries(state.board || {}).filter(([, o]) => o && ((o.card && !o.card.name) || (o.armaments || []).some((a) => !a.card?.name)))
+        .map(([cell, o]) => ({ cell, type: o.type, ownerId: o.ownerId, json: JSON.stringify(o, (k, v) => (k === 'raw' ? undefined : v)).slice(0, 600) })),
       lastActionOccupant: lastAction?.cellId ? JSON.stringify(state.board?.[lastAction.cellId], (k, v) => (k === 'raw' ? undefined : v))?.slice(0, 800) : null,
     }) + '\n');
     return { crashed: true };

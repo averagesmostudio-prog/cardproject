@@ -766,6 +766,18 @@ describe('endTurn', () => {
     const mouthOfMadness = { type: 'relic', ownerId: 'A', card: { id: 'mouth', instanceId: 'mouth#0', name: 'Mouth of Madness', kind: 'relic', keywords: { duringEndStepForceShift: 1 } } };
     const terraneanGates = { type: 'relic', ownerId: 'A', card: { id: 'gates', instanceId: 'gates#0', name: 'Terranean Gates', kind: 'relic', keywords: { duringEndStepLoseTimeCounters: 2 } } };
 
+    // Immen Gorta's controller now picks WHERE it lands on every return —
+    // including the end step and each bounce of the loop (it used to drop onto
+    // the first empty tile). This answers each such pick with the first legal
+    // tile so the tests below can keep exercising the damage-choice flow.
+    const settleReturns = (s) => {
+      let n = s;
+      while (n.pendingChoice?.kind === 'shift-return') {
+        n = gameReducer(n, { type: 'RESOLVE_SHIFT_RETURN', cellId: n.pendingChoice.allowedCells[0] });
+      }
+      return n;
+    };
+
     // Regression: per the user's own later ruling, the controller now gets
     // a REAL target choice for Immen Gorta's "any target" damage on all 5
     // illustrated returns (not just the ordinary no-Mouth-of-Madness case
@@ -803,6 +815,10 @@ describe('endTurn', () => {
       // engine already has) straight through to the first real pause: the
       // damage-target choice itself.
       let next = gameReducer(state, { type: 'PASS_TURN' });
+      // First: the controller picks where Immen Gorta returns.
+      expect(next.pendingChoice).toEqual(expect.objectContaining({ kind: 'shift-return', playerId: 'A', duringEndStep: true }));
+      expect(next.pendingChoice.allowedCells.length).toBeGreaterThan(1);
+      next = settleReturns(next);
       expect(next.phase).toBe('playing');
       expect(next.players.B.lifespan).toBe(1000);
       expect(next.pendingChoice).toEqual(expect.objectContaining({
@@ -811,7 +827,7 @@ describe('endTurn', () => {
       }));
 
       for (let bounceCount = 1; bounceCount <= 3; bounceCount += 1) {
-        next = gameReducer(next, { type: 'RESOLVE_DAMAGE_TARGET_PLAYER', targetPlayerId: 'B' });
+        next = settleReturns(gameReducer(next, { type: 'RESOLVE_DAMAGE_TARGET_PLAYER', targetPlayerId: 'B' }));
         expect(next.phase).toBe('playing');
         expect(next.players.B.lifespan).toBe(1000 - bounceCount);
         expect(next.pendingChoice).toEqual(expect.objectContaining({
@@ -820,7 +836,7 @@ describe('endTurn', () => {
       }
 
       // 5th (final illustrated) return: still a real choice.
-      next = gameReducer(next, { type: 'RESOLVE_DAMAGE_TARGET_PLAYER', targetPlayerId: 'B' });
+      next = settleReturns(gameReducer(next, { type: 'RESOLVE_DAMAGE_TARGET_PLAYER', targetPlayerId: 'B' }));
       expect(next.phase).toBe('playing');
       expect(next.players.B.lifespan).toBe(996);
       expect(next.pendingChoice).toEqual(expect.objectContaining({
@@ -851,12 +867,10 @@ describe('endTurn', () => {
         board: { r3c1: shiftedImmenGorta(1), r2c1: mouthOfMadness, r2c2: terraneanGates },
         players: { A: player(), B: player({ lifespan: 1_000_000, mainDeck: [{ instanceId: 'd1' }] }) },
       });
-      let next = gameReducer(state, { type: 'PASS_TURN' });
-      next = gameReducer(next, { type: 'RESOLVE_DAMAGE_TARGET_PLAYER', targetPlayerId: 'B' });
-      next = gameReducer(next, { type: 'RESOLVE_DAMAGE_TARGET_PLAYER', targetPlayerId: 'B' });
-      next = gameReducer(next, { type: 'RESOLVE_DAMAGE_TARGET_PLAYER', targetPlayerId: 'B' });
-      next = gameReducer(next, { type: 'RESOLVE_DAMAGE_TARGET_PLAYER', targetPlayerId: 'B' });
-      next = gameReducer(next, { type: 'RESOLVE_DAMAGE_TARGET_PLAYER', targetPlayerId: 'B' });
+      let next = settleReturns(gameReducer(state, { type: 'PASS_TURN' }));
+      for (let i = 0; i < 5; i += 1) {
+        next = settleReturns(gameReducer(next, { type: 'RESOLVE_DAMAGE_TARGET_PLAYER', targetPlayerId: 'B' }));
+      }
       expect(next.phase).toBe('gameover');
       expect(next.winner).toBe('A');
     });
@@ -867,14 +881,14 @@ describe('endTurn', () => {
         board: { r3c1: shiftedImmenGorta(1), r2c1: mouthOfMadness, r2c2: terraneanGates },
         players: { A: player(), B: player({ lifespan: 1000, mainDeck: [{ instanceId: 'd1' }] }) },
       });
-      let next = gameReducer(state, { type: 'PASS_TURN' });
+      let next = settleReturns(gameReducer(state, { type: 'PASS_TURN' }));
       const returnedCellId = Object.entries(next.board).find(([, o]) => o?.card?.name === 'Immen Gorta, the Boundless Hunger')?.[0];
       expect(returnedCellId).toBeTruthy();
       // Resolve the 1st damage choice, then simulate a response destroying
       // Immen Gorta before the deferred reshift step re-validates it — the
       // exact same "never trust stale data across a window" shape every
       // other pendingResolution kind already handles.
-      next = gameReducer(next, { type: 'RESOLVE_DAMAGE_TARGET_PLAYER', targetPlayerId: 'B' });
+      next = settleReturns(gameReducer(next, { type: 'RESOLVE_DAMAGE_TARGET_PLAYER', targetPlayerId: 'B' }));
       // By now the whole rest of the chain (with nobody to respond) has
       // already auto-resolved to the next damage-target choice — remove
       // Immen Gorta directly and resolve THAT choice to reach the next
@@ -897,7 +911,7 @@ describe('endTurn', () => {
         board: { r3c1: shiftedImmenGorta(1), r2c1: mouthOfMadness, r2c2: terraneanGates },
         players: { A: player(), B: player({ lifespan: 1000, mainDeck: [{ instanceId: 'd1' }] }) },
       });
-      let next = gameReducer(state, { type: 'PASS_TURN' });
+      let next = settleReturns(gameReducer(state, { type: 'PASS_TURN' }));
       // Remove Mouth of Madness before resolving the 1st damage choice, so
       // the resulting 'boundless-hunger-reshift' pendingResolution's own
       // re-validation (not the earlier board.js check inside
@@ -981,13 +995,56 @@ describe('endTurn', () => {
     // player instead of silently auto-hitting the opponent, per the
     // user's own ruling ("Immen Gorta returning should allow the player
     // to target where the damage goes").
+    it('lands Immen Gorta on the tile the controller PICKS, not the first empty one, on the end-step return and again on a later loop bounce', () => {
+      const state = baseState({
+        turnPlayer: 'A',
+        board: { r3c1: shiftedImmenGorta(1), r2c1: mouthOfMadness, r2c2: terraneanGates },
+        players: { A: player(), B: player({ lifespan: 1000, mainDeck: [{ instanceId: 'd1' }] }) },
+      });
+      const first = gameReducer(state, { type: 'PASS_TURN' });
+      expect(first.pendingChoice).toMatchObject({ kind: 'shift-return', playerId: 'A', duringEndStep: true, bounceCount: 0 });
+      const options = first.pendingChoice.allowedCells;
+      const chosen = options[options.length - 1];
+      expect(chosen).not.toBe(options[0]);
+      const landed = gameReducer(first, { type: 'RESOLVE_SHIFT_RETURN', cellId: chosen });
+      expect(landed.board[chosen]).toMatchObject({ type: 'being', ownerId: 'A' });
+      expect(landed.board[chosen].card.name).toBe('Immen Gorta, the Boundless Hunger');
+      // Resolve the damage, and the NEXT bounce asks again (still mid-loop, bounceCount advanced).
+      const second = gameReducer(landed, { type: 'RESOLVE_DAMAGE_TARGET_PLAYER', targetPlayerId: 'B' });
+      expect(second.pendingChoice).toMatchObject({ kind: 'shift-return', playerId: 'A', duringEndStep: true });
+      expect(second.pendingChoice.bounceCount).toBeGreaterThan(0);
+      const pick2 = second.pendingChoice.allowedCells[second.pendingChoice.allowedCells.length - 1];
+      const landed2 = gameReducer(second, { type: 'RESOLVE_SHIFT_RETURN', cellId: pick2 });
+      expect(landed2.board[pick2].card.name).toBe('Immen Gorta, the Boundless Hunger');
+    });
+
+    it('an Hourglass collects a Time Counter for every counter Immen Gorta loses along the way — the end-of-turn decay and each Terranean Gates strip', () => {
+      const hourglass = { type: 'relic', ownerId: 'A', card: { id: 'hg', instanceId: 'hg#0', name: 'Hourglass', kind: 'relic', keywords: { collectsRemovedProphecyTimeCounters: true } }, engaged: false, counters: { time: 0 } };
+      const state = baseState({
+        turnPlayer: 'A',
+        board: { r3c1: shiftedImmenGorta(2), r2c1: mouthOfMadness, r2c2: terraneanGates, r1c1: hourglass },
+        players: { A: player(), B: player({ lifespan: 1000, mainDeck: [{ instanceId: 'd1' }] }) },
+      });
+      let next = settleReturns(gameReducer(state, { type: 'PASS_TURN' }));
+      // End-of-turn decay removed 2 (timer 2 -> 0) = 2 collected before the first return.
+      expect(next.board.r1c1.counters.time).toBe(2);
+      // Each further bounce re-Shifts Immen Gorta (timer 1) and Terranean Gates strips it: +1 per bounce.
+      next = settleReturns(gameReducer(next, { type: 'RESOLVE_DAMAGE_TARGET_PLAYER', targetPlayerId: 'B' }));
+      expect(next.board.r1c1.counters.time).toBe(3);
+      next = settleReturns(gameReducer(next, { type: 'RESOLVE_DAMAGE_TARGET_PLAYER', targetPlayerId: 'B' }));
+      expect(next.board.r1c1.counters.time).toBe(4);
+    });
+
     it('does not bounce at all without both Relics in play — only its own quoted decay applies, and opens a real target choice for the damage', () => {
       const state = baseState({
         turnPlayer: 'A',
         board: { r3c1: shiftedImmenGorta(1) },
         players: { A: player(), B: player({ lifespan: 50, mainDeck: [{ instanceId: 'd1' }] }) },
       });
-      const next = endTurn(state);
+      const landing = endTurn(state);
+      // The controller chooses where it returns first (end-step returns used to auto-pick).
+      expect(landing.pendingChoice).toEqual(expect.objectContaining({ kind: 'shift-return', playerId: 'A' }));
+      const next = settleReturns(landing);
       expect(next.players.B.lifespan).toBe(50); // no damage yet — a real choice is pending, not auto-resolved
       const returned = Object.values(next.board).find(o => o?.card?.name === 'Immen Gorta, the Boundless Hunger');
       expect(returned?.type).toBe('being');

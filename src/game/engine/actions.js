@@ -1,7 +1,7 @@
 import { cellId, parseCellId, ROWS, COLS, ETHEREAL_ROW, SUMMON_CELLS, mortalCellsFor, isMortalRealm, opponentOf, computeMoveDestination, computeAttackCell, owningPlayerOfRow } from './board.js';
 import { STARTING_LIFESPAN } from './constants.js';
 import { STARTING_HAND_SIZE, MULLIGAN_COST, drawCard } from './deck.js';
-import { addLog, beginTurn, finishBeginTurn, endTurn, checkWin, controlsOnlyFaithlessPermanents, triggerZealotProphecyEssence, triggerHourglassCollection, resolveEndOfTurnDamageNamedFamilyQueue } from './turn.js';
+import { addLog, beginTurn, finishBeginTurn, endTurn, checkWin, controlsOnlyFaithlessPermanents, triggerProphecyCounterRemoval, resolveEndOfTurnDamageNamedFamilyQueue } from './turn.js';
 import { resolveMutualCombat, deathDamageFor, effectiveStrength } from './combat.js';
 import { stripFlavorText, EFFIGY_COLORS, makeTemporaryEssence, totalCastingCost, createTokenCard, isFaithlessTypedCard, parseKeywords } from '../../lib/cardData.js';
 
@@ -1420,10 +1420,8 @@ const SACRIFICE_THIS_THEN_RE = /^Sacrifice this,?\s*(.+)$/i;
 // Demon's own onMove text, after self-name substitution: "When Defective
 // Demon moves sacrifice it." becomes "sacrifice it.") — a bare self-
 // sacrifice, no further effect, distinct from SACRIFICE_THIS_THEN_RE above
-// (which requires trailing effect text). Real sacrifice, not death damage
-// — no owner Lifespan loss, same "sacrifice" vs "dies" distinction every
-// other sacrifice-as-a-cost effect in this file already follows
-// (destroyBeing).
+// (which requires trailing effect text). Goes through destroyBeing, so the
+// owner still takes the death-damage like any other sacrifice.
 const SELF_SACRIFICE_BARE_RE = /^Sacrifice (?:this|it)\.?$/i;
 
 // "Summon (N) <Name> token(s) ... on any tile this points to" (Blooming
@@ -2075,6 +2073,16 @@ const placeTokenOnBoard = (state, playerId, tokenCard, cellId) => {
 // of them: Bone collector, Cookie, Ditch Digger "Steve" all just say
 // "summon a Bag o' Bones token", no location).
 const emptyMortalCellsFor = (board, playerId) => mortalCellsFor(playerId).filter(c => !board[c]);
+
+// Where a Being returning from the Ethereal Realm (Shift / Delay / Prophesize)
+// may land: any empty Mortal Realm tile, plus the player's OWN freestanding
+// Armament piles — the Being picks them up on arrival, exactly like a summon
+// (emptyOrOwnArmamentStack). A tile whose only occupant is a "Beings may move
+// across this" ground Relic already counts as empty (those live in
+// state.groundRelics, not the board). It used to be bare empty tiles only, so
+// a Shifted Being had no legal return when the only free ground held its own
+// Armaments, and a pile could never be chosen.
+const shiftLandingCellsFor = (board, playerId) => mortalCellsFor(playerId).filter(c => emptyOrOwnArmamentStack(board[c], playerId));
 
 // Every cell geometrically adjacent to `fromCellId` (all 8 neighbors),
 // restricted to the Mortal Realm — plain grid adjacency, unlike
@@ -3864,7 +3872,7 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
       return addLog(state, `${cardName}'s ${label} has no blocking Being to destroy.`);
     }
     let next = addLog(state, `${cardName}'s ${label} destroys ${blocker.card.name} — the attacking Being will deal no damage.`);
-    next = destroyBeing(next, blockingCell);
+    next = destroyBeing(next, blockingCell, { noDeathDamage: true });
     // Stashed on the SAME pendingResolution the attack's own declare step
     // already opened (never a fresh one) — resolvePendingResolution's own
     // 'attack' kind reads this to zero out the attacker's damage once the
@@ -4036,11 +4044,15 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
     if (!occupant || occupant.type !== 'being') {
       return addLog(state, `${cardName}'s ${label} has no Being on this tile to sacrifice.`);
     }
-    const drawCount = occupant.card.lifespan;
+    // "its Lifespan" is the Being's CURRENT Lifespan — what it has right now,
+    // counting Armament/permanent bonuses and any damage taken — not the
+    // printed number (a Being carrying a +2 Armament draws 2 more). Floored at
+    // 0. (Death damage, by contrast, deliberately uses the printed Lifespan.)
+    const drawCount = Math.max(0, occupant.currentLifespan ?? occupant.card.lifespan);
     let next = addLog(state, `${playerId} sacrifices ${occupant.card.name} for ${cardName}'s ${label}.`);
     next = destroyBeing(next, context.selfCellId);
     const { state: afterDraw, drawnCount } = drawCardsFor(next, playerId, drawCount);
-    return addLog(afterDraw, `${cardName}'s ${label} draws ${drawnCount} card(s) for ${playerId} (equal to ${occupant.card.name}'s Lifespan).`);
+    return addLog(afterDraw, `${cardName}'s ${label} draws ${drawnCount} card(s) for ${playerId} (equal to ${occupant.card.name}'s Lifespan of ${drawCount}).`);
   }
 
   if (SACRIFICE_BEING_POINTED_RE.test(text) && context.selfCellId) {
@@ -4067,10 +4079,10 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
     }
     if (candidates.length === 1) {
       let next = addLog(state, `${cardName}'s ${label} destroys ${candidates[0][1].card.name}.`);
-      return destroyBeing(next, candidates[0][0]);
+      return destroyBeing(next, candidates[0][0], { noDeathDamage: true });
     }
     let next = addLog(state, `${cardName}'s ${label} lets ${playerId} choose a Being to destroy.`);
-    return { ...next, pendingChoice: { kind: 'sacrifice-pointed-target', playerId, cardName, label, selfCellId: context.selfCellId } };
+    return { ...next, pendingChoice: { kind: 'sacrifice-pointed-target', playerId, cardName, label, selfCellId: context.selfCellId, noDeathDamage: true } };
   }
 
   const midnightMassMatch = text.match(MIDNIGHT_MASS_RE);
@@ -4820,7 +4832,7 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
     });
     let next = addLog(state, `${cardName}'s ${label} sends every Being to Purgatory.`);
     Object.values(beingCellsByOwner).flat().forEach(cell => {
-      if (next.board[cell]?.type === 'being') next = destroyBeing(next, cell);
+      if (next.board[cell]?.type === 'being') next = destroyBeing(next, cell, { noDeathDamage: true });
     });
     Object.keys(state.players).forEach(pid => {
       const count = beingCellsByOwner[pid].length * perBeing;
@@ -5331,7 +5343,7 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
     if (candidates.length === 1) {
       const [cell, occ] = candidates[0];
       let next = addLog(state, `${opponentId} sacrifices ${occ.card.name} to ${cardName}'s ${label}.`);
-      return destroyBeing(next, cell);
+      return destroyBeing(next, cell, { noDeathDamage: true });
     }
     let next = addLog(state, `${cardName}'s ${label} lets ${opponentId} choose a Being to sacrifice.`);
     return { ...next, pendingChoice: { kind: 'sacrifice', playerId: opponentId, cardName } };
@@ -5467,7 +5479,9 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
     const applyCopy = (st, targetCellId) => {
       const target = st.board[targetCellId];
       const self = st.board[context.selfCellId];
-      if (!target || !self) return st;
+      // `self` must still be the Being itself — it may have died (leaving an
+      // Armament pile on its tile) before this resolved.
+      if (!target || !self || self.type !== 'being') return st;
       const next2 = { ...st, board: { ...st.board, [context.selfCellId]: grantCopiedEffectUntilNextTurn(self, target.card) } };
       return addLog(next2, `${cardName}'s ${label} copies ${target.card.name}'s effect(s) until the end of ${playerId}'s next turn.`);
     };
@@ -6111,6 +6125,7 @@ const performShift = (state, playerId, fromCellId, toCellId, shiftOverride = nul
         { ...next, board: { ...next.board, [toCellId]: { ...current, timer } } },
         `${occupant.card.name} loses ${loseAmount} Time Counter(s) (Terranean Gates).`
       );
+      next = triggerProphecyCounterRemoval(next, playerId, (current?.timer || 0) - timer);
       next = resolveProphecyModulateHitZero(next, toCellId, duringEndStep, bounceCount);
     }
   }
@@ -6122,6 +6137,7 @@ const performShift = (state, playerId, fromCellId, toCellId, shiftOverride = nul
         { ...next, board: { ...next.board, [toCellId]: { ...current, timer } } },
         `${occupant.card.name} loses ${postShiftLoseAmount} Time Counter(s).`
       );
+      next = triggerProphecyCounterRemoval(next, playerId, (current.timer || 0) - timer);
       next = resolveProphecyModulateHitZero(next, toCellId, false, 0, postShiftLoseAmount);
     }
   }
@@ -6306,8 +6322,25 @@ const placeReturnedFromShift = (state, cellId, toCellId, duringEndStep = false, 
   const card = occupant.shiftedFromCard;
   const board = { ...state.board };
   delete board[cellId];
-  board[toCellId] = { type: 'being', ownerId: occupant.ownerId, card, currentLifespan: card.lifespan, engaged: true };
-  let next = addLog({ ...state, board }, `${card.name} moves into the Mortal Realm at ${toCellId}, Engaged.`);
+  // Landing on the owner's own Armament pile picks the Armaments up (same as a
+  // summon — placeBeingOnBoard), including their Lifespan bonus.
+  const waiting = state.board[toCellId];
+  const pickingUpArmaments = waiting?.type === 'armament-stack' && waiting.ownerId === occupant.ownerId;
+  board[toCellId] = {
+    type: 'being', ownerId: occupant.ownerId, card, currentLifespan: card.lifespan, engaged: true,
+    ...(pickingUpArmaments ? { armaments: waiting.armaments } : {}),
+  };
+  let next = addLog({ ...state, board }, `${card.name} moves into the Mortal Realm at ${toCellId}, Engaged${pickingUpArmaments ? ' and picks up the Armament(s) waiting there' : ''}.`);
+  if (pickingUpArmaments) {
+    next = applyNewArmamentsLifespanBonus(next, toCellId, waiting.armaments);
+    // An Armament with a negative Lifespan bonus (Gargantuan hammer's -3) can
+    // kill the Being the instant it picks the pile up — it then dies on
+    // arrival (its Depart and death damage already resolved, and its armaments
+    // drop back as a pile), so none of the "moves into the Mortal Realm"
+    // reactions below may fire against a tile that no longer holds it.
+    const landed = next.board[toCellId];
+    if (!landed || landed.type !== 'being' || landed.card?.instanceId !== card.instanceId) return next;
+  }
   // Bypass the real "any target" choice only for a card OTHER than Immen
   // Gorta sharing this forced-bounce shape (no real card does today —
   // see the 100-bounce-cap test) — it has nowhere safe to pause across
@@ -6429,11 +6462,22 @@ const fizzleShiftReturn = (state, cellId) => {
 const returnFromShift = (state, cellId, duringEndStep = false, bounceCount = 0, disengageOnReturn = false, landDisengaged = true) => {
   const occupant = state.board[cellId];
   const card = occupant.shiftedFromCard;
-  const emptyCells = emptyMortalCellsFor(state.board, occupant.ownerId);
+  const emptyCells = shiftLandingCellsFor(state.board, occupant.ownerId);
   if (emptyCells.length === 0) {
     return fizzleShiftReturn(state, cellId);
   }
-  if (emptyCells.length === 1 || duringEndStep) {
+  // The owner picks where the Being lands whenever there is a real choice —
+  // INCLUDING during the end step and for every return in Immen Gorta's
+  // Boundless Hunger loop (it pauses at real choices/windows now, and a Being
+  // that drops onto an unwanted tile first-come-first-served is the bug the
+  // player hit). The one remaining auto-pick: a Mouth of Madness forced-bounce
+  // loop run by a card OTHER than Immen Gorta (no real card does today, and it
+  // has no safe place to pause across up to 100 automatic bounces — see
+  // placeReturnedFromShift).
+  const unpausableBounceLoop = duringEndStep
+    && !!relicWithKeywordAnywhere(state.board, 'duringEndStepForceShift')
+    && card.name !== 'Immen Gorta, the Boundless Hunger';
+  if (emptyCells.length === 1 || unpausableBounceLoop) {
     return placeReturnedFromShift(state, cellId, emptyCells[0], duringEndStep, bounceCount, disengageOnReturn, landDisengaged);
   }
   // Also waits on an open `pendingResolution` now, not just `pendingChoice`
@@ -6445,7 +6489,9 @@ const returnFromShift = (state, cellId, duringEndStep = false, bounceCount = 0, 
     return addLog(state, `${card.name}'s return from the Ethereal Realm doesn't resolve yet — still waiting on an earlier choice.`);
   }
   let next = addLog(state, `${occupant.ownerId} chooses where ${card.name} returns to the Mortal Realm.`);
-  return { ...next, pendingChoice: { kind: 'shift-return', playerId: occupant.ownerId, cellId, disengageOnReturn, allowedCells: emptyCells } };
+  // `duringEndStep`/`bounceCount` ride along on the choice so the continuation
+  // (RESOLVE_SHIFT_RETURN) still knows it is mid Boundless Hunger loop.
+  return { ...next, pendingChoice: { kind: 'shift-return', playerId: occupant.ownerId, cellId, disengageOnReturn, duringEndStep, bounceCount, allowedCells: emptyCells } };
 };
 
 // Delay/Prophesize's own return trip — same free-choice-among-empty-tiles
@@ -6465,7 +6511,7 @@ const returnAsSummon = (state, cellId, duringEndStep = false) => {
   const occupant = state.board[cellId];
   const card = occupant.shiftedFromCard;
   const ownerId = occupant.ownerId;
-  const emptyCells = emptyMortalCellsFor(state.board, ownerId);
+  const emptyCells = shiftLandingCellsFor(state.board, ownerId);
   if (emptyCells.length === 0) {
     return fizzleShiftReturn(state, cellId);
   }
@@ -7404,20 +7450,27 @@ const triggerOnAttachedBeingDied = (state, playerId, cellId, priorArmaments) => 
   }, state);
 };
 
-// Sends a Being to Purgatory *without* dealing its owner death-damage —
-// "destroy"/"sacrifice" effects (Cro-āsik Hunger's "destroy target non
-// Deity Being (Lifespan damage is not dealt)"; Venefica's forced
-// sacrifice). Mirrors dealDamageToBeing's own death branch (Purgatory,
-// Depart, drop Armaments) minus the owner-Lifespan-loss step — a
-// sacrifice/destroy is still a real death for every other purpose.
-export const destroyBeing = (state, cellId) => {
+// Sends a Being to Purgatory by a "destroy"/"sacrifice" effect. Ruled: a
+// sacrifice or destroy is still a death, so the owner takes the same
+// death-damage dealDamageToBeing deals (the printed Lifespan —
+// deathDamageFor) UNLESS the card says otherwise. `noDeathDamage` is the
+// opt-out for exactly those cards: Cro-āsik Hunger ("Lifespan damage is not
+// dealt"), Venefica ("takes no Lifespan damage from it"), Smite ("Opponent
+// does not take lifespan damage from it dying"), Strike Down ("its
+// controller is not dealt damage when it dies"), plus the two rules-driven
+// removals that are not really a card's sacrifice (Dust to Dust's "sent to
+// Purgatory", the Deity legend rule). Mirrors dealDamageToBeing's own death
+// branch (owner Lifespan loss, Purgatory, Depart, dropped Armaments).
+export const destroyBeing = (state, cellId, { noDeathDamage = false } = {}) => {
   const occupant = state.board[cellId];
   if (!occupant || occupant.type !== 'being') return state;
   const owner = state.players[occupant.ownerId];
+  const dmg = noDeathDamage ? 0 : deathDamageFor(occupant);
   let next = {
     ...state,
-    players: { ...state.players, [occupant.ownerId]: { ...owner, purgatory: purgatoryAfterAdding(owner.purgatory, occupant.card) } },
+    players: { ...state.players, [occupant.ownerId]: { ...owner, lifespan: owner.lifespan - dmg, purgatory: purgatoryAfterAdding(owner.purgatory, occupant.card) } },
   };
+  if (dmg > 0) next = addLog(next, `${occupant.card.name} dies; ${occupant.ownerId} takes ${dmg} Lifespan damage.`);
   next = incrementBeingsDiedThisTurn(next, occupant.ownerId);
   next = triggerOwnBeingDiedReactions(next, occupant.ownerId);
   next = triggerAnyBeingDiedCounterGain(next);
@@ -7440,9 +7493,8 @@ export const destroyBeing = (state, cellId) => {
 // Being this specific cast's cost target happened to be — see
 // resolveDesperateFinale above), not a static per-card condition like
 // Tilled Fields' own sacrificeIfEngagedAtEndOfTurn. Exported so turn.js's
-// own endTurn can sweep for it. "Sacrifice", not a real death, so this
-// reuses destroyBeing (no owner Lifespan loss) — same distinction this
-// whole file draws everywhere else. Deliberately NOT gated on
+// own endTurn can sweep for it. "Sacrifice" goes through
+// destroyBeing (owner death-damage, like every sacrifice). Deliberately NOT gated on
 // `occupant.ownerId === state.turnPlayer` — now that Ethereal Conjurings
 // (Desperate Finale included) can be cast reactively during a
 // reactiveWindow, the flagged Being's own owner can be the NON-turn-player,
@@ -12112,13 +12164,13 @@ const gameReducerCore = (state, action) => {
 
     case 'RESOLVE_SACRIFICE_POINTED_TARGET': {
       if (!state.pendingChoice || state.pendingChoice.kind !== 'sacrifice-pointed-target') return state;
-      const { playerId, cardName, label, selfCellId } = state.pendingChoice;
+      const { playerId, cardName, label, selfCellId, noDeathDamage } = state.pendingChoice;
       const selfArrows = state.board[selfCellId]?.card?.arrows || [];
       const pointedCells = [...new Set(selfArrows.map(dir => computeMoveDestination(playerId, selfCellId, dir)))].filter(Boolean);
       const occupant = state.board[action.cellId];
       if (!occupant || occupant.type !== 'being' || !pointedCells.includes(action.cellId)) return state;
-      let next = addLog({ ...state, pendingChoice: null }, `${cardName}'s ${label} sacrifices ${occupant.card.name}.`);
-      return destroyBeing(next, action.cellId);
+      let next = addLog({ ...state, pendingChoice: null }, `${cardName}'s ${label} ${noDeathDamage ? 'destroys' : 'sacrifices'} ${occupant.card.name}.`);
+      return destroyBeing(next, action.cellId, { noDeathDamage: !!noDeathDamage });
     }
 
     case 'RESOLVE_MIDNIGHT_MASS_SACRIFICE_TARGET': {
@@ -12223,7 +12275,7 @@ const gameReducerCore = (state, action) => {
         .map(([cell]) => cell);
       let next = addLog({ ...state, pendingChoice: null }, `${playerId} keeps ${keep.card.name} at ${action.cellId} (the legend rule).`);
       toSacrifice.forEach(cell => {
-        next = destroyBeing(next, cell);
+        next = destroyBeing(next, cell, { noDeathDamage: true });
       });
       return next;
     }
@@ -12888,7 +12940,7 @@ const gameReducerCore = (state, action) => {
       const occupant = state.board[action.cellId];
       if (!occupant || occupant.type !== 'being' || occupant.ownerId !== playerId) return state;
       let next = addLog({ ...state, pendingChoice: null }, `${playerId} sacrifices ${occupant.card.name}.`);
-      return destroyBeing(next, action.cellId);
+      return destroyBeing(next, action.cellId, { noDeathDamage: true }); // Venefica: "takes no Lifespan damage from it"
     }
 
     case 'RESOLVE_SACRIFICE_ARMAMENT': {
@@ -12997,10 +13049,10 @@ const gameReducerCore = (state, action) => {
 
     case 'RESOLVE_SHIFT_RETURN': {
       if (!state.pendingChoice || state.pendingChoice.kind !== 'shift-return') return state;
-      const { cellId, disengageOnReturn, allowedCells } = state.pendingChoice;
+      const { cellId, disengageOnReturn, allowedCells, duringEndStep, bounceCount } = state.pendingChoice;
       if (!allowedCells.includes(action.cellId)) return state;
       const next = { ...state, pendingChoice: null };
-      return placeReturnedFromShift(next, cellId, action.cellId, false, 0, disengageOnReturn || false);
+      return placeReturnedFromShift(next, cellId, action.cellId, !!duringEndStep, bounceCount || 0, disengageOnReturn || false);
     }
 
     // Delay/Prophesize's own multi-tile return choice — see returnAsSummon's
@@ -13057,6 +13109,10 @@ const gameReducerCore = (state, action) => {
       const target = state.board[action.cellId];
       const self = state.board[selfCellId];
       if (!target || !self) return state;
+      // Same guard as the single-candidate path: if the Being died while the
+      // choice was open its tile may now hold an Armament pile, which has no
+      // card to rewrite — drop the choice instead of corrupting the pile.
+      if (self.type !== 'being') return { ...state, pendingChoice: null };
       const next = {
         ...state, pendingChoice: null,
         board: { ...state.board, [selfCellId]: grantCopiedEffectUntilNextTurn(self, target.card) },
@@ -13143,10 +13199,8 @@ const gameReducerCore = (state, action) => {
       if (nextSelected.length < amount) {
         return { ...state, pendingChoice: { ...state.pendingChoice, selected: nextSelected } };
       }
-      // Last pick — sacrifice all of them (destroyBeing, not raw damage:
-      // same "sacrifice, not damage" precedent as every other
-      // sacrifice-as-a-cost effect — no owner Lifespan loss, Depart still
-      // fires), then place the Being that was waiting on this cost.
+      // Last pick — sacrifice all of them (destroyBeing: owner death-damage,
+      // Depart still fires), then place the Being that was waiting on this cost.
       const names = nextSelected.map(cell => state.board[cell].card.name);
       let next = nextSelected.reduce((s, cell) => destroyBeing(s, cell), { ...state, pendingChoice: null });
       next = addLog(next, `${playerId} sacrifices ${names.join(', ')} as an additional cost to summon ${cardName}.`);
@@ -13171,7 +13225,7 @@ const gameReducerCore = (state, action) => {
       delete next.board[action.prophecyCellId];
       next = addLog(next, `${playerId} sacrifices ${prophecy.card.name} to ${cardName}'s When Summoned.`);
       next = addLog(next, `${cardName}'s When Summoned destroys ${target.card.name}.`);
-      return destroyBeing(next, action.targetCellId);
+      return destroyBeing(next, action.targetCellId, { noDeathDamage: true });
     }
 
     case 'RESOLVE_DESTROY_PERMANENT': {
@@ -14251,6 +14305,10 @@ const gameReducerCore = (state, action) => {
           ...state.players,
           [playerId]: {
             ...owner,
+            // A Martyr sacrifice is still a Being's death: its owner takes the
+            // printed Lifespan as death-damage, same as destroyBeing (a Relic
+            // has no death-damage).
+            ...(occupant.type === 'being' ? { lifespan: owner.lifespan - deathDamageFor(occupant) } : {}),
             purgatory: purgatoryAfterAdding(owner.purgatory, occupant.card),
             ...(spentEffigy ? { effigyPool: spentEffigy.remaining, effigySpentThisTurn: [...owner.effigySpentThisTurn, ...spentEffigy.spent] } : {}),
           },
@@ -14263,6 +14321,7 @@ const gameReducerCore = (state, action) => {
         next = addLog(next, `${playerId} pays ${martyrEffigyCost.amount} ${martyrEffigyCost.color} Essence for ${occupant.card.name}'s Martyr.`);
       }
       next = addLog(next, `${playerId} engages and sacrifices ${occupant.card.name} for Martyr.`);
+      if (occupant.type === 'being') next = addLog(next, `${occupant.card.name} dies; ${playerId} takes ${deathDamageFor(occupant)} Lifespan damage.`);
       if (occupant.type === 'being') next = incrementBeingsDiedThisTurn(next, playerId);
       if (occupant.type === 'being') next = triggerOwnBeingDiedReactions(next, playerId);
       if (occupant.type === 'being') next = triggerAnyBeingDiedCounterGain(next);
@@ -14288,7 +14347,7 @@ const gameReducerCore = (state, action) => {
       // "later trigger waits" precedent logDepartIfPresent establishes.
       if (occupant.type === 'being') next = triggerWretchedRemnantsOffer(next, playerId, occupant.card);
       if (occupant.type === 'being') next = triggerEchoesOfBoundlessOffer(next, playerId, occupant.card);
-      return next;
+      return checkWin(next);
     }
 
     case 'ACTIVATE_ENGAGE': {
@@ -14718,8 +14777,8 @@ const gameReducerCore = (state, action) => {
         // check the once-per-turn Prophecy-counter-removal trigger, same as
         // the automatic per-turn tick does (turn.js > modulate).
         if (action.delta < 0) {
-          next = triggerZealotProphecyEssence(next, occupant.ownerId);
-          next = triggerHourglassCollection(next, occupant.ownerId);
+          // One Hourglass collection per Time Counter that actually came off.
+          next = triggerProphecyCounterRemoval(next, occupant.ownerId, occupant.timer - timer);
         }
         // Same two-phase finalization the automatic per-turn tick uses
         // (RULES.md > Prophecies) — a face-down Prophecy that hits 0 this way
@@ -15024,6 +15083,7 @@ const resolvePendingResolution = (state) => {
       { ...cleared, board: { ...cleared.board, [cellId]: { ...occupant, timer } } },
       `${cardName} loses ${loseAmount} Time Counter(s) (Terranean Gates).`
     );
+    next = triggerProphecyCounterRemoval(next, occupant.ownerId, (occupant.timer || 0) - timer);
     return resolveProphecyModulateHitZero(next, cellId, true, bounceCount);
   }
   return cleared;

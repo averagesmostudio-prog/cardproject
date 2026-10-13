@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import CoinToss from './CoinToss.jsx';
 
 // A short interactive coin-flip sequence run before the match is created
 // (so hands are dealt only once turn order is settled — RULES.md > Turn
@@ -9,12 +10,11 @@ import React, { useEffect, useState } from 'react';
 export default function CoinFlip({ onResolved }) {
   const [caller] = useState(() => (Math.random() < 0.5 ? 'human' : 'ai'));
   const [call, setCall] = useState(null); // 'heads' | 'tails' once called
-  const [result, setResult] = useState(null); // 'heads' | 'tails' once flipped
+  const [result, setResult] = useState(null); // 'heads' | 'tails' — decided when the flip starts
+  const [landed, setLanded] = useState(false); // the coin has finished its toss and come to rest
 
-  const winner = result && call ? (call === result ? caller : (caller === 'human' ? 'ai' : 'human')) : null;
-  // Derived, not stored — true for exactly the window between a call coming
-  // in and the flip landing.
-  const flipping = !!call && !result;
+  // Only known once the coin has actually landed, so nothing gives the result away mid-toss.
+  const winner = landed && result && call ? (call === result ? caller : (caller === 'human' ? 'ai' : 'human')) : null;
 
   // The AI calls its own side automatically, after a beat so the "who
   // calls it" reveal isn't instant.
@@ -24,12 +24,12 @@ export default function CoinFlip({ onResolved }) {
     return () => clearTimeout(t);
   }, [caller, call]);
 
-  // Once a call is in (either side), flip the coin after a short delay.
+  // Once a call is in (either side), start the toss after a short delay.
   useEffect(() => {
     if (!call || result) return;
     const t = setTimeout(() => {
       setResult(Math.random() < 0.5 ? 'heads' : 'tails');
-    }, 1100);
+    }, 500);
     return () => clearTimeout(t);
   }, [call, result]);
 
@@ -49,12 +49,8 @@ export default function CoinFlip({ onResolved }) {
         <h2 className="text-lg font-bold text-stone-800 mb-1">Coin flip</h2>
         <p className="text-sm text-stone-500 mb-6">The winner decides who goes first.</p>
 
-        <div
-          className={`mx-auto mb-6 w-24 h-24 rounded-full border-4 border-stone-800 flex items-center justify-center
-            text-2xl font-bold text-stone-800 bg-amber-100 transition-transform duration-300
-            ${flipping ? 'animate-spin' : ''}`}
-        >
-          {result ? label(result) : '?'}
+        <div className="mx-auto mb-3 flex justify-center overflow-hidden rounded-xl bg-stone-900">
+          <CoinToss result={result} size={140} onLanded={() => setLanded(true)} />
         </div>
 
         {!call && caller === 'human' && (
@@ -81,14 +77,10 @@ export default function CoinFlip({ onResolved }) {
           <p className="text-sm text-stone-500 italic">Opponent is calling it…</p>
         )}
 
-        {call && !result && (
+        {call && !landed && (
           <p className="text-sm text-stone-500">
             {caller === 'human' ? 'You call' : 'Opponent calls'} <span className="font-semibold text-stone-700">{label(call)}</span> — flipping…
           </p>
-        )}
-
-        {result && !winner && (
-          <p className="text-sm text-stone-500">Landed on {label(result)}…</p>
         )}
 
         {winner === 'human' && (

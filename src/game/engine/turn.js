@@ -57,7 +57,7 @@ export const triggerZealotProphecyEssence = (state, prophecyOwnerId) => {
 // granting Essence, and with no "Once per turn" limit — every removal
 // counts, so (unlike the Zealot) there's no used-this-turn flag to reset.
 // Each Hourglass the player controls collects independently.
-export const triggerHourglassCollection = (state, prophecyOwnerId) => {
+export const triggerHourglassCollection = (state, prophecyOwnerId, count = 1) => {
   let next = state;
   Object.entries(next.board).forEach(([cell, occupant]) => {
     // Hourglass (a Relic) and Horologist's Apprentice (a Being) print the
@@ -65,10 +65,27 @@ export const triggerHourglassCollection = (state, prophecyOwnerId) => {
     if ((occupant?.type !== 'relic' && occupant?.type !== 'being') || occupant.ownerId !== prophecyOwnerId) return;
     if (!occupant.card.keywords?.collectsRemovedProphecyTimeCounters) return;
     const have = occupant.counters?.time || 0;
-    next = { ...next, board: { ...next.board, [cell]: { ...occupant, counters: { ...occupant.counters, time: have + 1 } } } };
-    next = addLog(next, `${occupant.card.name} collects a Time Counter (now ${have + 1}).`);
+    next = { ...next, board: { ...next.board, [cell]: { ...occupant, counters: { ...occupant.counters, time: have + count } } } };
+    next = addLog(next, `${occupant.card.name} collects ${count} Time Counter${count === 1 ? '' : 's'} (now ${have + count}).`);
   });
   return next;
+};
+
+// A Prophecy's Time Counters were just removed by anything OTHER than the
+// plain per-turn Modulate tick (which fires its own triggers inline): a
+// shifted Being losing them to its own end-of-turn decay (Scā-vuhk Hunger,
+// Immen Gorta), to Terranean Gates, or to an effect like Údarik Hunger's
+// "...then loses (X) Time Counters". A shifted Being is a Prophecy in the
+// Ethereal Realm, so every Time Counter it actually loses fires the same
+// reactions a ticking Prophecy's does: each Hourglass / Horologist's
+// Apprentice collects ONE per counter removed ("whenever a Time Counter is
+// removed"), and a Zealot's once-per-turn reaction fires once. `removed` is
+// the number of counters that really came off — a Being with 1 left that
+// "loses (2)" only removed 1.
+export const triggerProphecyCounterRemoval = (state, prophecyOwnerId, removed) => {
+  if (!(removed > 0)) return state;
+  const next = triggerZealotProphecyEssence(state, prophecyOwnerId);
+  return triggerHourglassCollection(next, prophecyOwnerId, removed);
 };
 
 // Resets each Zealot's once-per-turn Prophecy-counter-removal trigger for
@@ -253,6 +270,7 @@ const applyEndOfTurnShiftDecay = (state) => {
     const timer = Math.max(0, (current.timer || 0) - amount);
     next = { ...next, board: { ...next.board, [cell]: { ...current, timer } } };
     next = addLog(next, `${current.card.name} loses ${amount} Time Counter(s) at the end of the turn.`);
+    next = triggerProphecyCounterRemoval(next, current.ownerId, (current.timer || 0) - timer);
     // `duringEndStep: true` is what lets the Boundless Hunger bounce loop
     // (Immen Gorta + Mouth of Madness + Terranean Gates — actions.js >
     // placeReturnedFromShift's own comment) actually run, capped at 100
@@ -447,8 +465,8 @@ const modulateOtherTimeCounters = (state) => {
 // own), for any Being carrying the keyword regardless of owner (the same
 // either-owner, unconditional treatment recomputeXBeings/disengage already
 // use for their own per-occupant checks this same Modulate Step). "Sacrifice"
-// (not "dies"), so this routes through destroyBeing — no owner Lifespan
-// loss, same precedent every other "sacrifice" text in this file follows.
+// (not "dies"), so this routes through destroyBeing — a sacrifice still
+// deals the token's death-damage, like every other sacrifice.
 const triggerSacrificeAtZeroTimeCounters = (state) => {
   let next = state;
   Object.keys(next.board).forEach(cell => {

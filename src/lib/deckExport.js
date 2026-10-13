@@ -3,14 +3,48 @@
 // list works too.
 
 export const DECK_EXPORT_FORMAT = 'tcg-deck';
-export const DECK_EXPORT_VERSION = 1;
+// Version 2 adds `effigyDeck` (per-color Effigy counts) next to `mainDeck` —
+// a game deck is a Main Deck AND an Effigy Deck, and an export that dropped
+// the Effigy half couldn't be played as exported. Version 1 files (main deck
+// only, e.g. from the Generator) still import fine.
+export const DECK_EXPORT_VERSION = 2;
 
-export const buildDeckExport = (entries) => ({
+export const buildDeckExport = (entries, { effigyCounts = null, name = null } = {}) => ({
   format: DECK_EXPORT_FORMAT,
   version: DECK_EXPORT_VERSION,
   exportedAt: new Date().toISOString(),
-  mainDeck: entries.map(({ name, count }) => ({ name, count })),
+  ...(name ? { name } : {}),
+  mainDeck: entries.map(({ name: cardName, count }) => ({ name: cardName, count })),
+  ...(effigyCounts ? {
+    effigyDeck: Object.fromEntries(
+      Object.entries(effigyCounts).map(([color, n]) => [color, Math.max(0, Math.floor(Number(n)) || 0)]).filter(([, n]) => n > 0)
+    ),
+  } : {}),
 });
+
+// Reads the Effigy half of an export: a { color: count } object. Returns null
+// when absent or unusable; unknown colors are dropped and counts floored.
+const parseEffigyDeck = (raw) => {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const counts = {};
+  Object.entries(raw).forEach(([color, n]) => {
+    const count = Math.floor(Number(n));
+    if (typeof color === 'string' && color && Number.isFinite(count) && count > 0) counts[color.toLowerCase()] = count;
+  });
+  return Object.keys(counts).length > 0 ? counts : null;
+};
+
+// Same as parseDeckImport but also returns the Effigy Deck when the file has
+// one: { entries, effigyCounts } (effigyCounts null for a main-deck-only file,
+// a plain "3x Card Name" list, or a v1 export).
+export const parseDeckImportFull = (text) => {
+  const entries = parseDeckImport(text);
+  let effigyCounts = null;
+  if (text.trim().startsWith('{')) {
+    try { effigyCounts = parseEffigyDeck(JSON.parse(text.trim()).effigyDeck); } catch { effigyCounts = null; }
+  }
+  return { entries, effigyCounts };
+};
 
 // Parses either the JSON export above, or a plain "3x Card Name" / "3 Card
 // Name" per line .txt list (the format the Generator's own decklist

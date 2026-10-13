@@ -1,0 +1,60 @@
+/* 3D gold coin used by the start-of-game flip and the in-game coin-flip popup
+   (CoinToss.jsx). Everything keys off --ct-d, the coin's diameter. */
+.ct-stage {
+  --ct-t: calc(var(--ct-d) * 0.095);          /* coin thickness */
+  position: relative;
+  width: calc(var(--ct-d) * 1.9);
+  height: calc(var(--ct-d) * 2.3);
+  perspective: calc(var(--ct-d) * 3.5);
+  perspective-origin: 50% 38%;
+}
+.ct-wrap {
+  position: absolute;
+  left: 50%;
+  top: 62%;
+  width: var(--ct-d);
+  height: var(--ct-d);
+  margin: calc(var(--ct-d) / -2) 0 0 calc(var(--ct-d) / -2);
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+.ct-coin {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+.ct-coin img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.ct-face {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+.ct-front { transform: translateZ(calc(var(--ct-t) * 0.5)); }
+.ct-back  { transform: rotateX(180deg) translateZ(calc(var(--ct-t) * 0.5)); }
+.ct-shadow {
+  position: absolute;
+  left: 50%;
+  top: calc(62% + var(--ct-d) * 0.5);
+  width: calc(var(--ct-d) * 0.86);
+  height: calc(var(--ct-d) * 0.2);
+  margin-left: calc(var(--ct-d) * -0.43);
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0));
+  filter: blur(5px);
+  pointer-events: none;
+}
+
+/* in-game popup */
+.ct-popup { animation: ct-popup-in 220ms ease-out both; }
+.ct-popup.ct-leaving { animation: ct-popup-out 260ms ease-in both; }
+@keyframes ct-popup-in  { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ct-popup-out { from { opacity: 1; } to { opacity: 0; } }

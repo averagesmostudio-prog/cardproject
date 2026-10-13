@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import NetLobby from './NetLobby.jsx';
 import DeckImport from './DeckImport.jsx';
 import PreconSelect from './PreconSelect.jsx';
@@ -7,6 +7,7 @@ import NetCoinFlip from './NetCoinFlip.jsx';
 import Match from './Match.jsx';
 import { createInitialState } from '../engine/actions.js';
 import { buildMainDeckList, buildEffigyDeckList } from '../engine/deck.js';
+import { REMATCH_REQUEST_MESSAGE, rematchPhase, rematchStartingPlayer } from '../net/rematch.js';
 
 // Sibling to GameApp.jsx for a two-player-over-the-network match —
 // GameApp.jsx itself gets zero changes. Reuses DeckImport/PreconSelect/
@@ -31,6 +32,12 @@ export default function NetGameApp({ onExitToMenu }) {
   const [peerCoinFlipResult, setPeerCoinFlipResult] = useState(null); // {result, startingPlayer} — peer-side only
   const [matchState, setMatchState] = useState(null);
   const [opponentGoneBeforeMatch, setOpponentGoneBeforeMatch] = useState(false);
+  // Rematch: both sides must ask (see net/rematch.js). `matchKey` remounts
+  // <Match> so the new game starts from a fresh engine state.
+  const [myRematchRequested, setMyRematchRequested] = useState(false);
+  const [peerRematchRequested, setPeerRematchRequested] = useState(false);
+  const [matchKey, setMatchKey] = useState(0);
+  const startingPlayerRef = useRef('A'); // who went first in the current match
 
   // Long-lived listener, active for the whole net match regardless of
   // which screen is showing — a message can legitimately arrive before the
@@ -41,7 +48,14 @@ export default function NetGameApp({ onExitToMenu }) {
     const offMessage = net.gameChannel.onMessage((msg) => {
       if (msg.kind === 'deck-chosen') setPeerDeck({ entries: msg.entries, effigyCounts: msg.effigyCounts });
       if (msg.kind === 'coin-flip-result') setPeerCoinFlipResult({ result: msg.result, startingPlayer: msg.startingPlayer });
-      if (msg.kind === 'match-start') { setMatchState(msg.state); setScreen('match'); }
+      if (msg.kind === 'match-start') {
+        setMatchState(msg.state);
+        setMatchKey(k => k + 1);
+        setMyRematchRequested(false);
+        setPeerRematchRequested(false);
+        setScreen('match');
+      }
+      if (msg.kind === REMATCH_REQUEST_MESSAGE) setPeerRematchRequested(true);
     });
     const onGone = () => setOpponentGoneBeforeMatch(true);
     const offPeerGone = net.gameChannel.onPeerDisconnected(onGone);
@@ -64,6 +78,35 @@ export default function NetGameApp({ onExitToMenu }) {
     if (screen !== 'waitingForPeerDeck') return;
     if (peerCoinFlipResult) setScreen('coinflip');
   }, [net, screen, peerCoinFlipResult]);
+
+  // Host-only: both sides asked for a rematch -> replay the same decks, other
+  // seat first, and send the whole fresh state across exactly like the first
+  // match (the host is the only side that ever builds it).
+  useEffect(() => {
+    if (!net || net.netRole !== 'host' || screen !== 'match') return;
+    // No game-over check needed: a request can only be sent from the game-over
+    // screen's Rematch button (the live match state itself lives inside <Match>).
+    if (rematchPhase({ myRequested: myRematchRequested, peerRequested: peerRematchRequested }) !== 'start') return;
+    if (!myDeck || !peerDeck) return;
+    const startingPlayer = rematchStartingPlayer(startingPlayerRef.current);
+    startingPlayerRef.current = startingPlayer;
+    const initialState = createInitialState({
+      mainDeckA: buildMainDeckList(myDeck.entries), effigyDeckA: buildEffigyDeckList(myDeck.effigyCounts),
+      mainDeckB: buildMainDeckList(peerDeck.entries), effigyDeckB: buildEffigyDeckList(peerDeck.effigyCounts),
+      startingPlayer, alwaysOfferPriorityTo: ['A', 'B'],
+    });
+    net.gameChannel.send({ kind: 'match-start', state: initialState });
+    setMatchState(initialState);
+    setMatchKey(k => k + 1);
+    setMyRematchRequested(false);
+    setPeerRematchRequested(false);
+  }, [net, screen, myRematchRequested, peerRematchRequested, myDeck, peerDeck]);
+
+  const requestRematch = () => {
+    if (myRematchRequested) return;
+    setMyRematchRequested(true);
+    net.gameChannel.send({ kind: REMATCH_REQUEST_MESSAGE });
+  };
 
   const handlePaired = (paired) => {
     setNet(paired);
@@ -89,6 +132,7 @@ export default function NetGameApp({ onExitToMenu }) {
     const mainDeckB = buildMainDeckList(peerDeck.entries);
     const effigyDeckB = buildEffigyDeckList(peerDeck.effigyCounts);
     const initialState = createInitialState({ mainDeckA, effigyDeckA, mainDeckB, effigyDeckB, startingPlayer, alwaysOfferPriorityTo: ['A', 'B'] });
+    startingPlayerRef.current = startingPlayer;
     net.gameChannel.send({ kind: 'match-start', state: initialState });
     setMatchState(initialState);
     setScreen('match');
@@ -155,9 +199,11 @@ export default function NetGameApp({ onExitToMenu }) {
 
   return (
     <Match
+      key={matchKey}
       initialState={matchState}
       onExit={onExitToMenu}
-      onRematch={null}
+      onRematch={requestRematch}
+      rematchStatus={rematchPhase({ myRequested: myRematchRequested, peerRequested: peerRematchRequested })}
       deckEntries={myDeck?.entries}
       competitiveMode={false}
       aiDifficulty="standard"

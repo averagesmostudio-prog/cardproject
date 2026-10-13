@@ -12,6 +12,8 @@ import { getBoardTheme, setBoardTheme } from '../../lib/boardTheme.js';
 import Board from './Board.jsx';
 import Hand from './Hand.jsx';
 import ActionLog from './ActionLog.jsx';
+import CoinTossPopup from './CoinTossPopup.jsx';
+import { useCoinFlipQueue } from '../state/coinFlipLog.js';
 import CardPile from './CardPile.jsx';
 import CardTile from './CardTile.jsx';
 import CardThumbnail from './CardThumbnail.jsx';
@@ -476,7 +478,7 @@ function RevealPopup({ revealPopup, dispatch, cardArtProps, human }) {
   );
 }
 
-export default function Match({ initialState, onExit, onRematch, deckEntries, competitiveMode, aiDifficulty, netRole = null, mySeat = 'A', gameChannel = null, onOpponentDisconnected }) {
+export default function Match({ initialState, onExit, onRematch, rematchStatus = 'idle', deckEntries, competitiveMode, aiDifficulty, netRole = null, mySeat = 'A', gameChannel = null, onOpponentDisconnected }) {
   // `HUMAN`/`AI` used to be module-level constants ('A'/'B') — shadowed here
   // instead so a net match can seat the local human as either player. Every
   // other read of HUMAN/AI in this file (still ~90 of them) resolves to
@@ -519,6 +521,8 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
   const { displayBoard, flashes } = useStagedBoard(state.board);
   const { displayLifespans, lifeFlashes } = useStagedLife(state.players);
   const turnBanner = useTurnBanner(state);
+  // A card's "Flip a coin" shows up as a popup coin toss (CoinTossPopup) — driven off the action log.
+  const [coinFlip, dismissCoinFlip] = useCoinFlipQueue(state.log);
   const prophecyReveal = useProphecyReveal(state);
   const justDrawnIds = useJustDrawn(state.players[HUMAN].hand);
   const vortexCells = useShiftVortex(state.board);
@@ -1980,8 +1984,17 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
             {deckEntries && deckEntries.length > 0 && (
               <button onClick={exportDeckList} className="px-4 py-2 border border-stone-300 rounded-lg">Export deck list</button>
             )}
-            {onRematch && (
-              <button onClick={onRematch} className="px-4 py-2 bg-amber-600 text-white rounded-lg">Rematch</button>
+            {onRematch && !(netRole && opponentGone) && (
+              <button
+                onClick={onRematch}
+                disabled={rematchStatus === 'waiting'}
+                className={`px-4 py-2 text-white rounded-lg disabled:opacity-70 ${rematchStatus === 'incoming' ? 'bg-green-700 animate-pulse' : 'bg-amber-600'}`}
+              >
+                {rematchStatus === 'waiting' ? 'Waiting for opponent…' : rematchStatus === 'incoming' ? 'Opponent wants a rematch — Accept' : 'Rematch'}
+              </button>
+            )}
+            {netRole && opponentGone && (
+              <span className="self-center text-xs text-stone-500">Opponent has left — no rematch.</span>
             )}
           </div>
         </div>
@@ -2067,6 +2080,7 @@ export default function Match({ initialState, onExit, onRematch, deckEntries, co
           </div>
         </div>
       )}
+      {coinFlip && <CoinTossPopup key={coinFlip.seq} flip={coinFlip} onDone={dismissCoinFlip} />}
       {reactiveWindowOpenForHuman && !autoPassingPriority && (priorityHidden ? (
         // "View board" collapses the banner to one slim pill up in the header
         // row, so the whole board is visible while the window stays open.

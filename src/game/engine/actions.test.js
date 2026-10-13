@@ -1,9 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
-import { gameReducer, getLegalActions, createInitialState, canPayCost, resolveOrLogEffect, faithlessPaymentNeedsChoice, faithlessPaymentCandidates, resolveProphecyModulateHitZero, dealDamageToBeing, effectiveCastingCost } from './actions.js';
+import { gameReducer, getLegalActions, createInitialState, canPayCost, resolveOrLogEffect, faithlessPaymentNeedsChoice, faithlessPaymentCandidates, resolveProphecyModulateHitZero, dealDamageToBeing, destroyBeing, effectiveCastingCost } from './actions.js';
 import { beginTurn, endTurn } from './turn.js';
 import { effectiveStrength, deathDamageFor } from './combat.js';
 import { computeMoveDestination, mortalCellsFor } from './board.js';
-import { toGameCard } from '../../lib/cardData.js';
+import { toGameCard, createTokenCard } from '../../lib/cardData.js';
 
 const player = (overrides = {}) => ({
   id: 'A',
@@ -579,7 +579,7 @@ describe('"Destroy a Relic." (Desecration) — plain Relics, Relic-Beings, and R
     expect(next.players.B.purgatory.some(c => c.instanceId === 'r#0')).toBe(true);
   });
 
-  it('can also destroy a Relic-Being (a full Being, via Depart/Purgatory — no owner Lifespan loss)', () => {
+  it('can also destroy a Relic-Being (a full Being, via Depart/Purgatory — owner takes its death-damage)', () => {
     const relicBeing = {
       type: 'being', ownerId: 'B',
       card: beingCard({ instanceId: 'rb#0', name: 'Training dummy', isRelicBeing: true, keywords: { depart: 'Draw (1) card.' } }),
@@ -592,7 +592,7 @@ describe('"Destroy a Relic." (Desecration) — plain Relics, Relic-Beings, and R
     const next = gameReducer(state, { type: 'CAST_CONJURING', instanceId: 'des-1#0' });
     expect(next.board.r2c1).toBeUndefined();
     expect(next.players.B.purgatory.some(c => c.instanceId === 'rb#0')).toBe(true);
-    expect(next.players.B.lifespan).toBe(50); // destroyed, not dealt combat damage
+    expect(next.players.B.lifespan).toBe(45); // destroyed Being still deals its printed Lifespan (5) as death damage
     expect(next.players.B.hand).toHaveLength(1); // its Depart still fired
   });
 
@@ -2918,7 +2918,7 @@ describe('Immen Gorta — "As an additional cost to summon, Sacrifice (2) Beings
     expect(next.board.r1c2.type).toBe('being');
     expect(next.board.r1c2.card).toBe(withWhenSummoned);
     expect(next.board.r1c2.engaged).toBe(false); // Deities enter disengaged
-    expect(next.players.A.lifespan).toBe(52); // its own When Summoned refired
+    expect(next.players.A.lifespan).toBe(42); // the two sacrificed Beings each cost their printed Lifespan; its own When Summoned refired
     expect(next.log.some(e => e.message.includes('sacrifices Fodder One, Fodder Two'))).toBe(true);
   });
 
@@ -4707,13 +4707,13 @@ describe('"As an additonal cost to conjure: Pay Lifespan equal to the Lifespan o
     expect(next.board.r2c2.sacrificeAtEndOfTurn).toBe(true);
   });
 
-  it('the flagged Being is sacrificed at end of turn via a real sacrifice, not a death (no owner Lifespan loss)', () => {
+  it('the flagged Being is sacrificed at end of turn; the sacrifice still deals death-damage', () => {
     const flagged = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'f#0', lifespan: 7 }), currentLifespan: 4, engaged: true, sacrificeAtEndOfTurn: true };
     const state = baseState({ turnPlayer: 'A', board: { r2c1: flagged }, players: { A: player({ lifespan: 50 }), B: player() } });
     const next = endTurn(state);
     expect(next.board.r2c1).toBeUndefined();
     expect(next.players.A.purgatory.some(c => c.instanceId === 'f#0')).toBe(true);
-    expect(next.players.A.lifespan).toBe(49); // only the normal -1 Down Tick cost, no death-Lifespan-loss
+    expect(next.players.A.lifespan).toBe(42); // -1 Down Tick, plus the sacrificed Being's printed Lifespan (7) as death damage
   });
 
   it('does not sacrifice a Being without the flag at end of turn', () => {
@@ -5003,7 +5003,7 @@ describe('Relic Engage fixes: Ferryman\'s Boat, Claws of Onoushara, Pruning Shee
     expect(next.board.r4c1).toEqual(notPointedBeing); // untouched
   });
 
-  it('Claws of Onoushara: "Sacrifice a Being on this tile, then draw cards equal to it\'s Lifespan" draws the sacrificed Being\'s printed Lifespan', () => {
+  it('Claws of Onoushara: "Sacrifice a Being on this tile, then draw cards equal to it\'s Lifespan" draws the sacrificed Being\'s Lifespan', () => {
     const claws = {
       id: 'co-1', instanceId: 'co-1#0', name: 'Claws of Onoushara', kind: 'relic',
       castingCost: { faithless: 0, colored: {} },
@@ -5019,7 +5019,48 @@ describe('Relic Engage fixes: Ferryman\'s Boat, Claws of Onoushara, Pruning Shee
     });
     const next = gameReducer(state, { type: 'ACTIVATE_GROUND_RELIC_ENGAGE', cellId: 'r2c1' });
     expect(next.board.r2c1).toBeUndefined();
-    expect(next.players.A.hand).toHaveLength(3); // 3 == the sacrificed Being's printed Lifespan
+    expect(next.players.A.hand).toHaveLength(3); // 3 == the sacrificed Being's Lifespan
+  });
+
+  describe('Claws of Onoushara draws the sacrificed Being\'s CURRENT Lifespan', () => {
+    const claws = {
+      id: 'co-2', instanceId: 'co-2#0', name: 'Claws of Onoushara', kind: 'relic',
+      castingCost: { faithless: 0, colored: {} },
+      textBox: "Engage: Sacrifice a Being on this tile, then draw cards equal to it's Lifespan.\nBeings may move across this.",
+      keywords: { engage: "Sacrifice a Being on this tile, then draw cards equal to it's Lifespan.", beingsMayMoveAcross: true },
+    };
+    const deck = Array.from({ length: 10 }, (_, n) => ({ instanceId: `d${n}`, name: `Deck ${n}` }));
+    const run = (being) => gameReducer(baseState({
+      board: { r2c1: being },
+      groundRelics: { r2c1: { type: 'relic', ownerId: 'A', card: claws, engaged: false } },
+      players: { A: player({ mainDeck: deck }), B: player() },
+    }), { type: 'ACTIVATE_GROUND_RELIC_ENGAGE', cellId: 'r2c1' });
+
+    it('a Being buffed above its printed Lifespan (an attached Armament) draws the bigger number', () => {
+      const buffed = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'b1', lifespan: 3 }), currentLifespan: 5, engaged: false };
+      const next = run(buffed);
+      expect(next.board.r2c1).toBeUndefined();
+      expect(next.players.A.hand).toHaveLength(5);
+    });
+
+    it('a damaged Being draws only what it has left', () => {
+      const hurt = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'b2', lifespan: 5 }), currentLifespan: 2, engaged: false };
+      expect(run(hurt).players.A.hand).toHaveLength(2);
+    });
+
+    it('an OPPONENT\'s Being standing on the Relic can be sacrificed too, and its Lifespan is drawn by the Relic\'s owner', () => {
+      const theirs = { type: 'being', ownerId: 'B', card: beingCard({ instanceId: 'b3', lifespan: 4 }), currentLifespan: 4, engaged: false };
+      const next = run(theirs);
+      expect(next.board.r2c1).toBeUndefined();
+      expect(next.players.A.hand).toHaveLength(4);
+      expect(next.players.B.hand).toHaveLength(0);
+    });
+
+    it('the sacrifice is not combat: only the owner takes death-damage, nothing to the opponent', () => {
+      const own = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'b4', lifespan: 3 }), currentLifespan: 3, engaged: false };
+      const next = run(own);
+      expect(next.players.A.lifespan).toBe(47); // the sacrifice is a death: printed Lifespan (3) is still lost, but it is not combat damage to either side
+    });
   });
 
   it('Pruning Sheers: sacrifices only a legal typed, cost-limited Being and gains 5 Lifespan', () => {
@@ -5042,7 +5083,7 @@ describe('Relic Engage fixes: Ferryman\'s Boat, Claws of Onoushara, Pruning Shee
     const next = gameReducer(state, { type: 'ACTIVATE_ENGAGE', cellId: 'r2c1' });
     expect(next.board.r2c2).toBeUndefined(); // the cheap Vine was sacrificed
     expect(next.board.r2c3).toEqual(expensiveTreefolk); // too expensive — untouched
-    expect(next.players.A.lifespan).toBe(45);
+    expect(next.players.A.lifespan).toBe(40); // +5 gained, minus the sacrificed Vine's printed Lifespan as death damage
   });
 });
 
@@ -5278,7 +5319,7 @@ describe('ACTIVATE_MARTYR', () => {
     expect(next.players.A.purgatory).toHaveLength(1);
     expect(next.log.some(e => e.message.includes('sacrifices Test Being for Martyr'))).toBe(true);
     expect(next.log.some(e => e.message.includes('Martyr triggers'))).toBe(true);
-    expect(next.players.A.lifespan).toBe(51); // Martyr's sacrifice itself deals no death-damage
+    expect(next.players.A.lifespan).toBe(46); // +5 gained, minus the Martyred Being's printed Lifespan (5) as death damage
   });
 
   it('refuses on a Being that is already engaged', () => {
@@ -11201,13 +11242,13 @@ describe('"Martyr: Modulate (+1), then repeat for each Time Counter on this." (T
 });
 
 describe('"When Defective Demon moves sacrifice it." (Defective Demon)', () => {
-  it('sacrifices itself the moment it moves, no owner Lifespan loss (a real sacrifice, not a death)', () => {
+  it('sacrifices itself the moment it moves, and the owner still takes its death-damage', () => {
     const defectiveDemon = { type: 'being', ownerId: 'A', card: beingCard({ name: 'Defective Demon', arrows: [7], keywords: { onMove: 'sacrifice it.' } }), currentLifespan: 3, engaged: false };
     const state = baseState({ board: { r2c2: defectiveDemon }, players: { A: player({ lifespan: 30 }), B: player() } });
     const next = gameReducer(state, { type: 'MOVE_OR_ATTACK', fromCellId: 'r2c2', toCellId: 'r2c1', direction: 7, isAttack: false });
     expect(next.board.r2c1).toBeUndefined(); // moved there, then immediately sacrificed
     expect(next.board.r2c2).toBeUndefined();
-    expect(next.players.A.lifespan).toBe(30); // sacrifice, not death — no Lifespan loss
+    expect(next.players.A.lifespan).toBe(25); // a sacrifice is still a death: the printed Lifespan (5) is lost
     expect(next.players.A.purgatory.some(c => c.name === 'Defective Demon')).toBe(true);
   });
 });
@@ -11985,7 +12026,7 @@ describe('Third wave: more Still Unwired gaps closed', () => {
     });
     const next = resolveProphecyModulateHitZero(state, 'r3c1');
     expect(next.board.r4c1.card.name).toBe("Bag o' Bones");
-    expect(next.players.B.lifespan).toBe(50); // destroyed, not dealt death damage
+    expect(next.players.B.lifespan).toBe(47); // destroyed Being still deals its printed Lifespan (3) as death damage
   });
 
   it('Mirage Visage — "Choose (2) Beings this points to, become Favored" grants Favored to up to 2 pointed Beings', () => {
@@ -14199,7 +14240,11 @@ describe('Shift — several shifted Beings returning at the start of the same tu
       board: { r3c1: shifted('h1#0'), r3c2: shifted('h2#0'), r3c3: shifted('h3#0') },
       players: { A: player({ mainDeck: [beingCard({ instanceId: 'draw#0' })] }), B: player({ mainDeck: [beingCard({ instanceId: 'drawb#0' })] }) },
     });
-    const next = endTurn(state);
+    // Each end-step return is now the owner's choice of tile (no more first-empty auto-pick).
+    let next = endTurn(state);
+    for (let i = 0; i < 10 && next.pendingChoice?.kind === 'shift-return'; i += 1) {
+      next = gameReducer(next, { type: 'RESOLVE_SHIFT_RETURN', cellId: next.pendingChoice.allowedCells[0] });
+    }
     expect(hungersOnBoard(next)).toHaveLength(3);
     expect(Object.values(next.board).filter(o => o?.type === 'prophecy' && o.ownerId === 'A')).toHaveLength(0);
   });
@@ -14483,3 +14528,230 @@ describe('Conjurings played from hand are recorded for the full-screen card reve
   });
 });
 
+describe('Shifted Beings may return onto the owner\'s own Armament piles and "Beings may move across" Relics', () => {
+  const shifted = (id = 'sh1') => {
+    const original = beingCard({ instanceId: `${id}#0`, name: `Returner ${id}`, strength: 1, lifespan: 3, keywords: { shift: { amount: 1, effect: null } } });
+    return { type: 'prophecy', ownerId: 'A', card: { ...original, textBox: '', typing: '', keywords: {} }, timer: 1, faceDown: false, shiftedFromCard: original };
+  };
+  const filler = (i) => ({ type: 'being', ownerId: 'A', card: beingCard({ instanceId: `fill${i}#0`, name: 'Filler', strength: 0, lifespan: 1 }), currentLifespan: 1, engaged: false });
+  const sword = { id: 'sw', instanceId: 'sw#0', name: 'Test Sword', kind: 'relic-armament', typing: 'Relic, Armament', strength: 1, lifespan: 2, arrows: [], keywords: {}, castingCost: { faithless: 0, colored: {} } };
+  const pile = (ownerId = 'A') => ({ type: 'armament-stack', ownerId, armaments: [{ card: sword, engaged: false }] });
+  // Every Mortal Realm tile of A's full of Beings except `free`, which gets `freeOccupant`.
+  const crowdedBoard = (free, freeOccupant) => {
+    const board = {};
+    mortalCellsFor('A').forEach((cell, i) => { if (cell !== free) board[cell] = filler(i); });
+    if (freeOccupant) board[free] = freeOccupant;
+    return board;
+  };
+
+  it('with an own Armament pile as the only open ground, the Being lands there and picks the Armament up (it used to fizzle)', () => {
+    const free = mortalCellsFor('A')[3];
+    const state = baseState({ turnPlayer: 'A', board: { ...crowdedBoard(free, pile()), r3c1: shifted() }, players: { A: player(), B: player() } });
+    const next = beginTurn(state);
+    expect(next.board.r3c1).toBeUndefined();
+    expect(next.board[free]).toMatchObject({ type: 'being', ownerId: 'A' });
+    expect(next.board[free].card.name).toBe('Returner sh1');
+    expect(next.board[free].armaments).toHaveLength(1);
+    expect(next.board[free].armaments[0].card.name).toBe('Test Sword');
+    expect(next.players.A.purgatory).toHaveLength(0); // it did NOT fizzle
+  });
+
+  it('an Armament pile is offered alongside empty tiles when the player has a real choice', () => {
+    const free = mortalCellsFor('A')[3];
+    const other = mortalCellsFor('A')[5];
+    const board = crowdedBoard(free, pile());
+    delete board[other];
+    const state = baseState({ turnPlayer: 'A', board: { ...board, r3c1: shifted() }, players: { A: player(), B: player() } });
+    const next = beginTurn(state);
+    expect(next.pendingChoice).toMatchObject({ kind: 'shift-return' });
+    expect(next.pendingChoice.allowedCells.sort()).toEqual([free, other].sort());
+    const picked = gameReducer(next, { type: 'RESOLVE_SHIFT_RETURN', cellId: free });
+    expect(picked.board[free].armaments).toHaveLength(1);
+  });
+
+  it('an OPPONENT\'s Armament pile is not a legal landing tile', () => {
+    const free = mortalCellsFor('A')[3];
+    const state = baseState({ turnPlayer: 'A', board: { ...crowdedBoard(free, pile('B')), r3c1: shifted() }, players: { A: player(), B: player() } });
+    const next = beginTurn(state);
+    expect(next.board[free].type).toBe('armament-stack'); // untouched
+    expect(next.players.A.purgatory.map(c => c.instanceId)).toEqual(['sh1#0']); // fizzled instead
+  });
+
+  it('a Being that DIES picking the pile up (an Armament with a Lifespan penalty) fires no return reaction and corrupts nothing — found by self-play', () => {
+    // Gargantuan hammer: "Being gains +6/-3". A 2-Lifespan Being returning onto it dies on arrival.
+    const hammer = { id: 'gh', instanceId: 'gh#0', name: 'Gargantuan hammer', kind: 'relic-armament', typing: 'Relic, Armament', strength: 0, lifespan: 0, arrows: [], keywords: { statBonus: { strength: 6, lifespan: -3 } }, castingCost: { faithless: 3, colored: {} } };
+    const hammerPile = { type: 'armament-stack', ownerId: 'A', armaments: [{ card: hammer, engaged: false }] };
+    const original = beingCard({
+      instanceId: 'mimic#0', name: 'Mimic Hunger', strength: 1, lifespan: 2,
+      keywords: { shift: { amount: 1, effect: null }, onMovedIntoMortalRealm: 'copy the effect(s) of target Being an opponent controls until the end of your next turn.' },
+    });
+    const returning = { type: 'prophecy', ownerId: 'A', card: { ...original, textBox: '', typing: '', keywords: {} }, timer: 1, faceDown: false, shiftedFromCard: original };
+    const free = mortalCellsFor('A')[3];
+    const enemy = (i) => ({ type: 'being', ownerId: 'B', card: beingCard({ instanceId: `en${i}#0`, name: `Enemy ${i}`, textBox: 'Hello.' }), currentLifespan: 3, engaged: false });
+    const state = baseState({
+      turnPlayer: 'A',
+      board: { ...crowdedBoard(free, hammerPile), r3c1: returning, r5c1: enemy(1), r5c2: enemy(2) },
+      players: { A: player(), B: player() },
+    });
+    let next;
+    expect(() => { next = beginTurn(state); }).not.toThrow();
+    // It died on the pile: no Being left, the pile is back, and nothing nameless was written onto it.
+    expect(next.board[free].type).toBe('armament-stack');
+    expect(next.board[free].card).toBeUndefined();
+    expect(next.pendingChoice).toBeFalsy(); // the copy-effect choice never opened
+    expect(next.log.some(e => e.message.includes('Mimic Hunger dies'))).toBe(true);
+  });
+
+  it('the copy-effect choice drops cleanly if the Being is gone (its tile now an Armament pile) by the time it resolves', () => {
+    const pileTile = { type: 'armament-stack', ownerId: 'A', armaments: [] };
+    const enemy = { type: 'being', ownerId: 'B', card: beingCard({ instanceId: 'en#0', name: 'Enemy', textBox: 'Hello.' }), currentLifespan: 3, engaged: false };
+    const state = baseState({
+      turnPlayer: 'A',
+      board: { r2c2: pileTile, r5c1: enemy },
+      pendingChoice: { kind: 'copy-opponent-effect', playerId: 'A', cardName: 'Mimic Hunger', label: 'Reaction', selfCellId: 'r2c2', allowedCells: ['r5c1'] },
+      players: { A: player(), B: player() },
+    });
+    const next = gameReducer(state, { type: 'RESOLVE_COPY_OPPONENT_EFFECT', cellId: 'r5c1' });
+    expect(next.pendingChoice).toBeNull();
+    expect(next.board.r2c2).toBe(pileTile); // untouched — no card written onto the pile
+  });
+
+  it('a tile holding only a "Beings may move across this" Relic counts as open ground', () => {
+    const free = mortalCellsFor('A')[3];
+    const relic = { type: 'relic', ownerId: 'A', card: { name: 'Test Sands', kind: 'relic', instanceId: 'rs#0', keywords: { beingsMayMoveAcross: true } } };
+    const state = baseState({ turnPlayer: 'A', board: { ...crowdedBoard(free, null), r3c1: shifted() }, groundRelics: { [free]: relic }, players: { A: player(), B: player() } });
+    const next = beginTurn(state);
+    expect(next.board[free]).toMatchObject({ type: 'being', ownerId: 'A' });
+    expect(next.groundRelics[free]).toBeDefined(); // the Relic stays under it
+  });
+});
+
+describe('a token Being\'s death costs its controller Lifespan, same as a real card (Scā-vuhk Hunger)', () => {
+  const svuhkText = 'Shift (1): "At the end of your turn remove (1) Time Counter from this"\nWhen this moves into the Mortal Realm, sacrifice this and create (2) Scā-vuhk Hunger tokens.';
+  const svuhkToken = () => createTokenCard({ name: 'Scā-vuhk Hunger', typing: 'Being, Hunger, Token', strength: 0, lifespan: 3, textBox: svuhkText, arrows: '1' });
+
+  it('dying to damage costs the token\'s controller its printed Lifespan', () => {
+    const state = baseState({ board: { r2c2: { type: 'being', ownerId: 'A', card: svuhkToken(), currentLifespan: 3, engaged: false } }, players: { A: player(), B: player() } });
+    const next = dealDamageToBeing(state, 'r2c2', 5, 'test');
+    expect(next.board.r2c2).toBeUndefined();
+    expect(next.players.A.lifespan).toBe(47);
+    expect(next.players.A.purgatory).toHaveLength(0); // a token never enters Purgatory
+  });
+
+  it('dying in combat costs it too', () => {
+    const attacker = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'atk#0', strength: 10, lifespan: 10 }), currentLifespan: 10, engaged: false };
+    const state = baseState({ board: { r2c1: attacker, r4c1: { type: 'being', ownerId: 'B', card: svuhkToken(), currentLifespan: 3, engaged: false } }, players: { A: player(), B: player() } });
+    const next = gameReducer(state, { type: 'MOVE_OR_ATTACK', fromCellId: 'r2c1', toCellId: 'r4c1', isAttack: true });
+    expect(next.board.r4c1).toBeUndefined();
+    expect(next.players.B.lifespan).toBe(47);
+  });
+});
+
+describe('Hourglass / Horologist\'s Apprentice collect a Time Counter whenever a shifted Being (a Prophecy) loses one — not just on the Modulate tick', () => {
+  const hourglass = (counters = 0) => ({ type: 'relic', ownerId: 'A', card: { id: 'hg', instanceId: 'hg#0', name: 'Hourglass', kind: 'relic', keywords: { collectsRemovedProphecyTimeCounters: true } }, engaged: false, counters: { time: counters } });
+  const apprentice = () => ({ type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'ha#0', name: 'Horologist\'s Apprentice', keywords: { collectsRemovedProphecyTimeCounters: true } }), currentLifespan: 2, engaged: false });
+  const shiftedWithDecay = (timer, amount) => {
+    const original = beingCard({ instanceId: 'dec#0', name: 'Decaying Hunger', keywords: { shift: { amount: 1, effect: `At the end of your turn remove (${amount}) Time Counters from this` } } });
+    return { type: 'prophecy', ownerId: 'A', card: { ...original, textBox: '', typing: '', keywords: { endOfTurnRemoveOwnTimeCounters: amount } }, timer, faceDown: false, shiftedFromCard: original };
+  };
+  const filler = (i) => ({ type: 'being', ownerId: 'A', card: beingCard({ instanceId: `f${i}#0`, name: 'Filler', strength: 0, lifespan: 1 }), currentLifespan: 1, engaged: false });
+  const fullExcept = (...free) => { const b = {}; mortalCellsFor('A').forEach((c, i) => { if (!free.includes(c)) b[c] = filler(i); }); return b; };
+  const endOfTurn = (board) => endTurn(baseState({ turnPlayer: 'A', board, players: { A: player({ mainDeck: [] }), B: player({ mainDeck: [beingCard({ instanceId: 'd#0' })] }) } }));
+
+  it('the end-of-turn decay (Scā-vuhk Hunger "remove (1) Time Counter") feeds an Hourglass', () => {
+    const next = endOfTurn({ ...fullExcept('r2c5'), r3c1: shiftedWithDecay(3, 1), r1c1: hourglass(0) });
+    expect(next.board.r3c1.timer).toBe(2);
+    expect(next.board.r1c1.counters.time).toBe(1);
+  });
+
+  it('a multi-counter decay (Immen Gorta "loses (2)") collects one per counter that came off', () => {
+    const next = endOfTurn({ ...fullExcept('r2c5'), r3c1: shiftedWithDecay(4, 2), r1c1: hourglass(0) });
+    expect(next.board.r3c1.timer).toBe(2);
+    expect(next.board.r1c1.counters.time).toBe(2);
+  });
+
+  it('only counters that actually came off count: a Being with 1 left that "loses (2)" feeds the Hourglass once', () => {
+    const next = endOfTurn({ ...fullExcept('r2c5'), r3c1: shiftedWithDecay(1, 2), r1c1: hourglass(0) });
+    expect(next.board.r1c1.counters.time).toBe(1);
+  });
+
+  it('Horologist\'s Apprentice (the Being with the same trigger) collects too, and each Hourglass collects independently', () => {
+    const second = { ...hourglass(5), card: { ...hourglass().card, instanceId: 'hg#1' } };
+    const next = endOfTurn({ ...fullExcept('r2c5'), r3c1: shiftedWithDecay(3, 1), r1c1: hourglass(0), r1c2: apprentice(), r1c3: second });
+    expect(next.board.r1c1.counters.time).toBe(1);
+    expect(next.board.r1c2.counters.time).toBe(1);
+    expect(next.board.r1c3.counters.time).toBe(6);
+  });
+
+  it('an opponent\'s Hourglass does not collect from MY shifted Being', () => {
+    const theirs = { ...hourglass(0), ownerId: 'B' };
+    const next = endOfTurn({ ...fullExcept('r2c5'), r3c1: shiftedWithDecay(3, 1), r5c1: theirs });
+    expect(next.board.r5c1.counters.time).toBe(0);
+  });
+
+  it('a Shift effect that strips Time Counters right away (Údarik Hunger "then loses (2)") feeds the Hourglass for the counters it really removed', () => {
+    const udarik = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'ud#0', name: 'Údarik Hunger', keywords: { shift: { amount: 1, effect: null } } }), currentLifespan: 2, engaged: false };
+    const target = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'tg#0', name: 'Shifty Target', keywords: { shift: { amount: 1, effect: null } } }), currentLifespan: 2, engaged: false };
+    const state = baseState({ turnPlayer: 'A', board: { r2c1: udarik, r2c2: target, r1c1: hourglass(0) }, players: { A: player(), B: player() } });
+    const opened = resolveOrLogEffect(
+      state, 'A', 'Údarik Hunger',
+      'Target Being you control Shifts (1), then loses (2) Time Counters; if it moves into the Mortal Realm this turn Disengage it.',
+      'Engage ability', { selfCellId: 'r2c1' }
+    );
+    // Several empty Ethereal tiles → the player picks where it lands first.
+    const picked = opened.pendingChoice ? gameReducer(opened, getLegalActions(opened, 'A').find(a => a.type === 'RESOLVE_UDARIK_SHIFT_TARGET' || a.type === 'RESOLVE_SHIFT_DESTINATION')) : opened;
+    let after = picked;
+    for (let i = 0; i < 4 && after.pendingChoice; i += 1) {
+      const act = getLegalActions(after, 'A').find(a => a.type === 'RESOLVE_SHIFT_DESTINATION' || a.type === 'RESOLVE_SHIFT_RETURN');
+      if (!act) break;
+      after = gameReducer(after, act);
+    }
+    expect(after.board.r1c1.counters.time).toBe(1); // it only had 1 Time Counter to lose
+  });
+});
+
+
+describe('sacrifice and destroy still deal death-damage unless the card says otherwise', () => {
+  const being = (ownerId, over = {}) => ({
+    type: 'being', ownerId, card: beingCard({ instanceId: `${ownerId}-v#0`, name: 'Victim', lifespan: 4 }), currentLifespan: 2, engaged: false, ...over,
+  });
+
+  it('destroyBeing takes the printed Lifespan (not the current one) from the owner and logs it', () => {
+    const state = baseState({ board: { r2c1: being('B') } });
+    const next = destroyBeing(state, 'r2c1');
+    expect(next.board.r2c1).toBeUndefined();
+    expect(next.players.B.lifespan).toBe(46);
+    expect(next.players.B.purgatory.some(c => c.name === 'Victim')).toBe(true);
+    expect(next.log.some(e => e.message.includes('takes 4 Lifespan damage'))).toBe(true);
+  });
+
+  it('destroyBeing with noDeathDamage still kills it but takes no Lifespan', () => {
+    const state = baseState({ board: { r2c1: being('B') } });
+    const next = destroyBeing(state, 'r2c1', { noDeathDamage: true });
+    expect(next.board.r2c1).toBeUndefined();
+    expect(next.players.B.lifespan).toBe(50);
+    expect(next.players.B.purgatory.some(c => c.name === 'Victim')).toBe(true);
+  });
+
+  it('a sacrifice that drops its owner to 0 Lifespan ends the game', () => {
+    const state = baseState({ board: { r2c1: being('B') }, players: { A: player({ id: 'A' }), B: player({ id: 'B', lifespan: 4 }) } });
+    const next = destroyBeing(state, 'r2c1');
+    expect(next.phase).toBe('gameover');
+    expect(next.winner).toBe('A');
+  });
+
+  it('Venefica: the opponent sacrifices a Being and takes no Lifespan damage', () => {
+    const state = baseState({ board: { r2c1: being('B') } });
+    const next = resolveOrLogEffect(state, 'A', 'Venefica', 'When summoned target opponent sacrifices a Being but takes no Lifespan damage from it.', 'When Summoned', {});
+    expect(next.board.r2c1).toBeUndefined();
+    expect(next.players.B.lifespan).toBe(50);
+  });
+
+  it('Martyr on a Being costs its owner the printed Lifespan', () => {
+    const martyr = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'm#0', name: 'Martyr Test', lifespan: 4, keywords: { martyr: 'Draw (1) card.' } }), currentLifespan: 4, engaged: false };
+    const state = baseState({ board: { r2c1: martyr }, players: { A: player({ id: 'A', mainDeck: [{ id: 'c', instanceId: 'c#0', name: 'Card' }] }), B: player({ id: 'B' }) } });
+    const next = gameReducer(state, { type: 'ACTIVATE_MARTYR', cellId: 'r2c1' });
+    expect(next.players.A.lifespan).toBe(46);
+    expect(next.players.A.hand).toHaveLength(1);
+  });
+});

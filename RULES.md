@@ -805,10 +805,16 @@ below) before they can actually run. Current implementation status:
     Gentleman ("you may pay (3) Lifespan to give a different demon or imp
     you control +1/+1" — gated the same "can't drop to 0" way as every other
     Lifespan cost in the engine).
-  - Forced sacrifice/destroy, without dealing death-damage to the Being's
-    owner: a new shared `destroyBeing` helper (mirrors `dealDamageToBeing`'s
-    death branch — Purgatory, Depart, dropped Armaments — minus the owner-
-    Lifespan-loss step). Venefica's "target opponent sacrifices a Being" is
+  - Forced sacrifice/destroy: the shared `destroyBeing` helper mirrors
+    `dealDamageToBeing`'s death branch (owner death-damage, Purgatory, Depart,
+    dropped Armaments). **A sacrifice or destroy is still a death**, so the
+    owner takes the Being's printed Lifespan unless the card says otherwise
+    (`{ noDeathDamage: true }`: Cro-āsik Hunger, Venefica, Smite, Strike
+    Down; also Dust to Dust's "sent to Purgatory" and the Deity legend rule,
+    which are not a card's sacrifice). Martyr on a Being and a Being's
+    self-sacrifice (Defective Demon, Scā-vuhk Hunger, Claws, Pruning Sheers,
+    additional-cost sacrifices) all cost the death-damage. Equanimity keeps
+    its own "No damage is dealt from any Beings that die". Venefica's "target opponent sacrifices a Being" is
     resolved by the *opponent*, not the caster — the engine already supports
     a pendingChoice belonging to a player outside their own turn (a
     defending Being's Depart can fire mid-attack the same way), so this
@@ -1174,8 +1180,8 @@ Unwired" doc, not here):
 - **Cursed Commission** — `SUMMON_TOKEN_POINTED_RE` widened to accept "a
   tile" (singular), not just "any tile", this points to.
 - **Smite** — new `DESTROY_BEING_POINTED_RE`, reusing the existing
-  `sacrifice-pointed-target` shape and `destroyBeing`'s own no-death-damage
-  ending (matches the card's own parenthetical exactly).
+  `sacrifice-pointed-target` shape and `destroyBeing`'s `noDeathDamage` opt-out
+  (matches the card's own parenthetical exactly).
 - **Locust swarm** — "Depart: Locust Swarm Shifts (3)" pulls the
   just-departed card back out of Purgatory and Shifts it, reusing Echoes
   of the Boundless' own `offerOrShiftFromPurgatory` machinery — Depart (and
@@ -1740,6 +1746,35 @@ Rulings confirmed with the user after the earlier waves, now built:
   on for real games (`prophecyFlipWindows`, set by `createInitialState`);
   bare test states without the flag keep the old atomic flip. Human seats
   are always offered the window (`alwaysOfferPriorityTo`).
+- **Shift returns land where the owner chooses, including onto their own
+  Armament piles.** A Being returning from the Ethereal Realm (Shift, Delay,
+  Prophesize) may land on any empty Mortal Realm tile, any tile with only a
+  "Beings may move across this" ground Relic, and the owner's OWN freestanding
+  Armament pile — it picks the Armaments up exactly like a summon
+  (`shiftLandingCellsFor`; an opponent's pile is never legal). If the only free
+  ground is such a pile the Being lands there instead of fizzling. The choice
+  is the owner's on EVERY return, including the end step and each bounce of
+  Immen Gorta's Boundless Hunger loop (it used to drop onto the first empty
+  tile); the pick carries `duringEndStep`/`bounceCount` so the loop continues
+  after it. Only a Mouth of Madness bounce loop run by a card OTHER than Immen
+  Gorta (none exists) still auto-picks.
+- **A shifted Being losing Time Counters feeds Hourglass / Horologist's
+  Apprentice (and a Zealot's once-per-turn trigger), not just the Modulate
+  tick.** Every Time Counter that actually comes off — the end-of-turn decay
+  (Scā-vuhk Hunger, Immen Gorta), Terranean Gates, an effect like Údarik
+  Hunger's "then loses (X)", a player Modulate of -2 — collects one per counter
+  (`triggerProphecyCounterRemoval`, turn.js). A Being with 1 left that "loses
+  (2)" removed only 1.
+- **Claws of Onoushara** draws cards equal to the sacrificed Being's CURRENT
+  Lifespan (Armament/permanent bonuses and damage included), whichever player
+  controls the Being on its tile. A token's death costs its controller the
+  printed Lifespan like any other Being, including when it is sacrificed
+  (Scā-vuhk Hunger's own "sacrifice this" reaction).
+- **Deck export carries the Effigy Deck** (`effigyDeck`, format version 2);
+  import restores it, and older main-deck-only files still import.
+- **Online rematch:** after a match either player can ask for a rematch; it
+  starts only when BOTH have asked, replaying the same decks with the other
+  seat going first (`net/rematch.js`, `NetGameApp.jsx`).
 - **UI coverage:** every `pendingChoice` kind the engine can open must be
   answerable in the UI (a kind with no screen freezes the game behind the
   open choice — Animate with 2+ Relics did). A test
@@ -2128,7 +2163,7 @@ real playable loop working first, then layer in the rest.
   for the full mechanism breakdown). All 31 of the real set's printed "When
   Summoned" Beings resolve for real now (damage, draw, deck manipulation,
   Favored, optional/"you may" effects with a shared Decline mechanism,
-  forced sacrifice/destroy without death-damage, a self-consuming "skip the
+  forced sacrifice/destroy (death-damage unless the card says not), a self-consuming "skip the
   next Disengage" status, an absolute Strength/Lifespan stat-copy, "moves
   without engaging" (Mahka-Rahva — reusing an Armament's own free-move
   primitive), token creation, and — the last 3 to close, formerly a "Tier
