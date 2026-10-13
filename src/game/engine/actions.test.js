@@ -14755,3 +14755,40 @@ describe('sacrifice and destroy still deal death-damage unless the card says oth
     expect(next.players.A.hand).toHaveLength(1);
   });
 });
+
+describe('Shifting Sands\' Engage moves a Being onto its tile even when the owner\'s Armament pile (Happy Hammer) sits there', () => {
+  const ENGAGE = 'Remove (1) Crossing Counter, then move target Being you control to this tile.';
+  const sands = () => ({
+    type: 'relic', ownerId: 'A',
+    card: { id: 'ss', instanceId: 'ss#0', name: 'Shifting Sands', kind: 'relic', keywords: { beingsMayMoveAcross: true, engage: ENGAGE } },
+    counters: { crossing: 2 }, engaged: false,
+  });
+  const hammerPile = () => ({
+    type: 'armament-stack', ownerId: 'A',
+    armaments: [{ card: { id: 'hh', instanceId: 'hh#0', name: 'Happy Hammer', kind: 'relic-armament', keywords: {} }, engaged: false }],
+  });
+  const beings = () => Object.fromEntries(['r1c1', 'r1c2', 'r1c3', 'r1c4'].map((c, i) => [c, {
+    type: 'being', ownerId: 'A', card: beingCard({ instanceId: `b${i}#0`, name: `Being ${i}` }), currentLifespan: 5, engaged: false,
+  }]));
+
+  it('offers a choice among the Beings and moves the picked one there, picking the Hammer up', () => {
+    const state = baseState({ board: { ...beings(), r2c2: hammerPile() }, groundRelics: { r2c2: sands() } });
+    const engaged = gameReducer(state, { type: 'ACTIVATE_GROUND_RELIC_ENGAGE', cellId: 'r2c2' });
+    expect(engaged.groundRelics.r2c2.counters.crossing).toBe(1);
+    expect(engaged.pendingChoice?.kind).toBe('move-target-being');
+    const next = gameReducer(engaged, { type: 'RESOLVE_MOVE_TARGET_BEING', fromCellId: 'r1c3' });
+    expect(next.board.r1c3).toBeUndefined();
+    expect(next.board.r2c2.type).toBe('being');
+    expect(next.board.r2c2.card.name).toBe('Being 2');
+    expect(next.board.r2c2.armaments.map(a => a.card.name)).toEqual(['Happy Hammer']);
+  });
+
+  it('still refuses when a Being is already standing on the Sands\' tile', () => {
+    const board = { ...beings() };
+    board.r2c2 = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'x#0', name: 'Squatter' }), currentLifespan: 5, engaged: false };
+    const state = baseState({ board, groundRelics: { r2c2: sands() } });
+    const next = gameReducer(state, { type: 'ACTIVATE_GROUND_RELIC_ENGAGE', cellId: 'r2c2' });
+    expect(next.pendingChoice).toBeNull();
+    expect(next.board.r2c2.card.name).toBe('Squatter');
+  });
+});

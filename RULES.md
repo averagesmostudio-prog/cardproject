@@ -1770,6 +1770,9 @@ Rulings confirmed with the user after the earlier waves, now built:
   controls the Being on its tile. A token's death costs its controller the
   printed Lifespan like any other Being, including when it is sacrificed
   (Scā-vuhk Hunger's own "sacrifice this" reaction).
+- **Shifting Sands' Engage** can move a Being onto its tile when that tile only
+  holds the owner's own Armament pile (e.g. a Happy Hammer left there); the
+  Being picks the pile up. A Being already on the tile still blocks it.
 - **Deck export carries the Effigy Deck** (`effigyDeck`, format version 2);
   import restores it, and older main-deck-only files still import.
 - **Online rematch:** after a match either player can ask for a rematch; it

@@ -13,7 +13,7 @@ import Board from './Board.jsx';
 import Hand from './Hand.jsx';
 import ActionLog from './ActionLog.jsx';
 import CoinTossPopup from './CoinTossPopup.jsx';
-import { useCoinFlipQueue } from '../state/coinFlipLog.js';
+import { useCoinFlipHold } from '../state/coinFlipLog.js';
 import CardPile from './CardPile.jsx';
 import CardTile from './CardTile.jsx';
 import CardThumbnail from './CardThumbnail.jsx';
@@ -490,10 +490,18 @@ export default function Match({ initialState, onExit, onRematch, rematchStatus =
   const AI = mySeat === 'A' ? 'B' : 'A';
   const opponentLabel = netRole ? 'Opponent' : 'AI';
   const [opponentGone, setOpponentGone] = useState(false);
-  const [state, dispatch, lastAttack, lastMartyr, lastEngageGlow, lastModulate, applyRemoteState] = useGameEngine(
+  // While a card's coin toss plays (CoinTossPopup), the screen keeps showing the board as it was
+  // before the flip and the AI waits — the engine has already applied the flip's result, so
+  // `liveState` is ahead of what's shown; `state` (everything below renders this) catches up
+  // once the coin has landed. See coinFlipLog.js > useCoinFlipHold.
+  const [coinHolding, setCoinHolding] = useState(false);
+  const [liveState, dispatch, lastAttack, lastMartyr, lastEngageGlow, lastModulate, applyRemoteState] = useGameEngine(
     initialState, AI, aiDifficulty, netRole,
-    netRole ? (nextState) => gameChannel?.send({ kind: 'state', state: nextState }) : null
+    netRole ? (nextState) => gameChannel?.send({ kind: 'state', state: nextState }) : null,
+    coinHolding
   );
+  const { state, flip: coinFlip, holding: holdingForCoin, resolveFlip: resolveCoinFlip } = useCoinFlipHold(liveState);
+  useEffect(() => { setCoinHolding(holdingForCoin); }, [holdingForCoin]);
 
   // Net-sync: adopt whatever state the peer's own dispatchTracked already
   // computed via gameReducer — this client never calls gameReducer itself
@@ -521,8 +529,6 @@ export default function Match({ initialState, onExit, onRematch, rematchStatus =
   const { displayBoard, flashes } = useStagedBoard(state.board);
   const { displayLifespans, lifeFlashes } = useStagedLife(state.players);
   const turnBanner = useTurnBanner(state);
-  // A card's "Flip a coin" shows up as a popup coin toss (CoinTossPopup) — driven off the action log.
-  const [coinFlip, dismissCoinFlip] = useCoinFlipQueue(state.log);
   const prophecyReveal = useProphecyReveal(state);
   const justDrawnIds = useJustDrawn(state.players[HUMAN].hand);
   const vortexCells = useShiftVortex(state.board);
@@ -2080,7 +2086,7 @@ export default function Match({ initialState, onExit, onRematch, rematchStatus =
           </div>
         </div>
       )}
-      {coinFlip && <CoinTossPopup key={coinFlip.seq} flip={coinFlip} onDone={dismissCoinFlip} />}
+      {coinFlip && <CoinTossPopup key={coinFlip.seq} flip={coinFlip} onDone={resolveCoinFlip} />}
       {reactiveWindowOpenForHuman && !autoPassingPriority && (priorityHidden ? (
         // "View board" collapses the banner to one slim pill up in the header
         // row, so the whole board is visible while the window stays open.

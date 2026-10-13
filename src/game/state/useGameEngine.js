@@ -33,7 +33,9 @@ export const engineReducer = (current, action) =>
 // entirely. This keeps gameReducer invoked exactly once per action even
 // in net mode, matching single-player's existing "useReducer calls it
 // exactly once" behavior.
-export const useGameEngine = (initialState, aiPlayer = 'B', aiDifficulty = 'standard', netRole = null, onLocalStateChange = null) => {
+// `paused` holds the AI still (e.g. while Match.jsx plays out a coin toss before revealing its result);
+// it resumes on its own the moment `paused` goes back to false.
+export const useGameEngine = (initialState, aiPlayer = 'B', aiDifficulty = 'standard', netRole = null, onLocalStateChange = null, paused = false) => {
   const [state, dispatch] = useReducer(engineReducer, initialState);
 
   // Purely a rendering hint for Board.jsx's attack-lunge animation — the
@@ -174,6 +176,7 @@ export const useGameEngine = (initialState, aiPlayer = 'B', aiDifficulty = 'stan
 
   useEffect(() => {
     if (netRole) return; // a two-human net match has no AI turn to drive
+    if (paused) return;
     if (state.phase === 'gameover') return;
     // A pending search effect (see actions.js > pendingChoice) can belong to
     // either player regardless of whose turn it is — e.g. the AI's Being
@@ -194,7 +197,7 @@ export const useGameEngine = (initialState, aiPlayer = 'B', aiDifficulty = 'stan
     // Small delay so the AI's moves are readable rather than instant.
     const timer = setTimeout(() => dispatchTracked(action), 500);
     return () => clearTimeout(timer);
-  }, [state, aiPlayer, aiDifficulty, dispatchTracked, netRole]);
+  }, [state, aiPlayer, aiDifficulty, dispatchTracked, netRole, paused]);
 
   return [state, dispatchTracked, lastAttack, lastMartyr, lastEngageGlow, lastModulate, applyRemoteState];
 };

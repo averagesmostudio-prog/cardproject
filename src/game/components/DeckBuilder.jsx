@@ -98,7 +98,10 @@ export default function DeckBuilder({ pool, seedDeck, onStart, onSaveComplete, o
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seedDeck, pool]);
   const [search, setSearch] = useState('');
-  const [viewMode, setViewMode] = useState('list'); // 'list' | 'visual' | 'deck'
+  // Two independent toggles: WHICH cards (the whole Library pool vs just the
+  // Deck being built) and HOW they're laid out (a text List vs card Visuals).
+  const [source, setSource] = useState('library'); // 'library' | 'deck'
+  const [layout, setLayout] = useState('list'); // 'list' | 'visual'
   const [sortBy, setSortBy] = useState('none'); // 'none' | 'name' | 'effigyType' | 'cost'
   // Tracked by the card's own id, not a raw array position — previewSource
   // (below) is recomputed with a new order/length whenever search, sortBy,
@@ -236,10 +239,11 @@ export default function DeckBuilder({ pool, seedDeck, onStart, onSaveComplete, o
 
   const openPreview = (card) => setPreviewCardId(card.id);
 
-  // Whichever list is actually showing right now — the full pool (List/
-  // Visual) or just the deck's own contents (Deck) — is what previewCardId
+  // Whichever list is actually showing right now — the full pool (Library)
+  // or just the deck's own contents (Deck) — is what previewCardId
   // is looked up in.
-  const previewSource = viewMode === 'deck' ? visibleDeckCards : visibleCards;
+  const shownCards = source === 'deck' ? visibleDeckCards : visibleCards;
+  const previewSource = shownCards;
 
   // Re-derived fresh every render — see previewCardId's own comment above.
   // -1 (not found) covers both "nothing is open" and "the previewed card
@@ -339,24 +343,32 @@ export default function DeckBuilder({ pool, seedDeck, onStart, onSaveComplete, o
               Main Deck — {mainTotal} / {MAIN_DECK_SIZE}
             </h2>
             <div className="flex items-center gap-2">
-              <div className="flex bg-stone-100 rounded p-0.5">
+              <div className="flex bg-stone-100 rounded p-0.5" role="group" aria-label="Which cards to show">
                 <button
-                  onClick={() => setViewMode('list')}
-                  className={`px-2.5 py-1 text-xs font-semibold rounded transition-colors ${viewMode === 'list' ? 'bg-white shadow-sm text-stone-800' : 'text-stone-500'}`}
+                  onClick={() => setSource('library')}
+                  className={`px-2.5 py-1 text-xs font-semibold rounded transition-colors ${source === 'library' ? 'bg-white shadow-sm text-stone-800' : 'text-stone-500'}`}
+                >
+                  Library
+                </button>
+                <button
+                  onClick={() => setSource('deck')}
+                  className={`px-2.5 py-1 text-xs font-semibold rounded transition-colors ${source === 'deck' ? 'bg-white shadow-sm text-stone-800' : 'text-stone-500'}`}
+                >
+                  Deck ({mainTotal})
+                </button>
+              </div>
+              <div className="flex bg-stone-100 rounded p-0.5" role="group" aria-label="Card layout">
+                <button
+                  onClick={() => setLayout('list')}
+                  className={`px-2.5 py-1 text-xs font-semibold rounded transition-colors ${layout === 'list' ? 'bg-white shadow-sm text-stone-800' : 'text-stone-500'}`}
                 >
                   List
                 </button>
                 <button
-                  onClick={() => setViewMode('visual')}
-                  className={`px-2.5 py-1 text-xs font-semibold rounded transition-colors ${viewMode === 'visual' ? 'bg-white shadow-sm text-stone-800' : 'text-stone-500'}`}
+                  onClick={() => setLayout('visual')}
+                  className={`px-2.5 py-1 text-xs font-semibold rounded transition-colors ${layout === 'visual' ? 'bg-white shadow-sm text-stone-800' : 'text-stone-500'}`}
                 >
                   Visual
-                </button>
-                <button
-                  onClick={() => setViewMode('deck')}
-                  className={`px-2.5 py-1 text-xs font-semibold rounded transition-colors ${viewMode === 'deck' ? 'bg-white shadow-sm text-stone-800' : 'text-stone-500'}`}
-                >
-                  Deck ({mainTotal})
                 </button>
               </div>
               <label className="flex items-center gap-1.5 px-3 py-1.5 bg-stone-100 hover:bg-stone-200 rounded text-xs font-medium text-stone-700 cursor-pointer transition-colors">
@@ -404,58 +416,17 @@ export default function DeckBuilder({ pool, seedDeck, onStart, onSaveComplete, o
             </ul>
           )}
 
-          {viewMode === 'deck' ? (
-            visibleDeckCards.length === 0 ? (
-              <p className="text-sm text-stone-400 py-4 text-center">
-                {entries.length === 0
-                  ? 'Your deck is empty — add cards from the List or Visual view.'
-                  : `No deck cards match "${search}".`}
-              </p>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-96 overflow-y-auto">
-                {visibleDeckCards.map(card => {
-                  const count = counts[card.id] || 0;
-                  const limit = card.isDeity ? MAX_DEITY_COPIES : MAX_COPIES;
-                  return (
-                    <div key={card.id} className="flex items-center justify-between border border-stone-200 rounded px-3 py-2">
-                      <button onClick={() => openPreview(card)} className="min-w-0 text-left hover:opacity-70 transition-opacity">
-                        <div className="text-sm font-medium text-stone-800 truncate">{card.name}</div>
-                        <div className="text-xs text-stone-400 capitalize flex items-center gap-1 flex-wrap">
-                          <span>{card.kind} · Cost</span>
-                          <CostPips card={card} />
-                          <span>· Str {card.strength} / Life {card.lifespan}</span>
-                        </div>
-                      </button>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <button onClick={() => adjust(card, -1)} className={STEP_BTN}>
-                          <Minus className={STEP_ICON} />
-                        </button>
-                        <input
-                          type="number"
-                          min="0"
-                          max={limit}
-                          value={count}
-                          onChange={(e) => setCountDirect(card, e.target.value)}
-                          className={STEP_INPUT}
-                        />
-                        <button
-                          onClick={() => adjust(card, 1)}
-                          disabled={count >= limit}
-                          className={STEP_BTN}
-                        >
-                          <Plus className={STEP_ICON} />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )
-          ) : visibleCards.length === 0 ? (
-            <p className="text-sm text-stone-400 py-4 text-center">No cards match "{search}".</p>
-          ) : viewMode === 'list' ? (
+          {shownCards.length === 0 ? (
+            <p className="text-sm text-stone-400 py-4 text-center">
+              {source === 'deck' && entries.length === 0
+                ? 'Your deck is empty — switch to Library to add cards.'
+                : source === 'deck'
+                  ? `No deck cards match "${search}".`
+                  : `No cards match "${search}".`}
+            </p>
+          ) : layout === 'list' ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-96 overflow-y-auto">
-              {visibleCards.map(card => {
+              {shownCards.map(card => {
                 const count = counts[card.id] || 0;
                 const limit = card.isDeity ? MAX_DEITY_COPIES : MAX_COPIES;
                 return (
@@ -494,7 +465,7 @@ export default function DeckBuilder({ pool, seedDeck, onStart, onSaveComplete, o
             </div>
           ) : (
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3 max-h-96 overflow-y-auto pr-1">
-              {visibleCards.map(card => {
+              {shownCards.map(card => {
                 const count = counts[card.id] || 0;
                 const limit = card.isDeity ? MAX_DEITY_COPIES : MAX_COPIES;
                 return (

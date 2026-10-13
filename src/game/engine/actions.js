@@ -5576,8 +5576,10 @@ export const resolveOrLogEffect = (state, playerId, cardName, rawText, label, co
     next = addLog(next, `${cardName}'s ${label} spends ${spend} ${counterType} Counter(s).`);
     // The destination (this Relic's own tile) only ever needs to be clear
     // of a board-tracked Being — the Relic itself never blocks it, same as
-    // "Beings may move across this" already means for any other move.
-    if (next.board[context.selfCellId]) {
+    // "Beings may move across this" already means for any other move. The
+    // mover's own Armament pile (Happy Hammer left on the Sands) doesn't
+    // block it either: the Being picks it up, as on any other move.
+    if (!emptyOrOwnArmamentStack(next.board[context.selfCellId], playerId)) {
       return addLog(next, `${cardName}'s ${label} has nowhere to place a Being — its own tile is occupied.`);
     }
     const candidates = Object.entries(next.board).filter(([, o]) => o?.type === 'being' && o.ownerId === playerId);
@@ -14685,7 +14687,7 @@ const gameReducerCore = (state, action) => {
       if (!state.pendingChoice || state.pendingChoice.kind !== 'move-target-being') return state;
       const { playerId, toCellId } = state.pendingChoice;
       const occupant = state.board[action.fromCellId];
-      if (!occupant || occupant.type !== 'being' || occupant.ownerId !== playerId || state.board[toCellId]) {
+      if (!occupant || occupant.type !== 'being' || occupant.ownerId !== playerId || !emptyOrOwnArmamentStack(state.board[toCellId], playerId)) {
         return { ...state, pendingChoice: null };
       }
       return moveBeingFreely({ ...state, pendingChoice: null }, action.fromCellId, toCellId);

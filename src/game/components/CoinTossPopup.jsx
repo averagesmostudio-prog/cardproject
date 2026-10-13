@@ -5,9 +5,12 @@ import CoinToss from './CoinToss.jsx';
 // ..., if tails ..." — Ambiguity, Illegible Grimoire, Witching Well). The
 // engine has already resolved the flip by the time this shows (it only
 // leaves a log line), so `flip.heads` is the true result; this just plays it
-// out. Non-interactive (pointer-events-none) — it never blocks play — and
-// removes itself via onDone a beat after the coin lands.
-const HOLD_MS = 1100;
+// out. While it's up, Match.jsx keeps the board at its pre-flip state (see
+// coinFlipLog.js > useCoinFlipHold) so the result isn't spoiled, so the overlay
+// also swallows clicks — nobody should act on a board that's behind the true
+// state. It calls onDone a beat after the coin lands, which is also the moment
+// the board catches up.
+const HOLD_MS = 900;
 const FADE_MS = 260;
 
 export default function CoinTossPopup({ flip, onDone }) {
@@ -28,7 +31,7 @@ export default function CoinTossPopup({ flip, onDone }) {
 
   const result = flip.heads ? 'heads' : 'tails';
   return (
-    <div className={`ct-popup ${leaving ? 'ct-leaving' : ''} fixed inset-0 z-[45] pointer-events-none flex items-center justify-center`}>
+    <div className={`ct-popup ${leaving ? 'ct-leaving' : ''} fixed inset-0 z-[45] flex items-center justify-center`}>
       <div className="absolute inset-0 bg-black/50" />
       <div className="relative flex flex-col items-center -mt-6">
         <div className="text-xs uppercase tracking-[0.18em] text-amber-200/80" style={{ fontFamily: 'Cinzel, serif' }}>
