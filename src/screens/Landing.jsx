@@ -3,6 +3,7 @@ import { Settings, X, BookOpen, Globe, Maximize, Minimize } from 'lucide-react';
 import { useFullscreen } from '../lib/useFullscreen.js';
 import FullscreenHint from '../game/components/FullscreenHint.jsx';
 import { getCustomCsvName, setCustomCsv, clearCustomCsv, CSV_PASSCODE } from '../lib/csvSource.js';
+import { LINEN_BG, PAGE_BG } from '../lib/deckBuilderStyle.js';
 
 // A closed leather-bound journal — a worn leather cover wrapped with a tied
 // strap, and a rough deckle-edge page block peeking out along the spine
@@ -226,15 +227,7 @@ export default function Landing({ onSelectLibrary, onSelectGame, onSelectNetGame
   return (
     <div
       className="min-h-dvh flex items-center justify-center p-8 short:p-3 relative"
-      style={{
-        background:
-          'radial-gradient(circle at 12% 18%, rgba(0,0,0,0.4), transparent 35%),' +
-          'radial-gradient(circle at 88% 12%, rgba(255,255,255,0.07), transparent 30%),' +
-          'radial-gradient(circle at 78% 72%, rgba(0,0,0,0.5), transparent 42%),' +
-          'radial-gradient(circle at 25% 78%, rgba(255,255,255,0.06), transparent 35%),' +
-          'radial-gradient(circle at 55% 45%, rgba(140,140,142,0.3), transparent 55%),' +
-          '#59595b',
-      }}
+      style={{ background: PAGE_BG, fontFamily: 'Georgia, serif' }}
     >
       <button
         onClick={() => setSettingsOpen(true)}
@@ -261,40 +254,40 @@ export default function Landing({ onSelectLibrary, onSelectGame, onSelectNetGame
         <BookOpen className="w-5 h-5 text-stone-300" />
       </button>
 
-      <div className="max-w-3xl short:max-w-none w-full text-center">
-        <h1 className="text-3xl short:text-xl font-bold text-white mb-2 short:mb-0">Scripturas Alpha</h1>
-        <p className="text-stone-300 mb-10 short:mb-3 short:text-sm">Design cards, open a pack, or play the game.</p>
+      <div className="max-w-3xl short:max-w-none w-full text-center border-[6px] border-black rounded-md p-6 sm:p-8 short:p-3" style={{ background: LINEN_BG }}>
+        <h1 className="text-3xl short:text-xl font-bold text-stone-900 mb-2 short:mb-0">Scripturas Alpha</h1>
+        <p className="text-stone-800 mb-8 short:mb-3 short:text-sm">Design cards, open a pack, or play the game.</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 short:!grid-cols-4 gap-6 short:gap-2">
           <button
             onClick={onSelectPack}
-            className="flex flex-col items-center justify-center gap-3 p-8 short:p-2 bg-white rounded-xl shadow hover:shadow-lg transition-shadow border border-stone-200"
+            className="flex flex-col items-center justify-center gap-3 p-8 short:p-2 bg-white/60 hover:bg-white/90 rounded-lg border-[3px] border-black transition-colors"
           >
             <OpenPackIcon className="h-24 short:h-12 w-auto" />
-            <span className="text-lg short:text-sm font-semibold text-stone-800">Open a Pack!</span>
+            <span className="text-lg short:text-sm font-bold text-stone-900">Open a Pack!</span>
           </button>
           <button
             onClick={onSelectGame}
-            className="flex flex-col items-center gap-3 p-8 short:p-2 bg-white rounded-xl shadow hover:shadow-lg transition-shadow border border-stone-200"
+            className="flex flex-col items-center gap-3 p-8 short:p-2 bg-white/60 hover:bg-white/90 rounded-lg border-[3px] border-black transition-colors"
           >
             <PlayIcon className="h-24 short:h-12 w-auto" />
-            <span className="text-lg short:text-sm font-semibold text-stone-800">Play a Game</span>
-            <span className="text-xs short:hidden text-stone-400">Build a deck and play against the AI</span>
+            <span className="text-lg short:text-sm font-bold text-stone-900">Play a Game</span>
+            <span className="text-xs short:hidden text-stone-700">Build a deck and play against the AI</span>
           </button>
           <button
             onClick={onSelectNetGame}
-            className="flex flex-col items-center gap-3 p-8 short:p-2 bg-white rounded-xl shadow hover:shadow-lg transition-shadow border border-stone-200"
+            className="flex flex-col items-center gap-3 p-8 short:p-2 bg-white/60 hover:bg-white/90 rounded-lg border-[3px] border-black transition-colors"
           >
             <Globe className="h-24 short:h-12 w-auto text-stone-700" strokeWidth={1.25} />
-            <span className="text-lg short:text-sm font-semibold text-stone-800">Play Online</span>
-            <span className="text-xs short:hidden text-stone-400">Host or join a match with another player</span>
+            <span className="text-lg short:text-sm font-bold text-stone-900">Play Online</span>
+            <span className="text-xs short:hidden text-stone-700">Host or join a match with another player</span>
           </button>
           <button
             onClick={onSelectLibrary}
-            className="flex flex-col items-center gap-3 p-8 short:p-2 bg-white rounded-xl shadow hover:shadow-lg transition-shadow border border-stone-200"
+            className="flex flex-col items-center gap-3 p-8 short:p-2 bg-white/60 hover:bg-white/90 rounded-lg border-[3px] border-black transition-colors"
           >
             <InkwellQuillIcon className="h-24 short:h-12 w-auto" />
-            <span className="text-lg short:text-sm font-semibold text-stone-800">Library</span>
-            <span className="text-xs short:hidden text-stone-400">Manage decks, browse precons, and design card art</span>
+            <span className="text-lg short:text-sm font-bold text-stone-900">Library</span>
+            <span className="text-xs short:hidden text-stone-700">Manage decks, browse precons, and design card art</span>
           </button>
         </div>
       </div>

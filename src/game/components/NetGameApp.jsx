@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import NetLobby from './NetLobby.jsx';
+import { LINEN_BG, PAGE_BG } from '../../lib/deckBuilderStyle.js';
 import DeckImport from './DeckImport.jsx';
 import PreconSelect from './PreconSelect.jsx';
 import DeckBuilder from './DeckBuilder.jsx';
@@ -144,11 +145,11 @@ export default function NetGameApp({ onExitToMenu }) {
 
   if (opponentGoneBeforeMatch && screen !== 'match') {
     return (
-      <div className="min-h-dvh flex items-center justify-center bg-black p-8 short:p-2">
-        <div className="text-center bg-white rounded-lg shadow p-8 max-w-lg">
-          <h2 className="text-2xl font-bold text-stone-800 mb-2">Opponent disconnected</h2>
-          <p className="text-sm text-stone-500 mb-4">The connection to your opponent was lost before the match started.</p>
-          <button onClick={onExitToMenu} className="px-4 py-2 border border-stone-300 rounded-lg">Back to menu</button>
+      <div className="min-h-dvh flex items-center justify-center p-8 short:p-2" style={{ background: PAGE_BG, fontFamily: 'Georgia, serif' }}>
+        <div className="text-center border-[6px] border-black rounded-md p-8 max-w-lg" style={{ background: LINEN_BG }}>
+          <h2 className="text-2xl font-bold text-stone-900 mb-2">Opponent disconnected</h2>
+          <p className="text-sm text-stone-800 mb-4">The connection to your opponent was lost before the match started.</p>
+          <button onClick={onExitToMenu} className="px-4 py-2 border-2 border-black bg-white/60 hover:bg-white/90 rounded-lg font-bold text-stone-900">Back to menu</button>
         </div>
       </div>
     );
@@ -177,10 +178,10 @@ export default function NetGameApp({ onExitToMenu }) {
   }
   if (screen === 'waitingForPeerDeck') {
     return (
-      <div className="min-h-dvh flex items-center justify-center bg-black p-8 short:p-2">
-        <div className="max-w-md w-full text-center bg-white rounded-lg shadow p-8">
-          <h2 className="text-lg font-bold text-stone-800 mb-2">Deck locked in</h2>
-          <p className="text-sm text-stone-500 animate-pulse">Waiting for your opponent to finish their deck…</p>
+      <div className="min-h-dvh flex items-center justify-center p-8 short:p-2" style={{ background: PAGE_BG, fontFamily: 'Georgia, serif' }}>
+        <div className="max-w-md w-full text-center border-[6px] border-black rounded-md p-8" style={{ background: LINEN_BG }}>
+          <h2 className="text-xl font-bold text-stone-900 mb-2">Deck locked in</h2>
+          <p className="text-sm text-stone-800 animate-pulse">Waiting for your opponent to finish their deck…</p>
         </div>
       </div>
     );

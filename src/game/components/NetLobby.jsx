@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createRelayClient, createGameChannel } from '../net/relayClient.js';
 import { getRelayAddress, setRelayAddress } from '../../lib/relayAddress.js';
+import { LINEN_BG, PAGE_BG } from '../../lib/deckBuilderStyle.js';
 
 // Host/join/quick-match pairing screen for a two-player-over-the-network
 // match — the net-mode counterpart to picking "vs AI" in GameApp.jsx.
@@ -136,36 +137,36 @@ export default function NetLobby({ onPaired, onBack }) {
   };
 
   return (
-    <div className="min-h-dvh flex items-center justify-center bg-black p-8 short:p-2">
-      <div className="max-w-md w-full text-center bg-white rounded-lg shadow p-8 short:p-3">
-        <h2 className="text-lg font-bold text-stone-800 mb-1">Play Online</h2>
-        <p className="text-sm text-stone-500 mb-6 short:mb-2">Find an opponent automatically, or play a friend directly.</p>
+    <div className="min-h-dvh flex items-center justify-center p-8 short:p-2" style={{ background: PAGE_BG, fontFamily: 'Georgia, serif' }}>
+      <div className="max-w-md w-full text-center border-[6px] border-black rounded-md p-8 short:p-3" style={{ background: LINEN_BG }}>
+        <h2 className="text-xl font-bold text-stone-900 mb-1">Play Online</h2>
+        <p className="text-sm text-stone-800 mb-6 short:mb-2">Find an opponent automatically, or play a friend directly.</p>
 
         {mode === null && (
           <>
-            <label className="block text-left text-xs text-stone-500 mb-1">Relay server address</label>
+            <label className="block text-left text-xs font-bold text-stone-800 mb-1">Relay server address</label>
             <input
               value={address}
               onChange={(e) => setAddress(e.target.value)}
-              className="w-full mb-6 short:mb-2 px-3 py-2 border border-stone-300 rounded-lg text-sm font-mono"
+              className="w-full mb-6 short:mb-2 px-3 py-2 border-2 border-black bg-white/70 rounded-lg text-sm font-mono"
               placeholder="ws://localhost:8787"
             />
             <button
               onClick={startQuickMatch}
-              className="w-full mb-5 px-5 py-2.5 bg-amber-600 text-white rounded-lg font-semibold hover:bg-amber-700 transition"
+              className="w-full mb-5 px-5 py-2.5 border-2 border-black bg-[#393938] text-white rounded-lg font-bold hover:bg-black transition"
             >
               Quick Match
             </button>
             <div className="flex items-center gap-3 mb-5">
-              <div className="flex-1 h-px bg-stone-200" />
-              <span className="text-xs text-stone-400 uppercase tracking-wide">Or play a friend</span>
-              <div className="flex-1 h-px bg-stone-200" />
+              <div className="flex-1 h-0.5 bg-black/40" />
+              <span className="text-xs font-bold text-stone-800 uppercase tracking-wide">Or play a friend</span>
+              <div className="flex-1 h-0.5 bg-black/40" />
             </div>
             <div className="flex gap-3 justify-center">
-              <button onClick={startHost} className="px-5 py-2 border border-stone-300 rounded-lg font-semibold hover:bg-stone-50 transition">
+              <button onClick={startHost} className="px-5 py-2 border-2 border-black bg-white/60 text-stone-900 rounded-lg font-bold hover:bg-white/90 transition">
                 Host a match
               </button>
-              <button onClick={startJoin} className="px-5 py-2 border border-stone-300 rounded-lg font-semibold hover:bg-stone-50 transition">
+              <button onClick={startJoin} className="px-5 py-2 border-2 border-black bg-white/60 text-stone-900 rounded-lg font-bold hover:bg-white/90 transition">
                 Join a match
               </button>
             </div>
@@ -174,19 +175,19 @@ export default function NetLobby({ onPaired, onBack }) {
 
         {mode === 'quick' && (
           <>
-            {status === 'connecting' && <p className="text-sm text-stone-500">Connecting…</p>}
-            {status === 'searching' && <p className="text-sm text-stone-500 animate-pulse">Searching for an opponent…</p>}
+            {status === 'connecting' && <p className="text-sm text-stone-800">Connecting…</p>}
+            {status === 'searching' && <p className="text-sm text-stone-800 animate-pulse">Searching for an opponent…</p>}
           </>
         )}
 
         {mode === 'host' && (
           <>
-            {status === 'connecting' && <p className="text-sm text-stone-500">Connecting…</p>}
+            {status === 'connecting' && <p className="text-sm text-stone-800">Connecting…</p>}
             {status === 'waiting' && (
               <>
-                <p className="text-sm text-stone-600 mb-2">Share this code with your opponent:</p>
-                <div className="text-3xl font-mono font-bold tracking-widest text-stone-800 mb-4 short:mb-2">{roomCode}</div>
-                <p className="text-sm text-stone-500 animate-pulse">Waiting for opponent…</p>
+                <p className="text-sm text-stone-800 mb-2">Share this code with your opponent:</p>
+                <div className="text-3xl font-mono font-bold tracking-widest text-stone-900 mb-4 short:mb-2">{roomCode}</div>
+                <p className="text-sm text-stone-800 animate-pulse">Waiting for opponent…</p>
               </>
             )}
           </>
@@ -194,28 +195,28 @@ export default function NetLobby({ onPaired, onBack }) {
 
         {mode === 'join' && status !== 'connecting' && status !== 'paired' && (
           <>
-            <label className="block text-left text-xs text-stone-500 mb-1">Room code</label>
+            <label className="block text-left text-xs font-bold text-stone-800 mb-1">Room code</label>
             <input
               value={joinCode}
               onChange={(e) => setJoinCode(e.target.value)}
-              className="w-full mb-4 short:mb-2 px-3 py-2 border border-stone-300 rounded-lg text-sm font-mono uppercase tracking-widest text-center"
+              className="w-full mb-4 short:mb-2 px-3 py-2 border-2 border-black bg-white/70 rounded-lg text-sm font-mono uppercase tracking-widest text-center"
               placeholder="ABCD"
               maxLength={4}
             />
-            <button onClick={attemptJoin} className="px-5 py-2 bg-amber-600 text-white rounded-lg font-semibold hover:bg-amber-700 transition">
+            <button onClick={attemptJoin} className="px-5 py-2 border-2 border-black bg-[#393938] text-white rounded-lg font-bold hover:bg-black transition">
               Connect
             </button>
           </>
         )}
 
-        {mode === 'join' && status === 'connecting' && <p className="text-sm text-stone-500">Connecting…</p>}
+        {mode === 'join' && status === 'connecting' && <p className="text-sm text-stone-800">Connecting…</p>}
 
         {status === 'error' && (
-          <p className="text-sm text-red-500 mt-4">{error}</p>
+          <p className="text-sm font-bold text-red-800 mt-4">{error}</p>
         )}
 
         <div className="mt-6">
-          <button onClick={onBack} className="text-xs text-stone-400 hover:text-stone-600">← Menu</button>
+          <button onClick={onBack} className="text-xs text-stone-800 hover:text-black">← Menu</button>
         </div>
       </div>
     </div>

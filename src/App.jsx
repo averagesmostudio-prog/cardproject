@@ -20,7 +20,7 @@ export default function App() {
       <div>
         <button
           onClick={() => setScreen(generatorBackTo)}
-          className="fixed top-3 left-3 z-40 text-xs bg-white/90 border border-stone-300 rounded px-3 py-1.5 shadow hover:bg-white"
+          className="fixed top-3 left-3 z-40 text-sm font-bold bg-white/90 border-2 border-black rounded px-3 py-1.5 hover:bg-white"
         >
           ← Menu
         </button>

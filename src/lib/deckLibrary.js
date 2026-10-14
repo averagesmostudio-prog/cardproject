@@ -9,6 +9,7 @@
 import { EFFIGY_TYPE_COLORS } from './cardData.js';
 import { PRECON_DECKS } from '../game/decks/precons.js';
 import { deriveDominantColor, getDeckIcon, pickRandomIconKey } from './deckLibraryStyle.js';
+import { autoBuildEffigyCounts } from '../game/engine/deck.js';
 
 const LIBRARY_KEY = 'scripturas-deck-library';
 
@@ -111,3 +112,25 @@ export const toDeckSeed = (deck) => ({
   sourceId: deck.raw.id,
   sourceName: deck.raw.name,
 });
+
+// "Name (copy)", then "Name (copy 2)", ... — never collides with an existing
+// precon or saved deck, and copying a copy doesn't stack "(copy) (copy)".
+export const nextCopyName = (name) => {
+  const taken = new Set(buildDeckLibraryList().map(d => d.name));
+  const base = ((name || '').trim() || 'Untitled Deck').replace(/ \(copy( \d+)?\)$/, '');
+  let candidate = `${base} (copy)`;
+  for (let n = 2; taken.has(candidate); n += 1) candidate = `${base} (copy ${n})`;
+  return candidate;
+};
+
+// Saves an independent copy of a deck (a precon or a saved one — a normalized
+// buildDeckLibraryList() entry) as a new saved deck. A precon without its own
+// explicit Effigy split gets its usual mono-color build written out in full.
+export const duplicateDeck = (deck) => {
+  const { raw } = deck;
+  return saveDeck({
+    name: nextCopyName(deck.name),
+    entries: raw.entries.map(({ name, count }) => ({ name, count })),
+    effigyCounts: { ...(raw.effigyCounts || autoBuildEffigyCounts(raw.color)) },
+  });
+};

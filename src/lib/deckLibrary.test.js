@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { PRECON_DECKS } from '../game/decks/precons.js';
 import {
   listSavedDecks, saveDeck, updateDeck, removeDeck, getSavedDeck,
-  buildDeckLibraryList, toDeckSeed,
+  buildDeckLibraryList, toDeckSeed, nextCopyName, duplicateDeck,
 } from './deckLibrary.js';
 
 // No jsdom in this project's vitest environment (node) — stub the same
@@ -107,5 +107,40 @@ describe('toDeckSeed', () => {
     expect(seed.source).toBe('precon');
     expect(seed.sourceId).toBe(deck.raw.id);
     expect(seed.color).toBe(deck.raw.color);
+  });
+});
+
+describe('duplicateDeck / nextCopyName', () => {
+  it('names the first copy "(copy)" and numbers later ones', () => {
+    const saved = saveDeck({ name: 'My Deck', entries, effigyCounts });
+    expect(nextCopyName('My Deck')).toBe('My Deck (copy)');
+    const first = duplicateDeck({ name: saved.name, raw: saved });
+    expect(first.name).toBe('My Deck (copy)');
+    expect(nextCopyName('My Deck')).toBe('My Deck (copy 2)');
+    // copying a copy doesn't stack suffixes
+    expect(nextCopyName('My Deck (copy)')).toBe('My Deck (copy 2)');
+    expect(nextCopyName('   ')).toBe('Untitled Deck (copy)');
+  });
+
+  it('copies a saved deck independently', () => {
+    const saved = saveDeck({ name: 'My Deck', entries, effigyCounts });
+    const copy = duplicateDeck({ name: saved.name, raw: saved });
+    expect(copy.id).not.toBe(saved.id);
+    expect(copy.entries).toEqual(saved.entries);
+    expect(copy.effigyCounts).toEqual(saved.effigyCounts);
+    expect(copy.entries).not.toBe(saved.entries);
+    expect(listSavedDecks()).toHaveLength(2);
+    removeDeck(copy.id);
+    expect(listSavedDecks()).toEqual([saved]);
+  });
+
+  it('copies a precon into a saved deck with its full Effigy Deck', () => {
+    const precon = buildDeckLibraryList().find(d => d.source === 'precon');
+    const copy = duplicateDeck(precon);
+    expect(copy.name).toBe(`${precon.name} (copy)`);
+    expect(copy.entries).toEqual(precon.raw.entries.map(({ name, count }) => ({ name, count })));
+    const total = Object.values(copy.effigyCounts).reduce((a, b) => a + b, 0);
+    expect(total).toBe(15);
+    expect(listSavedDecks()).toHaveLength(1);
   });
 });

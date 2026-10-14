@@ -1,21 +1,33 @@
 import React, { useState } from 'react';
 import { Layers } from 'lucide-react';
 import { resolveDeckEntries, validateMainDeck } from '../engine/deck.js';
-import { buildDeckLibraryList, removeDeck, toDeckSeed } from '../../lib/deckLibrary.js';
-import DeckLibraryGrid from './DeckLibraryGrid.jsx';
+import { buildDeckLibraryList, removeDeck, toDeckSeed, duplicateDeck } from '../../lib/deckLibrary.js';
+import { LINEN_BG, PAGE_BG } from '../../lib/deckBuilderStyle.js';
+import DeckTiles from './DeckTiles.jsx';
 
-// The "Play a Game" landing screen: the Library's full deck list (precons +
-// anything saved — DeckLibraryGrid) that jumps straight to the coin flip on
-// pick, or edits a copy first (into DeckBuilder) without ever mutating a
-// precon in place, plus a plain "Import / Build a Custom Deck" option below
-// that routes into the existing DeckImport → DeckBuilder flow unchanged.
+const SEG = 'px-3 py-1 text-xs font-bold transition-colors';
+const segActive = 'bg-[#393938] text-white';
+const segIdle = 'bg-white/60 text-stone-800 hover:bg-white/90';
+
+// The "Play a Game" landing screen: the same deck-selection screen as the
+// Library (DeckTiles — precons + anything saved) except that picking a deck
+// jumps straight to the coin flip, or edits a copy first (into DeckBuilder)
+// without ever mutating a precon in place, plus a plain "Import / Build a
+// Custom Deck" option below that routes into the existing DeckImport →
+// DeckBuilder flow unchanged.
 export default function PreconSelect({ pool, onStart, onCustom, onEdit, onBack, competitiveMode, onToggleCompetitiveMode, aiDifficulty, onChangeAiDifficulty }) {
   const [error, setError] = useState(null);
-  const [, setVersion] = useState(0); // bumped to force the grid to re-read the store after a remove
+  const [, setVersion] = useState(0); // bumped to force the tiles to re-read the store after a remove/duplicate
 
   const handleRemove = (deck) => {
     if (deck.source !== 'saved') return;
+    if (!window.confirm(`Remove "${deck.name}" from your Library?`)) return;
     removeDeck(deck.id);
+    setVersion(v => v + 1);
+  };
+
+  const handleDuplicate = (deck) => {
+    duplicateDeck(deck);
     setVersion(v => v + 1);
   };
 
@@ -36,86 +48,78 @@ export default function PreconSelect({ pool, onStart, onCustom, onEdit, onBack, 
   const handleEdit = (deck) => onEdit(toDeckSeed(deck));
 
   return (
-    <div className="min-h-dvh bg-black p-8 short:p-2">
-      <button
-        onClick={onBack}
-        className="fixed top-3 left-3 z-40 text-xs bg-white/90 border border-stone-300 rounded px-3 py-1.5 shadow hover:bg-white"
-      >
-        ← Menu
-      </button>
-      <div className="max-w-3xl mx-auto text-center pt-8 short:pt-4">
-        <h1 className="text-2xl font-bold text-white mb-2 short:mb-0">Play a Game</h1>
-        <p className="text-stone-400 mb-6 short:mb-3 text-sm">
-          Pick a ready-to-play deck, or build your own. The AI opponent's own
-          deck is chosen at random, scoped to the AI Difficulty below.
-        </p>
+    <div className="min-h-dvh p-3 sm:p-4 short:p-2" style={{ background: PAGE_BG, fontFamily: 'Georgia, serif' }}>
+      <div className="max-w-5xl mx-auto">
+        <div className="mb-3">
+          <button onClick={onBack} className="text-sm text-stone-300 hover:text-white">← Menu</button>
+        </div>
 
-        {/* Set before the match is built (GameApp.jsx > buildMatch), so it
-            can't change mid-match. Casual leaves the Ethereal Conjuring
-            reactive window (Match.jsx) open indefinitely; Competitive turns
-            on its 20s-then-10s auto-decline timer. */}
-        <div className="mb-10 flex flex-col items-center gap-1.5">
-          <span className="text-[11px] text-stone-500 uppercase tracking-wide">Casual Mode/Competitive</span>
-          <div className="inline-flex rounded-lg border border-stone-600 overflow-hidden">
-            <button
-              onClick={() => onToggleCompetitiveMode(false)}
-              className={`px-3 py-1 text-xs font-semibold transition ${!competitiveMode ? 'bg-white text-stone-800' : 'bg-transparent text-stone-400 hover:bg-white/10'}`}
-            >
-              Casual
-            </button>
-            <button
-              onClick={() => onToggleCompetitiveMode(true)}
-              className={`px-3 py-1 text-xs font-semibold transition ${competitiveMode ? 'bg-amber-600 text-white' : 'bg-transparent text-stone-400 hover:bg-white/10'}`}
-            >
-              Competitive
-            </button>
+        <div className="border-[6px] border-black rounded-md p-4 sm:p-5" style={{ background: LINEN_BG }}>
+          <h1 className="text-xl font-bold text-stone-900">Play a Game</h1>
+          <p className="text-stone-800 mt-1 mb-4 short:mb-2 text-sm">
+            Pick a ready-to-play deck, or build your own. The AI opponent's own
+            deck is chosen at random, scoped to the AI Difficulty below.
+          </p>
+
+          <div className="mb-4 flex flex-wrap items-start gap-x-8 gap-y-3">
+            {/* Set before the match is built (GameApp.jsx > buildMatch), so it
+                can't change mid-match. Casual leaves the Ethereal Conjuring
+                reactive window (Match.jsx) open indefinitely; Competitive turns
+                on its 20s-then-10s auto-decline timer. */}
+            <div className="flex flex-col gap-1.5">
+              <span className="text-[11px] text-stone-800 font-bold uppercase tracking-wide">Casual Mode/Competitive</span>
+              <div className="inline-flex rounded-lg border-2 border-black overflow-hidden self-start">
+                <button onClick={() => onToggleCompetitiveMode(false)} className={`${SEG} ${!competitiveMode ? segActive : segIdle}`}>
+                  Casual
+                </button>
+                <button onClick={() => onToggleCompetitiveMode(true)} className={`${SEG} ${competitiveMode ? 'bg-amber-700 text-white' : segIdle}`}>
+                  Competitive
+                </button>
+              </div>
+            </div>
+
+            {/* Which precons (precons.js > aiDifficulty) the AI opponent's own
+                deck is drawn from (pickAiDeck, GameApp.jsx) — never affects
+                which deck the human themself can pick below. Easy skips precons
+                entirely for a plain random mono-color deck; Standard and Hard
+                each draw only from the precons tagged that way. */}
+            <div className="flex flex-col gap-1.5">
+              <span className="text-[11px] text-stone-800 font-bold uppercase tracking-wide">AI Difficulty</span>
+              <div className="inline-flex rounded-lg border-2 border-black overflow-hidden self-start">
+                <button onClick={() => onChangeAiDifficulty('easy')} className={`${SEG} ${aiDifficulty === 'easy' ? 'bg-emerald-700 text-white' : segIdle}`}>
+                  Easy
+                </button>
+                <button onClick={() => onChangeAiDifficulty('standard')} className={`${SEG} ${aiDifficulty === 'standard' ? segActive : segIdle}`}>
+                  Standard
+                </button>
+                <button onClick={() => onChangeAiDifficulty('hard')} className={`${SEG} ${aiDifficulty === 'hard' ? 'bg-rose-700 text-white' : segIdle}`}>
+                  Hard
+                </button>
+              </div>
+            </div>
           </div>
+
+          <DeckTiles
+            decks={buildDeckLibraryList()}
+            onPick={handlePick}
+            onEdit={handleEdit}
+            onDuplicate={handleDuplicate}
+            onRemove={handleRemove}
+            pickLabel="Play"
+          />
+
+          {error && (
+            <p className="text-sm text-red-800 font-bold mt-4 max-w-lg">{error}</p>
+          )}
+
+          <button
+            onClick={onCustom}
+            className="mt-5 inline-flex items-center gap-2 px-5 py-2.5 border-2 border-black bg-white/60 hover:bg-white/90 text-stone-900 rounded-lg text-sm font-bold transition-colors"
+          >
+            <Layers className="w-4 h-4" />
+            Import / Build a Custom Deck
+          </button>
         </div>
-
-        {/* Which precons (precons.js > aiDifficulty) the AI opponent's own
-            deck is drawn from (pickAiDeck, GameApp.jsx) — never affects
-            which deck the human themself can pick above. Easy skips precons
-            entirely for a plain random mono-color deck; Standard and Hard
-            each draw only from the precons tagged that way. */}
-        <div className="mb-10 flex flex-col items-center gap-1.5">
-          <span className="text-[11px] text-stone-500 uppercase tracking-wide">AI Difficulty</span>
-          <div className="inline-flex rounded-lg border border-stone-600 overflow-hidden">
-            <button
-              onClick={() => onChangeAiDifficulty('easy')}
-              className={`px-3 py-1 text-xs font-semibold transition ${aiDifficulty === 'easy' ? 'bg-emerald-600 text-white' : 'bg-transparent text-stone-400 hover:bg-white/10'}`}
-            >
-              Easy
-            </button>
-            <button
-              onClick={() => onChangeAiDifficulty('standard')}
-              className={`px-3 py-1 text-xs font-semibold transition ${aiDifficulty === 'standard' ? 'bg-white text-stone-800' : 'bg-transparent text-stone-400 hover:bg-white/10'}`}
-            >
-              Standard
-            </button>
-            <button
-              onClick={() => onChangeAiDifficulty('hard')}
-              className={`px-3 py-1 text-xs font-semibold transition ${aiDifficulty === 'hard' ? 'bg-rose-600 text-white' : 'bg-transparent text-stone-400 hover:bg-white/10'}`}
-            >
-              Hard
-            </button>
-          </div>
-        </div>
-
-        <div className="mb-6">
-          <DeckLibraryGrid decks={buildDeckLibraryList()} onPick={handlePick} onEdit={handleEdit} onRemove={handleRemove} />
-        </div>
-
-        {error && (
-          <p className="text-sm text-red-400 mb-6 short:mb-3 max-w-lg mx-auto">{error}</p>
-        )}
-
-        <button
-          onClick={onCustom}
-          className="inline-flex items-center gap-2 px-5 py-2.5 bg-white/10 hover:bg-white/20 text-stone-200 rounded-lg text-sm font-medium transition-colors"
-        >
-          <Layers className="w-4 h-4" />
-          Import / Build a Custom Deck
-        </button>
       </div>
     </div>
   );

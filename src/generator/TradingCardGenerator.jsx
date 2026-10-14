@@ -8,6 +8,9 @@ import {
   renderCardOnCanvas, renderCardWithBleed, SHEET_COLS, SHEET_ROWS, CARDS_PER_SHEET, pngBlobWithDpi,
 } from '../lib/cardRender.js';
 import { useCardFont, useBorderImages, useCardArtImages } from '../lib/useCardAssets.js';
+import { LINEN_BG, PAGE_BG } from '../lib/deckBuilderStyle.js';
+
+const PANEL_STYLE = { background: LINEN_BG };
 
 const TradingCardGenerator = () => {
   const [csvData, setCsvData] = useState([]);
@@ -595,38 +598,38 @@ const TradingCardGenerator = () => {
   }, [deckPreviewIndex, displayDeckList, positions, fontLoaded, borderImagesLoaded, artImagesLoaded, borderStyle]);
 
   return (
-    <div className="min-h-screen bg-black p-4 md:p-8" style={{ fontFamily: "'Georgia', serif" }}>
+    <div className="min-h-screen p-4 md:p-8" style={{ background: PAGE_BG, fontFamily: "'Georgia', serif" }}>
       <div className="max-w-6xl mx-auto">
         <h1 className="text-3xl md:text-4xl font-bold text-white mb-1">Trading Card Generator</h1>
-        <p className="text-stone-400 mb-8 text-sm">Upload a CSV of card data to batch-generate finished cards. The border art is chosen automatically for each card from its Card Typing (Being/Prophecy, Relic/Altar, or Ethereal Conjuring/Conjuring).</p>
+        <p className="text-stone-300 mb-8 text-sm">Upload a CSV of card data to batch-generate finished cards. The border art is chosen automatically for each card from its Card Typing (Being/Prophecy, Relic/Altar, or Ethereal Conjuring/Conjuring).</p>
 
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-stone-200 mb-8 max-w-sm">
+        <div style={PANEL_STYLE} className="p-6 border-[6px] border-black rounded-md mb-8 max-w-sm">
           {!csvUploadUnlocked ? (
-            <form onSubmit={submitCsvUploadPasscode} className="flex flex-col items-center justify-center h-32 border-2 border-dashed border-stone-300 rounded px-4">
-              <Lock className="w-6 h-6 text-stone-400 mb-2" />
-              <p className="text-xs text-stone-500 mb-2 text-center">Enter the passcode to upload a CSV file.</p>
+            <form onSubmit={submitCsvUploadPasscode} className="flex flex-col items-center justify-center h-32 border-2 border-dashed border-black rounded px-4">
+              <Lock className="w-6 h-6 text-stone-700 mb-2" />
+              <p className="text-xs text-stone-800 mb-2 text-center">Enter the passcode to upload a CSV file.</p>
               <input
                 type="password"
                 value={csvUploadPasscode}
                 onChange={(e) => { setCsvUploadPasscode(e.target.value); setCsvUploadError(''); }}
                 placeholder="Passcode"
-                className="w-full px-2 py-1 border border-stone-300 rounded text-sm mb-1 focus:outline-none focus:ring-1 focus:ring-stone-400"
+                className="w-full px-2 py-1 border-2 border-black bg-white/70 rounded text-sm mb-1 focus:outline-none focus:bg-white"
               />
-              {csvUploadError && <p className="text-xs text-red-600">{csvUploadError}</p>}
-              <button type="submit" className="text-xs text-blue-600 hover:underline mt-1">Unlock</button>
+              {csvUploadError && <p className="text-xs font-bold text-red-800">{csvUploadError}</p>}
+              <button type="submit" className="text-xs font-bold text-stone-900 hover:underline mt-1">Unlock</button>
             </form>
           ) : (
-            <label className="flex flex-col items-center justify-center h-32 border-2 border-dashed border-stone-300 rounded cursor-pointer hover:border-blue-500 transition-colors">
-              <Upload className="w-8 h-8 text-stone-400 mb-2" />
-              <span className="text-sm text-stone-600">Upload CSV File</span>
+            <label className="flex flex-col items-center justify-center h-32 border-2 border-dashed border-black rounded cursor-pointer bg-white/40 hover:bg-white/70 transition-colors">
+              <Upload className="w-8 h-8 text-stone-700 mb-2" />
+              <span className="text-sm font-bold text-stone-900">Upload CSV File</span>
               <input type="file" accept=".csv" onChange={handleCSVUpload} className="hidden" />
             </label>
           )}
-          {csvData.length > 0 && <p className="text-green-600 mt-2 text-sm">✓ {csvData.length} cards loaded</p>}
+          {csvData.length > 0 && <p className="text-emerald-900 font-bold mt-2 text-sm">✓ {csvData.length} cards loaded</p>}
         </div>
 
         {csvData.length > 0 && (
-          <div className="bg-white p-6 rounded-lg shadow-sm border border-stone-200 mb-8">
+          <div style={PANEL_STYLE} className="p-6 border-[6px] border-black rounded-md mb-8">
             <div className="flex items-start gap-2 mb-4">
               <div className="relative flex-1">
                 <div className="flex items-center gap-2 border border-stone-300 rounded px-3 py-2 bg-stone-50 focus-within:border-blue-500 transition-colors">
@@ -757,7 +760,7 @@ const TradingCardGenerator = () => {
                   onClick={() => setSearchPreviewIndex(null)}
                 >
                   <div
-                    className="bg-white rounded-lg shadow-2xl p-4 max-w-lg w-full relative"
+                    style={PANEL_STYLE} className="border-[6px] border-black rounded-md shadow-2xl p-4 max-w-lg w-full relative"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <button
@@ -814,7 +817,7 @@ const TradingCardGenerator = () => {
                   onClick={() => setDeckPreviewIndex(null)}
                 >
                   <div
-                    className="bg-white rounded-lg shadow-2xl p-4 max-w-lg w-full relative"
+                    style={PANEL_STYLE} className="border-[6px] border-black rounded-md shadow-2xl p-4 max-w-lg w-full relative"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <button
@@ -1028,7 +1031,7 @@ const TradingCardGenerator = () => {
         )}
 
         {!showSearchPanel && (
-          <div className="bg-white p-6 rounded-lg shadow-sm border border-stone-200">
+          <div style={PANEL_STYLE} className="p-6 border-[6px] border-black rounded-md">
             {previewUrl && (
               <div className="mb-4 p-4 bg-yellow-50 border border-yellow-300 rounded">
                 <p className="text-sm font-semibold text-yellow-800 mb-2">Downloaded. Preview below.</p>
@@ -1064,7 +1067,7 @@ const TradingCardGenerator = () => {
         )}
 
         {csvData.length > 0 && showDeckList && (
-          <div className="bg-white p-6 rounded-lg shadow-sm border border-stone-200 mb-8 mt-8">
+          <div style={PANEL_STYLE} className="p-6 border-[6px] border-black rounded-md mb-8 mt-8">
             <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
               <h3 className="font-bold text-stone-800">
                 Custom Deck — {deckTotal}/{DECK_SIZE} cards

@@ -1,21 +1,32 @@
 import React, { useEffect, useState } from 'react';
-import { Plus, PenSquare } from 'lucide-react';
-import { parseCSV, toGameCard } from '../lib/cardData.js';
+import { Plus } from 'lucide-react';
+import { parseCSV, toGameCard, EFFIGY_COLORS } from '../lib/cardData.js';
 import { getActiveCsvText } from '../lib/csvSource.js';
-import { removeDeck, buildDeckLibraryList, toDeckSeed } from '../lib/deckLibrary.js';
+import { removeDeck, buildDeckLibraryList, toDeckSeed, duplicateDeck } from '../lib/deckLibrary.js';
+import { LINEN_BG, PAGE_BG } from '../lib/deckBuilderStyle.js';
 import DeckBuilder from '../game/components/DeckBuilder.jsx';
-import DeckLibraryGrid from '../game/components/DeckLibraryGrid.jsx';
+import DeckTiles from '../game/components/DeckTiles.jsx';
 
-// Reachable from Landing ("Library") and, standalone, manages saved decks:
-// browse everything (precons + saved), start a fresh build, edit any deck
-// (a precon edit always saves as new — see DeckBuilder), or remove a saved
-// one. The card-art Generator lives one level down from here ("Design
-// Cards") rather than being merged into deck management.
+// A fresh, empty build. A new object every call so DeckBuilder (which re-seeds
+// whenever seedDeck's identity changes) clears itself back to empty each time.
+const newDeckSeed = () => ({
+  entries: [],
+  effigyCounts: Object.fromEntries(EFFIGY_COLORS.map(c => [c, 0])),
+  color: null,
+  source: 'new',
+  sourceId: null,
+  sourceName: '',
+});
+
+// Reachable from Landing ("Library"). Opens on the decks themselves
+// (preloaded + saved); picking one opens it in the deck builder, where the
+// card library fills the center and a deck switcher sits in the right-hand
+// panel. The card-art Generator is one click away ("Design Cards").
 export default function Library({ onBack, onSelectGenerator }) {
   const [step, setStep] = useState('grid'); // 'grid' | 'edit'
-  const [editSeed, setEditSeed] = useState(null); // null = fresh build
+  const [seed, setSeed] = useState(null);
   const [pool, setPool] = useState([]);
-  const [, setVersion] = useState(0); // bumped to force the grid to re-read the store
+  const [, setVersion] = useState(0); // bumped to force the deck list to re-read the store
 
   useEffect(() => {
     getActiveCsvText().then(text => {
@@ -23,69 +34,81 @@ export default function Library({ onBack, onSelectGenerator }) {
     }).catch(() => {});
   }, []);
 
-  const openEdit = (deck) => { setEditSeed(toDeckSeed(deck)); setStep('edit'); };
-  const openNew = () => { setEditSeed(null); setStep('edit'); };
+  const openDeck = (deck) => { setSeed(toDeckSeed(deck)); setStep('edit'); };
+  const openNew = () => { setSeed(newDeckSeed()); setStep('edit'); };
   const closeEdit = () => { setStep('grid'); setVersion(v => v + 1); };
 
-  const handleRemove = (deck) => {
-    if (deck.source !== 'saved') return;
-    removeDeck(deck.id);
+  // After a save the deck exists in the store: keep it open, now as that saved
+  // deck, so the next save updates it instead of creating a duplicate.
+  const handleSaved = (record) => {
+    setSeed(toDeckSeed({ raw: record, source: 'saved' }));
     setVersion(v => v + 1);
   };
 
+  // Saves an independent copy ("Name (copy)") and leaves you on the deck list,
+  // where the new deck appears next to the original.
+  const handleDuplicate = (deck) => {
+    duplicateDeck(deck);
+    setVersion(v => v + 1);
+  };
+
+  const handleRemove = (deck) => {
+    if (deck.source !== 'saved') return;
+    if (!window.confirm(`Remove "${deck.name}" from your Library?`)) return;
+    removeDeck(deck.id);
+    if (seed?.sourceId === deck.id) setSeed(newDeckSeed());
+    setVersion(v => v + 1);
+  };
+
+  // Recomputed fresh every render (including the ones triggered by `version`)
+  // so a save/edit/remove is reflected immediately.
+  const decks = buildDeckLibraryList();
+
   if (step === 'edit') {
+    if (pool.length === 0) {
+      return (
+        <div className="min-h-dvh bg-black p-6 short:p-2">
+          <button onClick={closeEdit} className="text-sm text-stone-300 hover:text-white">← Decks</button>
+          <p className="text-stone-400 text-sm text-center mt-24">Loading your cards…</p>
+        </div>
+      );
+    }
     return (
       <DeckBuilder
         pool={pool}
-        seedDeck={editSeed}
+        seedDeck={seed}
         onBack={closeEdit}
-        onSaveComplete={closeEdit}
+        onSaveComplete={handleSaved}
+        libraryDecks={decks}
+        onSelectDeck={openDeck}
+        onNewDeck={openNew}
+        onRemoveDeck={handleRemove}
       />
     );
   }
 
-  // Recomputed fresh every render (including the ones triggered by
-  // `version` below) so a save/edit/remove is reflected immediately.
-  const decks = buildDeckLibraryList();
-
   return (
-    <div className="min-h-dvh bg-black p-8 short:p-2">
-      <button
-        onClick={onBack}
-        className="fixed top-3 left-3 z-40 text-xs bg-white/90 border border-stone-300 rounded px-3 py-1.5 shadow hover:bg-white"
-      >
-        ← Menu
-      </button>
-      <div className="max-w-3xl mx-auto text-center pt-8">
-        <h1 className="text-2xl font-bold text-white mb-2">Library</h1>
-        <p className="text-stone-400 mb-6 text-sm">
-          Preloaded decks plus anything you've saved. Click a deck to edit it,
-          or start fresh.
-        </p>
-
-        <div className="mb-8 flex items-center justify-center gap-3">
-          <button
-            onClick={openNew}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-white text-stone-800 rounded-lg text-sm font-semibold shadow hover:shadow-md transition-shadow"
-          >
-            <Plus className="w-4 h-4" />
-            New Deck
-          </button>
-          <button
-            onClick={onSelectGenerator}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 text-stone-200 rounded-lg text-sm font-medium transition-colors"
-          >
-            <PenSquare className="w-4 h-4" />
-            Design Cards
-          </button>
+    <div className="min-h-dvh p-3 sm:p-4 short:p-2" style={{ background: PAGE_BG, fontFamily: 'Georgia, serif' }}>
+      <div className="max-w-5xl mx-auto">
+        <div className="flex items-center gap-4 mb-3">
+          <button onClick={onBack} className="text-sm text-stone-300 hover:text-white">← Menu</button>
+          <button onClick={onSelectGenerator} className="text-sm text-stone-300 hover:text-white">Design Cards</button>
         </div>
 
-        <DeckLibraryGrid
-          decks={decks}
-          onPick={openEdit}
-          onEdit={openEdit}
-          onRemove={handleRemove}
-        />
+        <div className="border-[6px] border-black rounded-md p-4 sm:p-5" style={{ background: LINEN_BG }}>
+          <div className="flex items-center justify-between mb-4">
+            <h1 className="text-xl font-bold text-stone-900">Library</h1>
+            <button
+              onClick={openNew}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-[#393938] text-white rounded-lg text-sm font-bold"
+            >
+              <Plus className="w-4 h-4" />
+              New Deck
+            </button>
+          </div>
+
+          <DeckTiles decks={decks} onPick={openDeck} onDuplicate={handleDuplicate} onRemove={handleRemove} />
+        </div>
       </div>
     </div>
   );
