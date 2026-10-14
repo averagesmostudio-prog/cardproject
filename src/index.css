@@ -538,3 +538,32 @@ html, body {
 @media (prefers-reduced-motion: reduce) {
   .prophecy-reveal-card { animation: none; }
 }
+
+/* PackOpener > SparkleFrame — a pulsing glow ring plus four-point stars
+   twinkling around a pulled Historic / Sacred card. */
+@keyframes sparkle-glow-pulse {
+  0%, 100% { box-shadow: 0 0 14px 4px color-mix(in srgb, var(--sparkle-glow) 55%, transparent); }
+  50% { box-shadow: 0 0 30px 10px color-mix(in srgb, var(--sparkle-glow) 85%, transparent); }
+}
+.sparkle-glow {
+  animation: sparkle-glow-pulse 1.6s ease-in-out infinite;
+}
+@keyframes sparkle-twinkle {
+  0%, 100% { transform: translate(-50%, -50%) scale(0) rotate(0deg); opacity: 0; }
+  50% { transform: translate(-50%, -50%) scale(1) rotate(45deg); opacity: 1; }
+}
+.sparkle-star {
+  background: var(--sparkle-star);
+  clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%);
+  filter: drop-shadow(0 0 4px var(--sparkle-glow));
+  animation: sparkle-twinkle 1.3s ease-in-out infinite;
+}
+
+/* Immortal Rare — the whole sparkle layer cycles through the spectrum. */
+@keyframes sparkle-prismatic-cycle {
+  from { filter: hue-rotate(0deg); }
+  to { filter: hue-rotate(360deg); }
+}
+.sparkle-prismatic {
+  animation: sparkle-prismatic-cycle 3s linear infinite;
+}

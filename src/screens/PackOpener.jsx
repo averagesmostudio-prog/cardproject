@@ -7,21 +7,14 @@ import {
 } from '../lib/cardRender.js';
 import { useCardFont, useBorderImages, useCardArtImages } from '../lib/useCardAssets.js';
 import { getActiveCsvText } from '../lib/csvSource.js';
+import { classifyRarity, rollPack } from '../lib/packRoll.js';
+import SparkleFrame from './SparkleFrame.jsx';
+import { LINEN_BG, PAGE_BG } from '../lib/deckBuilderStyle.js';
+import { buildEffigyCardRow } from '../lib/effigyCard.js';
 
 const PACK_SIZE = 14;
-const SACRED_UPGRADE_CHANCE = 1 / 7;
 const THUMB_WIDTH = 320;
 const THUMB_HEIGHT = 448;
-
-const classifyRarity = (card) => {
-  const r = (getColumnData(card, ['Rarity', 'rarity']) || '').toLowerCase().trim();
-  if (!r) return null;
-  if (r.includes('sacred') || r.includes('mythic') || r === 'sr' || r === 'm') return 'sacred';
-  if (r.includes('rare') || r === 'r') return 'rare';
-  if (r.includes('uncommon') || r === 'u') return 'uncommon';
-  if (r.includes('common') || r === 'c') return 'common';
-  return null;
-};
 
 const pickRandom = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
@@ -44,13 +37,13 @@ export default function PackOpener({ onBack }) {
   const { borderImages: borderImageRefs, loaded: borderImagesLoaded } = useBorderImages();
   const { artImages, artBorderImages, loaded: artImagesLoaded } = useCardArtImages();
 
-  // Tints the currently loaded template's blank art window (its near-white
-  // pixels) to a solid color for the Basic Effigy slot, leaving the marbled
-  // border and every other pixel untouched.
+  // Tints the Effigy card's border template (the Altar/Conjuring border)'s
+  // blank art window (its near-white pixels) to a solid color for the Basic
+  // Effigy slot, leaving the marbled border and every other pixel untouched.
   const getTintedEffigyTemplate = (colorType) => {
     if (effigyTemplateCache.current[colorType]) return effigyTemplateCache.current[colorType];
 
-    const baseImg = borderImageRefs.current.beingProphecy;
+    const baseImg = borderImageRefs.current.conjuring;
     if (!baseImg) return null;
 
     const hex = EFFIGY_TYPE_COLORS[colorType] || '#888888';
@@ -90,21 +83,12 @@ export default function PackOpener({ onBack }) {
     return { img: borderImageRefs.current[key], loaded: !!borderImagesLoaded[key] };
   };
 
+  // The same Effigy card face the Deck Builder shows (effigyCard.js): Altar
+  // border, one pip of its color, its Engage text, rarity C.
   const makeBasicEffigyCard = () => {
     const colorTypes = ['bleeding', 'living', 'formless', 'timeless', 'shifting'];
     const colorType = pickRandom(colorTypes);
-    const label = colorType.charAt(0).toUpperCase() + colorType.slice(1);
-    return {
-      'Card Name': `Basic ${label} Effigy`,
-      'Card Typing': 'Effigy',
-      'Effigy Costs': '',
-      'Text Box': '',
-      Strength: 'XXX',
-      Lifespan: 'XXX',
-      Timer: 'XXX',
-      Rarity: 'Basic',
-      __effigyColor: colorType,
-    };
+    return { ...buildEffigyCardRow(colorType), __effigyColor: colorType };
   };
 
   const generatePack = (pool) => {
@@ -128,36 +112,7 @@ export default function PackOpener({ onBack }) {
       return;
     }
 
-    const pack = [];
-    for (let i = 0; i < 6; i++) pack.push({ card: pickRandom(pools.common), slot: 'Common' });
-    for (let i = 0; i < 3; i++) pack.push({ card: pickRandom(pools.uncommon), slot: 'Uncommon' });
-    for (let i = 0; i < 2; i++) {
-      const upgraded = pools.sacred.length > 0 && Math.random() < SACRED_UPGRADE_CHANCE;
-      pack.push({
-        card: pickRandom(upgraded ? pools.sacred : pools.rare),
-        slot: upgraded ? 'Rare → Sacred Rare' : 'Rare',
-      });
-    }
-
-    // Wildcard: Sacred 1/30, Rare 1/30, Uncommon 1/5, Common 1/3 — remaining
-    // ~40% of rolls default to Common along with its own explicit share.
-    const roll = Math.random();
-    let wildcardTier = 'common';
-    let wildcardLabel = 'Wildcard (Common)';
-    if (roll < 1 / 30 && pools.sacred.length > 0) {
-      wildcardTier = 'sacred';
-      wildcardLabel = 'Wildcard (Sacred Rare)';
-    } else if (roll < 2 / 30) {
-      wildcardTier = 'rare';
-      wildcardLabel = 'Wildcard (Rare)';
-    } else if (roll < 2 / 30 + 1 / 5) {
-      wildcardTier = 'uncommon';
-      wildcardLabel = 'Wildcard (Uncommon)';
-    }
-    pack.push({ card: pickRandom(pools[wildcardTier]), slot: wildcardLabel });
-
-    pack.push({ card: makeBasicEffigyCard(), slot: 'Basic Effigy' });
-    pack.push({ card: pickRandom(tokenPool), slot: 'Token' });
+    const pack = rollPack({ pools, tokenPool, makeBasicEffigy: makeBasicEffigyCard });
 
     setPackError(null);
     setCurrentPack(pack);
@@ -252,7 +207,7 @@ export default function PackOpener({ onBack }) {
   };
 
   return (
-    <div className="min-h-dvh bg-black p-6 short:p-2">
+    <div className="min-h-dvh p-6 short:p-2" style={{ background: PAGE_BG, fontFamily: 'Georgia, serif' }}>
       <div className="max-w-2xl mx-auto">
         <div className="flex items-center gap-3 mb-6">
           <button
@@ -266,22 +221,23 @@ export default function PackOpener({ onBack }) {
         </div>
 
         {csvData.length === 0 ? (
-          <div className="bg-white p-8 rounded-lg shadow-sm border border-stone-200 text-center">
-            <p className="text-sm text-stone-500 mb-4">
+          <div className="border-[6px] border-black rounded-md p-8 text-center" style={{ background: LINEN_BG }}>
+            <p className="text-sm text-stone-800 mb-4">
               Upload a card CSV (with a Rarity column) to open a 14-card pack: 6
-              Common, 3 Uncommon, 2 Rare (~1 in 7 upgrade to Sacred Rare), 1
-              Wildcard, 1 Basic Effigy, 1 Token.
+              Common, 3 Uncommon, 2 Rare (~1 in 12 upgrade to Sacred Rare), 1
+              Wildcard, 1 Basic Effigy, 1 Token. Any card can roll a Historic
+              (stylized art) version.
             </p>
-            <label className="inline-flex flex-col items-center justify-center border-2 border-dashed border-stone-300 rounded-lg p-10 cursor-pointer hover:border-stone-400 transition-colors">
-              <Upload className="w-8 h-8 text-stone-400 mb-3" />
-              <span className="text-stone-600 font-medium">Choose a CSV file</span>
+            <label className="inline-flex flex-col items-center justify-center border-2 border-dashed border-black rounded-lg p-10 cursor-pointer bg-white/40 hover:bg-white/70 transition-colors">
+              <Upload className="w-8 h-8 text-stone-700 mb-3" />
+              <span className="text-stone-900 font-bold">Choose a CSV file</span>
               <input type="file" accept=".csv" onChange={handleUpload} className="hidden" />
             </label>
           </div>
         ) : (
-          <div className="bg-white p-6 rounded-lg shadow-sm border border-stone-200">
+          <div className="border-[6px] border-black rounded-md p-6" style={{ background: LINEN_BG }}>
             {packError && (
-              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+              <div className="mb-4 p-3 bg-red-100 border-2 border-red-800 rounded text-sm text-red-900">
                 {packError}
               </div>
             )}
@@ -292,7 +248,7 @@ export default function PackOpener({ onBack }) {
                   <button
                     onClick={() => setPackViewIndex(i => Math.max(0, i - 1))}
                     disabled={packViewIndex === 0}
-                    className="p-3 rounded-full bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-30 disabled:hover:bg-purple-600 transition-colors shrink-0"
+                    className="p-3 rounded-full border-2 border-black bg-[#393938] text-white hover:bg-black disabled:opacity-30 disabled:hover:bg-[#393938] transition-colors shrink-0"
                     aria-label="Previous card"
                   >
                     <ChevronLeft className="w-6 h-6" />
@@ -305,6 +261,10 @@ export default function PackOpener({ onBack }) {
                     {packViewIndex < currentPack.length - 1 && (
                       <div className="absolute inset-0 translate-x-1.5 translate-y-1.5 bg-stone-900 rounded-lg border border-stone-700" />
                     )}
+                    <SparkleFrame
+                      key={`${packViewIndex}-${currentPack[packViewIndex].sparkle || 'none'}`}
+                      tier={currentPack[packViewIndex].sparkle}
+                    />
                     <div className="relative border-2 border-purple-400 rounded-lg overflow-hidden bg-white shadow-xl">
                       {packThumbnails[packViewIndex] ? (
                         <img
@@ -323,7 +283,7 @@ export default function PackOpener({ onBack }) {
                   <button
                     onClick={() => setPackViewIndex(i => Math.min(currentPack.length - 1, i + 1))}
                     disabled={packViewIndex === currentPack.length - 1}
-                    className="p-3 rounded-full bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-30 disabled:hover:bg-purple-600 transition-colors shrink-0"
+                    className="p-3 rounded-full border-2 border-black bg-[#393938] text-white hover:bg-black disabled:opacity-30 disabled:hover:bg-[#393938] transition-colors shrink-0"
                     aria-label="Next card"
                   >
                     <ChevronRight className="w-6 h-6" />
@@ -331,21 +291,21 @@ export default function PackOpener({ onBack }) {
                 </div>
 
                 <div className="text-center mb-4">
-                  <div className="text-sm font-semibold text-purple-700">{currentPack[packViewIndex].slot}</div>
-                  <div className="text-stone-800 font-bold">{currentPack[packViewIndex].card['Card Name']}</div>
-                  <div className="text-xs text-stone-400 mt-1">{packViewIndex + 1} / {PACK_SIZE}</div>
+                  <div className="text-sm font-bold text-stone-700">{currentPack[packViewIndex].slot}</div>
+                  <div className="text-stone-900 font-bold">{currentPack[packViewIndex].card['Card Name']}</div>
+                  <div className="text-xs text-stone-700 mt-1">{packViewIndex + 1} / {PACK_SIZE}</div>
                 </div>
 
                 <div className="flex flex-wrap items-center justify-center gap-3">
                   <button
                     onClick={() => generatePack(csvData)}
-                    className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors"
+                    className="flex items-center gap-2 px-4 py-2 border-2 border-black bg-[#393938] text-white font-bold rounded-lg hover:bg-black transition-colors"
                   >
                     Open another Pack
                   </button>
                   <button
                     onClick={downloadPackList}
-                    className="flex items-center gap-2 px-4 py-2 bg-stone-700 text-white rounded hover:bg-stone-800 transition-colors"
+                    className="flex items-center gap-2 px-4 py-2 border-2 border-black bg-white/60 text-stone-900 font-bold rounded-lg hover:bg-white/90 transition-colors"
                   >
                     <Download className="w-4 h-4" />
                     Download Pack List (.txt)
@@ -353,7 +313,7 @@ export default function PackOpener({ onBack }) {
                   <button
                     onClick={downloadPackPrintSheets}
                     disabled={isExportingPackSheets}
-                    className="flex items-center gap-2 px-4 py-2 bg-amber-700 text-white rounded hover:bg-amber-800 transition-colors disabled:opacity-60"
+                    className="flex items-center gap-2 px-4 py-2 border-2 border-black bg-white/60 text-stone-900 font-bold rounded-lg hover:bg-white/90 transition-colors disabled:opacity-60"
                   >
                     <LayoutGrid className="w-4 h-4" />
                     {isExportingPackSheets ? 'Building sheet…' : 'Download Pack Print Sheet'}
