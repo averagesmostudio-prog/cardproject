@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { History, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Flag, Eye, EyeOff, Sun, Moon, RotateCw, Maximize, Minimize } from 'lucide-react';
 import { useGameEngine } from '../state/useGameEngine.js';
 import { useStagedBoard, useStagedLife, useTurnBanner, useJustDrawn, useShiftVortex, useDepartFlash, useDeitySummonCinematic, useOpenLaneStrike, useFeatherMove, usePurgatoryArrivals, useProphecyReveal } from '../state/useStagedBoard.js';
-import { getLegalActions, effectiveEngage, animatedTopEntry, effectiveCastingCost, faithlessPaymentNeedsChoice, faithlessPaymentCandidates, searchZoneCandidates } from '../engine/actions.js';
+import { getLegalActions, effectiveEngage, grantedEngageOf, animatedTopEntry, effectiveCastingCost, faithlessPaymentNeedsChoice, faithlessPaymentCandidates, searchZoneCandidates } from '../engine/actions.js';
 import { effectiveStrength } from '../engine/combat.js';
 import { STARTING_LIFESPAN } from '../engine/constants.js';
 import { useCardFont, useBorderImages, useCardArtImages } from '../../lib/useCardAssets.js';
@@ -3664,13 +3664,15 @@ export default function Match({ initialState, onExit, onRematch, rematchStatus =
                   ? state.groundRelics[selectedCell]
                   : state.board[selectedCell];
                 const ownAbilities = cardOccupant.card.keywords?.engageAbilities || [];
-                const effectText = action.abilityIndex != null && ownAbilities[action.abilityIndex]
+                const effectText = action.granted
+                  ? grantedEngageOf(cardOccupant)
+                  : action.abilityIndex != null && ownAbilities[action.abilityIndex]
                   ? ownAbilities[action.abilityIndex].effect
                   : action.type === 'ACTIVATE_GROUND_RELIC_ENGAGE'
                     ? cardOccupant.card.keywords?.engage
                     : effectiveEngage(cardOccupant);
                 return (
-                  <div key={`${action.type}-${action.abilityIndex ?? 0}`} className="flex items-center gap-2">
+                  <div key={`${action.type}-${action.granted ? 'granted' : action.abilityIndex ?? 0}`} className="flex items-center gap-2">
                     <span className="text-xs text-stone-300">
                       {cardOccupant.card.name}: Engage — "{effectText}"
                     </span>

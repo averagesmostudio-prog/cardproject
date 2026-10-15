@@ -1745,7 +1745,21 @@ Rulings confirmed with the user after the earlier waves, now built:
   not draw" Prophecy is already face up when the Draw Step reads it. This is
   on for real games (`prophecyFlipWindows`, set by `createInitialState`);
   bare test states without the flag keep the old atomic flip. Human seats
-  are always offered the window (`alwaysOfferPriorityTo`).
+  are always offered the window (`alwaysOfferPriorityTo`). **Both** players
+  get a look at a revealed Prophecy: the opponent's window first, then one for
+  the Prophecy's own owner before the text resolves (an owner with nothing to
+  respond with and no human seat is skipped).
+- **A Being with its own Engage can also use an Armament-granted one** (Shovel's
+  "Engage: Sacrifice Shovel, then reveal...") — offered as a second
+  `ACTIVATE_ENGAGE` with `granted: true`; it uses only the granted text and none
+  of the Being's own costs. Same for Natures Bounty's one-time grant.
+- **Relic-Beings trigger Monumental Mason.** A "Relic, Being" (Training dummy,
+  Crumbling Sphinx, Vicious Vittles) summoned onto a tile the Mason points to
+  counts as conjuring a non-Armament Relic, however it enters (hand, Invoke,
+  Purgatory, token, Shift return).
+- **Deck Builder tabs**: All, then the colors alphabetically (Bleeding, Formless,
+  Living, Shifting, Timeless), then Faithless, then Effigy last. The Relic type chip also lists
+  Relic-Beings (they are Beings too).
 - **Shift returns land where the owner chooses, including onto their own
   Armament piles.** A Being returning from the Ethereal Realm (Shift, Delay,
   Prophesize) may land on any empty Mortal Realm tile, any tile with only a

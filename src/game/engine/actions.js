@@ -2061,7 +2061,10 @@ const placeTokenOnBoard = (state, playerId, tokenCard, cellId) => {
   // the Summoning of target Being") can target a token-summoned Being too —
   // confirmed with the user: Delay answers any summoning mechanism, tokens
   // included. whenSummonedText stays null (no current token prints one).
-  const reacted = triggerTypedSummonReactions(next, playerId, cellId, tokenCard);
+  let reacted = triggerTypedSummonReactions(next, playerId, cellId, tokenCard);
+  // Every Relic-Being, token or not, counts as a non-Armament Relic for
+  // Monumental Mason (see placeBeingOnBoard).
+  if (tokenCard.isRelicBeing) reacted = triggerPointedRelicConjureCraftEffigy(reacted, playerId, cellId);
   return {
     ...reacted,
     pendingResolution: { kind: 'summon-being', declaringPlayer: playerId, cellId, cardName: tokenCard.name, whenSummonedText: null, instanceId: tokenCard.instanceId },
@@ -6801,6 +6804,23 @@ export const effectiveEngage = (occupant) =>
   || occupant.grantedEngage
   || (occupant.armaments || []).find(a => a.card.keywords?.grantedEngage)?.card.keywords?.grantedEngage || null;
 
+// The Engage text a Being was GRANTED (by an attached Armament such as Shovel,
+// or a one-time grant like Natures Bounty), regardless of whether it also has
+// a printed Engage of its own. effectiveEngage above returns the printed one
+// first, so a Being with its own Engage could never use a granted one; the
+// granted ability is therefore offered as a second ACTIVATE_ENGAGE
+// ({ granted: true }) when the Being already has an Engage of its own.
+export const grantedEngageOf = (occupant) =>
+  occupant.grantedEngage
+  || (occupant.armaments || []).find(a => a.card.keywords?.grantedEngage)?.card.keywords?.grantedEngage || null;
+const hasOwnPrintedEngage = (occupant) =>
+  !!occupant.card.keywords?.engage || (occupant.card.keywords?.engageAbilities || []).length > 1;
+const offerGrantedEngage = (occupant, cell, actions) => {
+  if (occupant.type === 'being' && hasOwnPrintedEngage(occupant) && grantedEngageOf(occupant)) {
+    actions.push({ type: 'ACTIVATE_ENGAGE', cellId: cell, granted: true });
+  }
+};
+
 // Whether a Zealot's conditional Engage ("If you control ... you may
 // Engage: X" — see cardData.js > classifyEngageCondition) can actually be
 // activated right now. An unrecognized condition (engageCondition === null)
@@ -8859,6 +8879,10 @@ const placeBeingOnBoard = (state, playerId, cellId, card, { skipProphesize = fal
     ...next,
     pendingResolution: { kind: 'summon-being', declaringPlayer: playerId, cellId, cardName: card.name, whenSummonedText, instanceId: card.instanceId },
   };
+  // A "Relic, Being" (Training dummy, Crumbling Sphinx, Vicious Vittles) is a
+  // non-Armament Relic too, so it also triggers Monumental Mason's "If you
+  // conjure a non Armament Relic on a tile this points to".
+  if (card.isRelicBeing) next = triggerPointedRelicConjureCraftEffigy(next, playerId, cellId);
   return next;
 };
 
@@ -9743,6 +9767,7 @@ const offerReactiveEngageActions = (state, playerId, actions) => {
           actions.push({ type: 'ACTIVATE_ENGAGE', cellId: cell });
         }
       }
+      offerGrantedEngage(occupant, cell, actions);
     }
     if (occupant?.type === 'relic' && occupant.ownerId === playerId && !occupant.engaged && occupant.card.keywords?.engage) {
       // A Relic's Engage can carry the same "If you control ... you may
@@ -10732,6 +10757,7 @@ export const getLegalActions = (state, playerId) => {
         actions.push({ type: 'ACTIVATE_ENGAGE', cellId: cell });
       }
     }
+    offerGrantedEngage(occupant, cell, actions);
   });
 
   // "Remove (X) <Type> Counters: Sacrifice this Relic, then add a <Typing>
@@ -14389,7 +14415,12 @@ const gameReducerCore = (state, action) => {
       // only read off the single-ability keywords branch below — same
       // scope the matching getLegalActions fix above uses.
       let effigyCost = null;
-      if (ownAbilities.length > 1 && action.abilityIndex != null) {
+      if (action.granted) {
+        // The ability an attached Armament (Shovel) grants alongside the
+        // Being's own printed Engage: only the granted text, none of the
+        // Being's own costs.
+        engageEffect = occupant.type === 'being' ? grantedEngageOf(occupant) : null;
+      } else if (ownAbilities.length > 1 && action.abilityIndex != null) {
         const ability = ownAbilities[action.abilityIndex];
         if (!ability) return state;
         ({ effect: engageEffect, lifespanCost, condition, extraCost } = ability);
@@ -15126,6 +15157,14 @@ const resolvePendingResolution = (state) => {
 // exactly one more look before anything resolves.
 const passReactiveWindowPriority = (state) => {
   const { openFor, everResponded, passedOnce, triggerDescription } = state.reactiveWindow;
+  // A revealed Prophecy gives BOTH players a look before its text resolves:
+  // the opponent's window (opened by advanceProphecyFlips) is followed by one
+  // for the Prophecy's own owner, who may also have something to respond with.
+  // passedOnce marks that owner look as the last one.
+  const flip = state.pendingResolution?.kind === 'prophecy-flip' ? state.pendingResolution : null;
+  if (flip && !everResponded && !passedOnce && openFor !== flip.ownerId) {
+    return { ...state, reactiveWindow: { openFor: flip.ownerId, triggerDescription, everResponded: false, passedOnce: true } };
+  }
   if (!everResponded || passedOnce) {
     return resolvePendingResolution({ ...state, reactiveWindow: null });
   }

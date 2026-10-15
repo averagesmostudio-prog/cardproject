@@ -10268,6 +10268,28 @@ describe('"If you conjure a non Armament Relic on a tile this points to, Craft a
     expect(next.players.A.effigyPool).toHaveLength(0);
   });
 
+  it('also triggers for a "Relic, Being" (Training dummy) summoned onto a tile it points to', () => {
+    const dummy = beingCard({ instanceId: 'td#0', name: 'Training dummy', typing: 'Relic, Being', isRelicBeing: true, castingCost: { faithless: 0, colored: {} }, strength: 0, lifespan: 3 });
+    const state = baseState({ board: { r1c2: withAbility }, players: { A: player({ hand: [dummy], effigyDeck: [effigy('living')] }), B: player() } });
+    const next = gameReducer(state, { type: 'SUMMON_BEING', instanceId: 'td#0', cellId: 'r2c2' });
+    expect(next.board.r2c2?.card.name).toBe('Training dummy');
+    expect(next.log.some(e => e.message.includes("Monumental Mason's reaction crafts 1 Effigy"))).toBe(true);
+    expect(next.players.A.effigyPool).toHaveLength(1);
+    // ...but not when it lands on a tile the Mason does not point to.
+    const elsewhere = gameReducer(state, { type: 'SUMMON_BEING', instanceId: 'td#0', cellId: 'r2c4' });
+    expect(elsewhere.players.A.effigyPool).toHaveLength(0);
+  });
+
+  it('triggers for every real Relic-Being in the set, summoned from hand', () => {
+    const names = ['Training dummy', 'Crumbling Sphinx', 'Vicious Vittles'];
+    names.forEach((name, i) => {
+      const card = beingCard({ instanceId: `rb${i}#0`, name, typing: 'Relic, Being', isRelicBeing: true, castingCost: { faithless: 0, colored: {} } });
+      const state = baseState({ board: { r1c2: withAbility }, players: { A: player({ hand: [card], effigyDeck: [effigy('living')] }), B: player() } });
+      const next = gameReducer(state, { type: 'SUMMON_BEING', instanceId: `rb${i}#0`, cellId: 'r2c2' });
+      expect(next.players.A.effigyPool).toHaveLength(1);
+    });
+  });
+
   it('does not trigger without the keyword (plain Mason with no printed ability)', () => {
     const state = baseState({ board: { r1c2: mason }, players: { A: player({ hand: [relicCard], effigyDeck: [effigy('living')] }), B: player() } });
     const next = gameReducer(state, { type: 'PLACE_RELIC', instanceId: 'relic#0', cellId: 'r2c2' });
@@ -14790,5 +14812,104 @@ describe('Shifting Sands\' Engage moves a Being onto its tile even when the owne
     const next = gameReducer(state, { type: 'ACTIVATE_GROUND_RELIC_ENGAGE', cellId: 'r2c2' });
     expect(next.pendingChoice).toBeNull();
     expect(next.board.r2c2.card.name).toBe('Squatter');
+  });
+});
+
+describe('an Armament-granted Engage (Shovel) is usable even when the Being has its own Engage', () => {
+  const SHOVEL_TEXT = 'Sacrifice Shovel, then reveal the top (3) cards of your deck, you may add any Relics revealed to hand, shuffle the others back into your deck.';
+  const shovel = () => ({
+    card: { id: 'sh', instanceId: 'sh#0', name: 'Shovel', kind: 'relic-armament', keywords: { grantedEngage: SHOVEL_TEXT } },
+    engaged: false,
+  });
+  const engager = (extra = {}) => ({
+    type: 'being', ownerId: 'A',
+    card: beingCard({ instanceId: 'w#0', name: 'Wielder', keywords: { engage: 'Draw (1) card.' } }),
+    currentLifespan: 5, engaged: false, armaments: [shovel()], ...extra,
+  });
+  const deck = () => [
+    { id: 'r1', instanceId: 'r1#0', name: 'Some Relic', kind: 'relic' },
+    { id: 'c1', instanceId: 'c1#0', name: 'Plain Card', kind: 'being' },
+    { id: 'c2', instanceId: 'c2#0', name: 'Other Card', kind: 'being' },
+  ];
+
+  it('offers both the printed Engage and the Shovel-granted one', () => {
+    const state = baseState({ board: { r2c1: engager() }, players: { A: player({ mainDeck: deck() }), B: player() } });
+    const engages = getLegalActions(state, 'A').filter(a => a.type === 'ACTIVATE_ENGAGE');
+    expect(engages).toContainEqual({ type: 'ACTIVATE_ENGAGE', cellId: 'r2c1' });
+    expect(engages).toContainEqual({ type: 'ACTIVATE_ENGAGE', cellId: 'r2c1', granted: true });
+  });
+
+  it('the granted Engage sacrifices Shovel and reveals the top cards, not the Being\'s own ability', () => {
+    const state = baseState({ board: { r2c1: engager() }, players: { A: player({ mainDeck: deck() }), B: player() } });
+    const next = gameReducer(state, { type: 'ACTIVATE_ENGAGE', cellId: 'r2c1', granted: true });
+    expect(next.log.some(e => e.message.includes('sacrifices Shovel'))).toBe(true);
+    expect(next.board.r2c1.armaments ?? []).toHaveLength(0); // Shovel is gone
+    expect(next.board.r2c1.engaged).toBe(true);
+    expect(next.log.some(e => e.message.includes('reveals 3 card'))).toBe(true);
+    expect(next.players.A.hand.map(c => c.name)).toEqual(['Some Relic']); // the revealed Relic, not a draw from the Wielder's own "Draw (1) card."
+  });
+
+  it('a Being without Shovel only offers its own Engage once, and a Being with only the grant offers just one', () => {
+    const plain = { ...engager(), armaments: undefined };
+    const s1 = baseState({ board: { r2c1: plain }, players: { A: player(), B: player() } });
+    expect(getLegalActions(s1, 'A').filter(a => a.type === 'ACTIVATE_ENGAGE')).toEqual([{ type: 'ACTIVATE_ENGAGE', cellId: 'r2c1' }]);
+    const grantOnly = { ...engager(), card: beingCard({ instanceId: 'g#0', name: 'Grantee' }) };
+    const s2 = baseState({ board: { r2c1: grantOnly }, players: { A: player(), B: player() } });
+    expect(getLegalActions(s2, 'A').filter(a => a.type === 'ACTIVATE_ENGAGE')).toEqual([{ type: 'ACTIVATE_ENGAGE', cellId: 'r2c1' }]);
+  });
+});
+
+describe('a revealed Prophecy lets its owner respond too, not just the opponent', () => {
+  const rewriteThePast = () => ({
+    id: 'rtp', instanceId: 'rtp#0', name: 'Rewrite the Past', kind: 'ethereal-conjuring',
+    castingCost: { faithless: 0, colored: {} },
+    textBox: 'Negate a Prophecy and flip it face down, then add (2) Time Counters to it.',
+  });
+  const mine = () => ({
+    type: 'prophecy', ownerId: 'A', faceDown: true, timer: 1,
+    card: { name: 'My Prophecy', instanceId: 'mp#0', kind: 'prophecy', textBox: '', keywords: {} },
+  });
+  const start = (extra = {}) => baseState({
+    turnPlayer: 'B', prophecyFlipWindows: true, board: { r3c1: mine() },
+    players: { A: player({ mainDeck: [{ instanceId: 'draw#0', kind: 'being', castingCost: { faithless: 0, colored: {} } }] }), B: player() },
+    ...extra,
+  });
+
+  // PASS_TURN is itself respondable: clear that window first, then the flip's.
+  const toFlipWindow = (state) => {
+    let s = gameReducer(state, { type: 'PASS_TURN' });
+    while (s.pendingResolution?.kind === 'pass-turn') s = gameReducer(s, { type: 'PASS_PRIORITY' });
+    return s;
+  };
+
+  it('after the opponent passes, the owner gets a window of their own before the text resolves', () => {
+    const declared = toFlipWindow(start({ alwaysOfferPriorityTo: ['A', 'B'] }));
+    expect(declared.reactiveWindow).toMatchObject({ openFor: 'B' });
+    const ownerLook = gameReducer(declared, { type: 'PASS_PRIORITY' });
+    expect(ownerLook.reactiveWindow).toMatchObject({ openFor: 'A' });
+    expect(ownerLook.board.r3c1).toMatchObject({ faceDown: true }); // still not resolved
+    const done = gameReducer(ownerLook, { type: 'PASS_PRIORITY' });
+    expect(done.reactiveWindow).toBeNull();
+    expect(done.board.r3c1).toBeUndefined();
+    expect(done.players.A.hand).toHaveLength(1);
+  });
+
+  it('the owner can use their own Ethereal Conjuring in that window (Rewrite the Past on their own Prophecy)', () => {
+    const state = start({ alwaysOfferPriorityTo: ['B'], players: {
+      A: player({ hand: [rewriteThePast()], mainDeck: [{ instanceId: 'draw#0', kind: 'being', castingCost: { faithless: 0, colored: {} } }] }),
+      B: player(),
+    } });
+    const declared = toFlipWindow(state);
+    const ownerLook = gameReducer(declared, { type: 'PASS_PRIORITY' });
+    expect(ownerLook.reactiveWindow).toMatchObject({ openFor: 'A' });
+    expect(getLegalActions(ownerLook, 'A').map(a => a.type)).toEqual(expect.arrayContaining(['CAST_CONJURING', 'PASS_PRIORITY']));
+    const negated = gameReducer(ownerLook, { type: 'CAST_CONJURING', instanceId: 'rtp#0' });
+    expect(negated.board.r3c1).toMatchObject({ type: 'prophecy', faceDown: true, timer: 2 });
+  });
+
+  it('an owner with nothing to respond with and no human seat is skipped, so nothing stalls', () => {
+    const next = gameReducer(start(), { type: 'PASS_TURN' });
+    expect(next.reactiveWindow).toBeNull();
+    expect(next.board.r3c1).toBeUndefined();
   });
 });

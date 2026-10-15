@@ -31,6 +31,8 @@ const STEP_INPUT = 'w-10 text-center text-sm border border-stone-200 rounded py-
 const TEXT_OUTLINE = '-1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 0 0 3px #000';
 const TYPING_TABS = ['formless', 'living', 'bleeding', 'timeless', 'shifting', 'faithless'];
 const EFFIGY_TAB_COLOR = '#efe6c9';
+const ALL_TAB = 'all'; // every typing at once
+const BOOK_TABS = [ALL_TAB, ...TYPING_TABS.filter(t => t !== 'faithless').sort(), 'faithless', 'effigy']; // All, the colors A-Z, then Faithless, then Effigy
 const PAGE_SIZE = 8;
 const COST_FILTERS = ['all', 0, 1, 2, 3, 4, 5, '6+'];
 const KIND_ORDER = ['being', 'deity', 'prophecy', 'relic', 'relic-armament', 'conjuring', 'ethereal-conjuring', 'altar'];
@@ -40,6 +42,9 @@ const KIND_LABELS = {
 };
 // Dark text on the light gems, white on the saturated ones.
 const GEM_TEXT = (color) => (['timeless', 'shifting', 'faithless'].includes(color) ? '#111' : '#fff');
+// A "Relic, Being" (Training dummy, Crumbling Sphinx) is a Being (kind 'being')
+// that is also a Relic, so it shows under both the Being and Relic type chips.
+const cardMatchesKind = (card, kind) => card.kind === kind || (kind === 'relic' && !!card.isRelicBeing);
 const cardTypingTab = (card) => {
   const t = (card.effigyType || '').toLowerCase();
   return TYPING_TABS.includes(t) ? t : 'faithless';
@@ -283,7 +288,7 @@ export default function DeckBuilder({ pool, seedDeck, onStart, onSaveComplete, o
   const openPreview = (card) => setPreviewCardId(card.id);
 
   const searching = search.trim() !== '';
-  const kindsPresent = useMemo(() => KIND_ORDER.filter(k => eligible.some(c => c.kind === k)), [eligible]);
+  const kindsPresent = useMemo(() => KIND_ORDER.filter(k => eligible.some(c => cardMatchesKind(c, k))), [eligible]);
   const costMatches = (card) => {
     if (costFilter === 'all') return true;
     const cost = totalCastingCost(card);
@@ -296,8 +301,8 @@ export default function DeckBuilder({ pool, seedDeck, onStart, onSaveComplete, o
   const shownCards = useMemo(() => {
     const base = source === 'deck' ? visibleDeckCards : visibleCards;
     return base.filter(card =>
-      (searching || activeTab === 'effigy' || cardTypingTab(card) === activeTab)
-      && (kindFilter === 'all' || card.kind === kindFilter)
+      (searching || activeTab === 'effigy' || activeTab === ALL_TAB || cardTypingTab(card) === activeTab)
+      && (kindFilter === 'all' || cardMatchesKind(card, kindFilter))
       && costMatches(card));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [source, visibleDeckCards, visibleCards, searching, activeTab, kindFilter, costFilter]);
@@ -542,7 +547,7 @@ export default function DeckBuilder({ pool, seedDeck, onStart, onSaveComplete, o
         <div className="grid lg:grid-cols-[minmax(0,1fr)_280px] gap-4 items-start">
           <div className="min-w-0">
             <div className="flex flex-wrap items-end gap-1.5 pl-3 relative z-10" role="tablist" aria-label="Card typing">
-              {[...TYPING_TABS, 'effigy'].map(tab => {
+              {BOOK_TABS.map(tab => {
                 const active = activeTab === tab;
                 return (
                   <button
@@ -551,7 +556,7 @@ export default function DeckBuilder({ pool, seedDeck, onStart, onSaveComplete, o
                     aria-selected={active}
                     onClick={() => setActiveTab(tab)}
                     className={`px-3 sm:px-4 text-sm sm:text-[15px] font-bold border-[3px] border-black border-b-0 rounded-t-[10px] capitalize ${active ? 'pt-3 pb-3 -mb-[6px]' : 'mt-2 pt-2 pb-3 brightness-[.82]'}`}
-                    style={{ background: LINEN_BG, color: tab === 'effigy' ? EFFIGY_TAB_COLOR : EFFIGY_TYPE_COLORS[tab], textShadow: TEXT_OUTLINE }}
+                    style={{ background: LINEN_BG, color: tab === 'effigy' || tab === ALL_TAB ? EFFIGY_TAB_COLOR : EFFIGY_TYPE_COLORS[tab], textShadow: TEXT_OUTLINE }}
                   >
                     {tab}
                   </button>
