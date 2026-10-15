@@ -6833,7 +6833,8 @@ const engageConditionMet = (condition, board, playerId, altars = [], groundRelic
   // lives in groundRelics, not board (RULES.md > Being-Relic
   // co-location) — still a real controlled Relic for this check.
   if (condition === 'controls-relic') {
-    return Object.values(board).some(o => o?.type === 'relic' && o.ownerId === playerId)
+    // A "Relic, Being" (Training dummy, ...) is a non-Armament Relic too.
+    return Object.values(board).some(o => o?.ownerId === playerId && (o.type === 'relic' || (o.type === 'being' && o.card.isRelicBeing)))
       || Object.values(groundRelics).some(o => o?.ownerId === playerId);
   }
   return true;
@@ -7372,6 +7373,17 @@ const applyMinusCounters = (state, cardName, label, targetCellId, amount) => {
 // RESOLVE_LIFESPAN_DAMAGE_FIRST_TARGET (it doesn't), so both paths reach
 // the same second-target logic.
 const dealSecondLifespanDamage = (state, playerId, cardName, label, amount, excludeCell) => {
+  // The first hit may have killed a Being whose Depart just opened its own
+  // choice (Kendasha: "Deal (1) damage to target Being"). Opening this second
+  // choice now would overwrite that one and silently drop a hit, so this half
+  // waits in queuedEffects until the Depart's choice is done (see the drain in
+  // gameReducer).
+  if (state.pendingChoice) {
+    return {
+      ...state,
+      queuedEffects: [...(state.queuedEffects || []), { kind: 'lifespan-damage-second', playerId, cardName, label, amount, excludeCell }],
+    };
+  }
   const candidates = Object.entries(state.board).filter(([cell, o]) => cell !== excludeCell && o?.type === 'being').map(([cell]) => cell);
   if (candidates.length === 0) {
     return addLog(state, `${cardName}'s ${label} has no different Being to target.`);
@@ -8103,7 +8115,8 @@ const conditionalBonusTarget = (state, cell, occupant) => {
   // other Relic-counting precedent in this file (groundRelics/Altars never
   // counted as "a Relic" by any of them either).
   if (kw.perNonArmamentRelicLifespan) {
-    const count = Object.values(state.board).filter(o => o?.type === 'relic' && o.ownerId === owner).length;
+    // A "Relic, Being" counts as a non-Armament Relic too.
+    const count = Object.values(state.board).filter(o => o?.ownerId === owner && (o.type === 'relic' || (o.type === 'being' && o.card.isRelicBeing))).length;
     lifespan += kw.perNonArmamentRelicLifespan * count;
   }
 
@@ -15157,13 +15170,17 @@ const resolvePendingResolution = (state) => {
 // exactly one more look before anything resolves.
 const passReactiveWindowPriority = (state) => {
   const { openFor, everResponded, passedOnce, triggerDescription } = state.reactiveWindow;
-  // A revealed Prophecy gives BOTH players a look before its text resolves:
-  // the opponent's window (opened by advanceProphecyFlips) is followed by one
-  // for the Prophecy's own owner, who may also have something to respond with.
-  // passedOnce marks that owner look as the last one.
-  const flip = state.pendingResolution?.kind === 'prophecy-flip' ? state.pendingResolution : null;
-  if (flip && !everResponded && !passedOnce && openFor !== flip.ownerId) {
-    return { ...state, reactiveWindow: { openFor: flip.ownerId, triggerDescription, everResponded: false, passedOnce: true } };
+  // A revealed Prophecy and a declared attack give BOTH players a look before
+  // they resolve: the opponent's window is followed by one for whoever
+  // declared it (the Prophecy's owner / the attacker), who may also have
+  // something to respond with — a Strike Down cast after the defender passes,
+  // say. passedOnce marks that second look as the last one; `optionalLook`
+  // means it is only held when that player really has something to cast (it
+  // is never a "do you want to pass?" prompt, even for a human seat).
+  const pr = state.pendingResolution;
+  const declarer = pr?.kind === 'prophecy-flip' ? pr.ownerId : pr?.kind === 'attack' ? pr.declaringPlayer : null;
+  if (declarer && !everResponded && !passedOnce && openFor !== declarer) {
+    return { ...state, reactiveWindow: { openFor: declarer, triggerDescription, everResponded: false, passedOnce: true, optionalLook: true } };
   }
   if (!everResponded || passedOnce) {
     return resolvePendingResolution({ ...state, reactiveWindow: null });
@@ -15195,7 +15212,7 @@ const settleReactiveWindow = (state) => {
     const hasRealOption = getLegalActions(next, openFor).some(a => REACTIVE_RESPONSE_TYPES.has(a.type));
     // A person is always given the chance to pass explicitly, even with
     // nothing to respond with — see createInitialState's alwaysOfferPriorityTo.
-    if (hasRealOption || next.alwaysOfferPriorityTo?.includes(openFor)) break;
+    if (hasRealOption || (!next.reactiveWindow.optionalLook && next.alwaysOfferPriorityTo?.includes(openFor))) break;
     next = passReactiveWindowPriority(next);
   }
   return next;
@@ -15443,6 +15460,20 @@ export const gameReducer = (state, action) => {
   if ((state.pendingChoice || state.pendingResolution) && !afterWindow.pendingChoice && !afterWindow.pendingResolution && !afterWindow.winner) {
     const retried = retryStuckShiftReturns(afterWindow);
     if (retried !== afterWindow) afterWindow = recomputeLiveAuras(retried);
+  }
+  // A half of a two-part effect that had to wait behind a Depart's own choice
+  // (dealSecondLifespanDamage) runs the moment nothing is open any more.
+  if (afterWindow.queuedEffects?.length > 0) {
+    if (afterWindow.phase !== 'playing' || afterWindow.winner) {
+      afterWindow = { ...afterWindow, queuedEffects: [] };
+    } else if (!afterWindow.pendingChoice && !afterWindow.pendingResolution && !afterWindow.reactiveWindow) {
+      const [head, ...rest] = afterWindow.queuedEffects;
+      let drained = { ...afterWindow, queuedEffects: rest };
+      if (head.kind === 'lifespan-damage-second') {
+        drained = dealSecondLifespanDamage(drained, head.playerId, head.cardName, head.label, head.amount, head.excludeCell);
+      }
+      afterWindow = recomputeLiveAuras(drained);
+    }
   }
   // Prophecy flips queued by this action (or by the turn start it triggered)
   // get their reveal + response window now — see advanceProphecyFlips.

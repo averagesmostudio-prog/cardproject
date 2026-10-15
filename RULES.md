@@ -1747,12 +1747,26 @@ Rulings confirmed with the user after the earlier waves, now built:
   bare test states without the flag keep the old atomic flip. Human seats
   are always offered the window (`alwaysOfferPriorityTo`). **Both** players
   get a look at a revealed Prophecy: the opponent's window first, then one for
-  the Prophecy's own owner before the text resolves (an owner with nothing to
-  respond with and no human seat is skipped).
+  the Prophecy's own owner before the text resolves, but only if the owner has
+  something to cast or Engage (never a bare "pass?" prompt).
+- **Two-part effects wait behind a Depart's own choice.** Crumbling Sphinx's
+  second hit ("...and (1) to a different Being") is queued (`queuedEffects`)
+  when its first hit kills a Being whose Depart opens its own target choice
+  (Kendasha), and runs once that choice is done, so both hits land instead of
+  the second choice overwriting the Depart's.
+- **A declared attack gives the attacker a look too.** After the defender passes
+  (or responds), the attacker gets their own priority before damage lands, but
+  only when they actually hold something to cast or Engage (never a bare "pass?"
+  prompt, even for a human seat) — so Strike Down can be cast by either side
+  once the defender has passed. Same rule for the Prophecy owner's look.
 - **A Being with its own Engage can also use an Armament-granted one** (Shovel's
   "Engage: Sacrifice Shovel, then reveal...") — offered as a second
   `ACTIVATE_ENGAGE` with `granted: true`; it uses only the granted text and none
   of the Being's own costs. Same for Natures Bounty's one-time grant.
+- **Relic-Beings count as non-Armament Relics you control** for Kalduran Zealot's
+  "If you control a non-armament relic" Engage condition and Temple Guardian's
+  per-Relic Lifespan (an opponent's does not). Costs that sacrifice or destroy a
+  Relic still only target standalone Relics.
 - **Relic-Beings trigger Monumental Mason.** A "Relic, Being" (Training dummy,
   Crumbling Sphinx, Vicious Vittles) summoned onto a tile the Mason points to
   counts as conjuring a non-Armament Relic, however it enters (hand, Invoke,

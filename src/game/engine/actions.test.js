@@ -4116,25 +4116,31 @@ describe('"Destroy target blocking Being, its controller is not dealt damage whe
   });
 
   it('the same negation works when cast reactively by the ATTACKER instead (either side may cast it)', () => {
-    // The window opens for B first; B declines (has nothing), flipping
-    // it back to A, who then casts Strike Down against B's own blocker.
+    // The window opens for B first; B has nothing and passes, and the
+    // attacker (A) then gets their own look — the attack has NOT resolved
+    // yet — and casts Strike Down against B's blocker.
     const conjuringForA = strikeDown({ instanceId: 'sd-a#0' });
     const state = baseState({
       turnPlayer: 'A', board: { r2c1: attacker, r4c1: defender },
       players: { A: player({ hand: [conjuringForA] }), B: player({ lifespan: 50 }) },
     });
     const declared = gameReducer(state, { type: 'MOVE_OR_ATTACK', fromCellId: 'r2c1', toCellId: 'r4c1', isAttack: true });
-    expect(declared.reactiveWindow).toBeNull(); // B has nothing — auto-closed already
-    // Since B never got a real chance to hold priority open, simulate A
-    // still holding it via a fresh reactiveWindow for this half of the
-    // test (a separate real path: A could also cast it on their own
-    // still-open declare-time window whenever B's own pass flips it back
-    // in a real multi-response chain — covered structurally by the
-    // "resolves atomically as a response" Engage/Conjuring tests above).
-    const reopened = { ...state, reactiveWindow: { openFor: 'A' }, pendingResolution: { kind: 'attack', declaringPlayer: 'A', fromCellId: 'r2c1', cardName: 'Attacker' } };
-    const resolved = gameReducer(reopened, { type: 'CAST_CONJURING', instanceId: 'sd-a#0' });
+    expect(declared.reactiveWindow).toMatchObject({ openFor: 'A' }); // B passed; A holds the attack open
+    expect(declared.pendingResolution).toMatchObject({ kind: 'attack' });
+    expect(getLegalActions(declared, 'A').map(a => a.type)).toEqual(expect.arrayContaining(['CAST_CONJURING', 'PASS_PRIORITY']));
+    const resolved = gameReducer(declared, { type: 'CAST_CONJURING', instanceId: 'sd-a#0' });
     expect(resolved.board.r4c1).toBeUndefined();
     expect(resolved.players.B.lifespan).toBe(50); // no death damage, no attack damage either
+  });
+
+  it('an attacker with nothing to cast is not prompted (even a human seat), so the attack just resolves after the defender passes', () => {
+    const state = baseState({
+      turnPlayer: 'A', alwaysOfferPriorityTo: ['A'], board: { r2c1: attacker, r4c1: defender },
+      players: { A: player(), B: player({ lifespan: 50 }) },
+    });
+    const declared = gameReducer(state, { type: 'MOVE_OR_ATTACK', fromCellId: 'r2c1', toCellId: 'r4c1', isAttack: true });
+    expect(declared.reactiveWindow).toBeNull();
+    expect(declared.pendingResolution).toBeNull();
   });
 
   it('never targets a Being off the current attack\'s own lane, even if it belongs to the same defender', () => {
@@ -6163,6 +6169,20 @@ describe('Zealots with an extra Engage cost or condition', () => {
     const groundRelic = { type: 'relic', ownerId: 'A', card: { id: 'ss', instanceId: 'ss#0', name: 'Shifting Sands', keywords: { beingsMayMoveAcross: true } }, counters: { crossing: 2 } };
     const state = baseState({ board: { r2c1: zealot }, groundRelics: { r2c2: groundRelic } });
     expect(getLegalActions(state, 'A')).toContainEqual({ type: 'ACTIVATE_ENGAGE', cellId: 'r2c1' });
+  });
+
+  it('a "Relic, Being" (Training dummy) counts as the non-Armament Relic Kalduran Zealot needs', () => {
+    const zealot = {
+      type: 'being', ownerId: 'A',
+      card: beingCard({ name: 'Kalduran Zealot', keywords: { engage: 'Add (1) Shifting Essence.', engageCondition: 'controls-relic' } }),
+      currentLifespan: 5, engaged: false,
+    };
+    const dummy = { type: 'being', ownerId: 'A', card: beingCard({ instanceId: 'td#0', name: 'Training dummy', typing: 'Relic, Being', isRelicBeing: true }), currentLifespan: 3, engaged: false };
+    const state = baseState({ board: { r2c1: zealot, r2c2: dummy } });
+    expect(getLegalActions(state, 'A')).toContainEqual({ type: 'ACTIVATE_ENGAGE', cellId: 'r2c1' });
+    // an opponent's Training dummy does not count
+    const theirs = baseState({ board: { r2c1: zealot, r2c2: { ...dummy, ownerId: 'B' } } });
+    expect(getLegalActions(theirs, 'A')).not.toContainEqual({ type: 'ACTIVATE_ENGAGE', cellId: 'r2c1' });
   });
 
   it('leaves Engage unconditional for an unrecognized condition phrase (honest simplification)', () => {
@@ -13505,7 +13525,10 @@ describe('Eighteenth wave: Ethereal Conjuring reactive timing (priority window)'
         B: player({ mainDeck: [armament0] }),
       },
     });
-    const afterCombat = gameReducer(state, { type: 'MOVE_OR_ATTACK', fromCellId: 'r4c1', toCellId: 'r2c1', isAttack: true });
+    const declared = gameReducer(state, { type: 'MOVE_OR_ATTACK', fromCellId: 'r4c1', toCellId: 'r2c1', isAttack: true });
+    // B has nothing to respond with; A (the attacker) gets their own look before damage lands.
+    expect(declared.reactiveWindow).toMatchObject({ openFor: 'A' });
+    const afterCombat = gameReducer(declared, { type: 'PASS_PRIORITY' });
     expect(afterCombat.pendingChoice).toEqual(expect.objectContaining({ kind: 'search', playerId: 'B' }));
     expect(afterCombat.reactiveWindow).toBeNull();
     const resolved = gameReducer(afterCombat, { type: 'RESOLVE_CHOICE', instanceId: 'a0#0' });
@@ -14882,8 +14905,12 @@ describe('a revealed Prophecy lets its owner respond too, not just the opponent'
     return s;
   };
 
-  it('after the opponent passes, the owner gets a window of their own before the text resolves', () => {
-    const declared = toFlipWindow(start({ alwaysOfferPriorityTo: ['A', 'B'] }));
+  it('after the opponent passes, an owner who has something to cast gets a window of their own before the text resolves', () => {
+    const ownerHand = [{ id: 'ec', instanceId: 'ec#0', name: 'Test Ethereal', kind: 'ethereal-conjuring', castingCost: { faithless: 0, colored: {} }, textBox: 'Gain 3 Lifespan.' }];
+    const declared = toFlipWindow(start({ alwaysOfferPriorityTo: ['A', 'B'], players: {
+      A: player({ hand: ownerHand, mainDeck: [{ instanceId: 'draw#0', kind: 'being', castingCost: { faithless: 0, colored: {} } }] }),
+      B: player(),
+    } }));
     expect(declared.reactiveWindow).toMatchObject({ openFor: 'B' });
     const ownerLook = gameReducer(declared, { type: 'PASS_PRIORITY' });
     expect(ownerLook.reactiveWindow).toMatchObject({ openFor: 'A' });
@@ -14891,7 +14918,7 @@ describe('a revealed Prophecy lets its owner respond too, not just the opponent'
     const done = gameReducer(ownerLook, { type: 'PASS_PRIORITY' });
     expect(done.reactiveWindow).toBeNull();
     expect(done.board.r3c1).toBeUndefined();
-    expect(done.players.A.hand).toHaveLength(1);
+    expect(done.players.A.hand).toHaveLength(2); // the Ethereal still in hand + the turn's draw
   });
 
   it('the owner can use their own Ethereal Conjuring in that window (Rewrite the Past on their own Prophecy)', () => {
@@ -14911,5 +14938,40 @@ describe('a revealed Prophecy lets its owner respond too, not just the opponent'
     const next = gameReducer(start(), { type: 'PASS_TURN' });
     expect(next.reactiveWindow).toBeNull();
     expect(next.board.r3c1).toBeUndefined();
+  });
+});
+
+describe('Crumbling Sphinx killing Kendasha still lands BOTH hits (Kendasha\'s Depart no longer swallows the second one)', () => {
+  const SPHINX = 'Deal (1) Lifespan Damage to a Being you control and (1) to a different Being.';
+  const mk = (ownerId, name, life, extra = {}) => ({
+    type: 'being', ownerId,
+    card: beingCard({ instanceId: `${name}#0`, name, lifespan: life, keywords: extra.keywords || {} }),
+    currentLifespan: life, engaged: false,
+  });
+  const setup = () => baseState({
+    board: {
+      r2c1: mk('A', 'Crumbling Sphinx', 3),
+      r2c2: mk('A', 'Kendasha', 1, { keywords: { depart: 'Deal (1) damage to target Being.' } }),
+      r4c1: mk('B', 'Target', 5),
+    },
+    players: { A: player(), B: player() },
+  });
+
+  it('Kendasha dies, its Depart hit lands, and the Sphinx\'s second hit still gets its own choice afterwards', () => {
+    let s = resolveOrLogEffect(setup(), 'A', 'Crumbling Sphinx', SPHINX, 'Engage ability', { selfCellId: 'r2c1' });
+    expect(s.pendingChoice?.kind).toBe('lifespan-damage-first-target');
+    s = gameReducer(s, { type: 'RESOLVE_LIFESPAN_DAMAGE_FIRST_TARGET', cellId: 'r2c2' });
+    expect(s.board.r2c2).toBeUndefined(); // Kendasha died
+    // Kendasha's Depart choice is open; the Sphinx's second half is waiting, not lost.
+    expect(s.pendingChoice).toBeTruthy();
+    expect(s.queuedEffects).toHaveLength(1);
+    s = gameReducer(s, { type: 'RESOLVE_DAMAGE_TARGET', cellId: 'r4c1' });
+    // Depart's hit landed (5 -> 4), then the Sphinx's second choice opened.
+    expect(s.board.r4c1.currentLifespan).toBe(4);
+    while (s.reactiveWindow) s = gameReducer(s, { type: 'PASS_PRIORITY' });
+    expect(s.pendingChoice?.kind).toBe('lifespan-damage-second-target');
+    s = gameReducer(s, { type: 'RESOLVE_LIFESPAN_DAMAGE_SECOND_TARGET', cellId: 'r4c1' });
+    expect(s.board.r4c1.currentLifespan).toBe(3); // 2 damage total
+    expect(s.queuedEffects ?? []).toHaveLength(0);
   });
 });
