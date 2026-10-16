@@ -139,7 +139,7 @@ export default function NetLobby({ onPaired, onBack }) {
   return (
     <div className="min-h-dvh flex items-center justify-center p-8 short:p-2" style={{ background: PAGE_BG, fontFamily: 'Georgia, serif' }}>
       <div className="max-w-md w-full text-center border-[6px] border-black rounded-md p-8 short:p-3" style={{ background: LINEN_BG }}>
-        <h2 className="text-xl font-bold text-stone-900 mb-1">Play Online</h2>
+        <h2 className="text-xl font-bold text-stone-900 mb-1">Play a Game</h2>
         <p className="text-sm text-stone-800 mb-6 short:mb-2">Find an opponent automatically, or play a friend directly.</p>
 
         {mode === null && (

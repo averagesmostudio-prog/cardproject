@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { LINEN_BG, PAGE_BG } from '../lib/deckBuilderStyle.js';
 
 // Rules text is the user's own verbatim ruling draft — cross-checked
 // against the live engine (deck sizes, mulligan floor, draw-fail
@@ -99,16 +100,16 @@ function RulesPanel() {
     <div className="space-y-8 text-left">
       {RULES_SECTIONS.map(section => (
         <section key={section.title}>
-          <h2 className="text-lg font-bold text-stone-800 mb-2">{section.title}</h2>
+          <h2 className="text-lg font-bold text-stone-900 mb-2">{section.title}</h2>
           {section.body && (
-            <p className="text-sm text-stone-600 whitespace-pre-line leading-relaxed">{section.body}</p>
+            <p className="text-sm text-stone-800 whitespace-pre-line leading-relaxed">{section.body}</p>
           )}
           {section.steps && (
             <div className="space-y-4 mt-2">
               {section.steps.map(step => (
                 <div key={step.name}>
-                  <h3 className="text-sm font-semibold text-stone-700 mb-1">{step.name}</h3>
-                  <p className="text-sm text-stone-600 whitespace-pre-line leading-relaxed">{step.body}</p>
+                  <h3 className="text-sm font-bold text-stone-900 mb-1">{step.name}</h3>
+                  <p className="text-sm text-stone-800 whitespace-pre-line leading-relaxed">{step.body}</p>
                 </div>
               ))}
             </div>
@@ -116,7 +117,7 @@ function RulesPanel() {
           {section.qa && (
             <ul className="list-disc list-outside pl-5 space-y-2 mt-1">
               {section.qa.map((item, i) => (
-                <li key={i} className="text-sm text-stone-600 leading-relaxed">{item}</li>
+                <li key={i} className="text-sm text-stone-800 leading-relaxed">{item}</li>
               ))}
             </ul>
           )}
@@ -131,8 +132,8 @@ function KeywordsPanel() {
     <div className="space-y-5 text-left">
       {KEYWORDS.map(kw => (
         <div key={kw.name}>
-          <h3 className="text-sm font-bold text-stone-800">{kw.name}</h3>
-          <p className="text-sm text-stone-600 leading-relaxed">{kw.body}</p>
+          <h3 className="text-sm font-bold text-stone-900">{kw.name}</h3>
+          <p className="text-sm text-stone-800 leading-relaxed">{kw.body}</p>
         </div>
       ))}
     </div>
@@ -142,36 +143,41 @@ function KeywordsPanel() {
 export default function HowToPlay({ onBack }) {
   const [tab, setTab] = useState('rules'); // 'rules' | 'keywords'
 
+  const tabs = [['rules', 'Rules'], ['keywords', 'Keywords']];
+
   return (
-    <div className="min-h-dvh bg-black p-8 short:p-2">
+    <div className="min-h-dvh p-8 short:p-2" style={{ background: PAGE_BG, fontFamily: 'Georgia, serif' }}>
       <button
         onClick={onBack}
-        className="fixed top-3 left-3 z-40 text-xs bg-white/90 border border-stone-300 rounded px-3 py-1.5 shadow hover:bg-white"
+        className="fixed top-3 left-3 z-40 text-sm text-stone-300 hover:text-white"
       >
         ← Menu
       </button>
       <div className="max-w-2xl mx-auto pt-8">
         <div className="text-center mb-6">
           <h1 className="text-2xl font-bold text-white mb-2">How to Play</h1>
-          <p className="text-stone-400 text-sm">The rules of Scripturas Alpha, plus a glossary of printed keywords.</p>
+          <p className="text-stone-300 text-sm">The rules of Scripturas Alpha, plus a glossary of printed keywords.</p>
         </div>
 
-        <div className="flex items-center justify-center gap-2 mb-6">
-          <button
-            onClick={() => setTab('rules')}
-            className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors ${tab === 'rules' ? 'bg-white text-stone-800' : 'bg-white/10 text-stone-300 hover:bg-white/20'}`}
-          >
-            Rules
-          </button>
-          <button
-            onClick={() => setTab('keywords')}
-            className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors ${tab === 'keywords' ? 'bg-white text-stone-800' : 'bg-white/10 text-stone-300 hover:bg-white/20'}`}
-          >
-            Keywords
-          </button>
+        <div className="flex items-end gap-1.5 pl-3 relative z-10" role="tablist">
+          {tabs.map(([key, label]) => {
+            const active = tab === key;
+            return (
+              <button
+                key={key}
+                role="tab"
+                aria-selected={active}
+                onClick={() => setTab(key)}
+                className={`px-5 text-sm font-bold text-stone-900 border-[3px] border-black border-b-0 rounded-t-[10px] ${active ? 'pt-3 pb-3 -mb-[6px]' : 'mt-2 pt-2 pb-3 brightness-[.82]'}`}
+                style={{ background: LINEN_BG }}
+              >
+                {label}
+              </button>
+            );
+          })}
         </div>
 
-        <div className="bg-white rounded-xl shadow p-6 sm:p-8">
+        <div className="border-[6px] border-black rounded-md p-6 sm:p-8" style={{ background: LINEN_BG }}>
           {tab === 'rules' ? <RulesPanel /> : <KeywordsPanel />}
         </div>
       </div>

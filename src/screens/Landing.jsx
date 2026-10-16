@@ -1,9 +1,22 @@
 import React, { useState } from 'react';
-import { Settings, X, BookOpen, Globe, Maximize, Minimize } from 'lucide-react';
+import { Settings, X, BookOpen, Maximize, Minimize } from 'lucide-react';
 import { useFullscreen } from '../lib/useFullscreen.js';
 import FullscreenHint from '../game/components/FullscreenHint.jsx';
 import { getCustomCsvName, setCustomCsv, clearCustomCsv, CSV_PASSCODE } from '../lib/csvSource.js';
 import { LINEN_BG, PAGE_BG } from '../lib/deckBuilderStyle.js';
+
+// The coin's two faces (the same art the coin flip uses): front for Play
+// Test, back for Play a Game (online).
+function CoinIcon({ face, className }) {
+  return (
+    <img
+      src={`${import.meta.env.BASE_URL}coin/coin_${face}.png`}
+      alt=""
+      aria-hidden="true"
+      className={`${className} object-contain drop-shadow-md`}
+    />
+  );
+}
 
 // A closed leather-bound journal — a worn leather cover wrapped with a tied
 // strap, and a rough deckle-edge page block peeking out along the spine
@@ -80,54 +93,6 @@ function InkwellQuillIcon({ className }) {
   );
 }
 
-// A sword crossed with a dip pen — same "drawn, not photographed" approach,
-// each weapon/tool built from simple shapes in its own local coordinate
-// space (tip pointing along +x) and rotated into place, so the geometry
-// stays easy to read and adjust.
-function PlayIcon({ className }) {
-  return (
-    <svg viewBox="0 0 200 220" className={className} xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      {/* heraldic shield, behind the crossed sword and pen — a nearly-flat
-          top edge (not a center notch) so it reads as a shield rather than
-          a heart, tapering to a point at the bottom. Centered on the same
-          (100,110) point the crossed pair below is built around. */}
-      <path
-        d="M30,32 Q30,16 48,15 L152,15 Q170,16 170,32 C170,100 155,172 100,212 C45,172 30,100 30,32 Z"
-        fill="#9a9aa0"
-        stroke="#3a3a3d"
-        strokeWidth="3"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M42,35 Q42,24 56,23 L144,23 Q158,24 158,35 C158,92 146,156 100,198 C54,156 42,92 42,35 Z"
-        fill="#e8e8ec"
-        stroke="#3a3a3d"
-        strokeWidth="2.5"
-        strokeLinejoin="round"
-      />
-      {/* Two identical swords (same 131-local-unit shape, centered on its
-          own rotation pivot) crossed at the viewBox's own center (100,110)
-          — slightly bigger than before (scale 1.65 vs 1.5) but the same
-          shared center point, so they still cross exactly on the
-          shield/button's own center. */}
-      <g transform="translate(100,110) scale(1.65) rotate(-48)">
-        <circle cx="-60" cy="0" r="6" fill="#8a6d3a" />
-        <rect x="-60" y="-3" width="20" height="6" rx="2" fill="#5c4630" />
-        <rect x="-41" y="-14" width="6" height="28" rx="2" fill="#8a6d3a" />
-        <rect x="-35" y="-4" width="90" height="8" fill="#d9d9dd" stroke="#6b6b70" strokeWidth="1.5" />
-        <polygon points="55,-4 65,0 55,4" fill="#d9d9dd" stroke="#6b6b70" strokeWidth="1.5" strokeLinejoin="round" />
-      </g>
-      <g transform="translate(100,110) scale(1.65) rotate(225)">
-        <circle cx="-60" cy="0" r="6" fill="#8a6d3a" />
-        <rect x="-60" y="-3" width="20" height="6" rx="2" fill="#5c4630" />
-        <rect x="-41" y="-14" width="6" height="28" rx="2" fill="#8a6d3a" />
-        <rect x="-35" y="-4" width="90" height="8" fill="#d9d9dd" stroke="#6b6b70" strokeWidth="1.5" />
-        <polygon points="55,-4 65,0 55,4" fill="#d9d9dd" stroke="#6b6b70" strokeWidth="1.5" strokeLinejoin="round" />
-      </g>
-    </svg>
-  );
-}
-
 function SettingsModal({ onClose }) {
   const [unlocked, setUnlocked] = useState(false);
   const [passcode, setPasscode] = useState('');
@@ -152,7 +117,7 @@ function SettingsModal({ onClose }) {
     reader.onload = (event) => {
       setCustomCsv(event.target.result, file.name);
       setCustomName(file.name);
-      setStatus(`Saved "${file.name}" — it'll be used next time you open Build, Open a Pack, or Play a Game.`);
+      setStatus(`Saved "${file.name}" — it'll be used next time you open Open a Pack, Play Test, Play a Game, or the Library.`);
     };
     reader.readAsText(file);
   };
@@ -269,17 +234,17 @@ export default function Landing({ onSelectLibrary, onSelectGame, onSelectNetGame
             onClick={onSelectGame}
             className="flex flex-col items-center gap-3 p-8 short:p-2 bg-white/60 hover:bg-white/90 rounded-lg border-[3px] border-black transition-colors"
           >
-            <PlayIcon className="h-24 short:h-12 w-auto" />
-            <span className="text-lg short:text-sm font-bold text-stone-900">Play a Game</span>
-            <span className="text-xs short:hidden text-stone-700">Build a deck and play against the AI</span>
+            <CoinIcon face="heads" className="h-24 w-24 short:h-12 short:w-12" />
+            <span className="text-lg short:text-sm font-bold text-stone-900">Play Test</span>
+            <span className="text-xs short:hidden text-stone-700">Test vs the AI Opponent before heading into Battle</span>
           </button>
           <button
             onClick={onSelectNetGame}
             className="flex flex-col items-center gap-3 p-8 short:p-2 bg-white/60 hover:bg-white/90 rounded-lg border-[3px] border-black transition-colors"
           >
-            <Globe className="h-24 short:h-12 w-auto text-stone-700" strokeWidth={1.25} />
-            <span className="text-lg short:text-sm font-bold text-stone-900">Play Online</span>
-            <span className="text-xs short:hidden text-stone-700">Host or join a match with another player</span>
+            <CoinIcon face="tails" className="h-24 w-24 short:h-12 short:w-12" />
+            <span className="text-lg short:text-sm font-bold text-stone-900">Play a Game</span>
+            <span className="text-xs short:hidden text-stone-700">Compete vs other Players in Ranked or Casual</span>
           </button>
           <button
             onClick={onSelectLibrary}
@@ -287,7 +252,7 @@ export default function Landing({ onSelectLibrary, onSelectGame, onSelectNetGame
           >
             <InkwellQuillIcon className="h-24 short:h-12 w-auto" />
             <span className="text-lg short:text-sm font-bold text-stone-900">Library</span>
-            <span className="text-xs short:hidden text-stone-700">Manage decks, browse precons, and design card art</span>
+            <span className="text-xs short:hidden text-stone-700">Manage decks and Browse the Card Pool</span>
           </button>
         </div>
       </div>

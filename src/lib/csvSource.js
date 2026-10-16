@@ -1,5 +1,5 @@
 // Shared source for "the current card CSV" used by Build, Open a Pack, and
-// Play a Game. A custom CSV set via the Settings panel (passcode-gated) is
+// Play Test / Play a Game. A custom CSV set via the Settings panel (passcode-gated) is
 // stored in localStorage and takes priority over the bundled default file.
 
 // Shared with every CSV-upload gate in the app (Landing's Settings panel and

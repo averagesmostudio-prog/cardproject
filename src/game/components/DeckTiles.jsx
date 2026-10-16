@@ -1,7 +1,7 @@
 import React from 'react';
 import { Pencil, Copy, X } from 'lucide-react';
 
-// The deck-selection tiles shared by the Library and Play a Game screens, in
+// The deck-selection tiles shared by the Library and Play Test screens, in
 // the Deck Builder's linen / black-border style. `decks` is the normalized
 // list from deckLibrary.js's buildDeckLibraryList(). Clicking a tile calls
 // onPick (open it, or play it); the corner buttons are each optional:

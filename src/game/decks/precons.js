@@ -1,4 +1,4 @@
-// Preloaded, ready-to-play decks shown on the "Play a Game" screen
+// Preloaded, ready-to-play decks shown on the "Play Test" screen
 // (PreconSelect.jsx) — each is a real 40-card mono-color Main Deck (plus a
 // matching 15-card mono-color Effigy Deck, built the same way the AI's own
 // old random deck was: autoBuildEffigyCounts, deck.js) lifted straight from

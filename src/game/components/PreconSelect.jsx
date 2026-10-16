@@ -9,7 +9,7 @@ const SEG = 'px-3 py-1 text-xs font-bold transition-colors';
 const segActive = 'bg-[#393938] text-white';
 const segIdle = 'bg-white/60 text-stone-800 hover:bg-white/90';
 
-// The "Play a Game" landing screen: the same deck-selection screen as the
+// The "Play Test" (vs the AI) landing screen: the same deck-selection screen as the
 // Library (DeckTiles — precons + anything saved) except that picking a deck
 // jumps straight to the coin flip, or edits a copy first (into DeckBuilder)
 // without ever mutating a precon in place, plus a plain "Import / Build a
@@ -55,7 +55,7 @@ export default function PreconSelect({ pool, onStart, onCustom, onEdit, onBack, 
         </div>
 
         <div className="border-[6px] border-black rounded-md p-4 sm:p-5" style={{ background: LINEN_BG }}>
-          <h1 className="text-xl font-bold text-stone-900">Play a Game</h1>
+          <h1 className="text-xl font-bold text-stone-900">Play Test</h1>
           <p className="text-stone-800 mt-1 mb-4 short:mb-2 text-sm">
             Pick a ready-to-play deck, or build your own. The AI opponent's own
             deck is chosen at random, scoped to the AI Difficulty below.

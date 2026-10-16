@@ -4,7 +4,7 @@
 
 const ADDRESS_KEY = 'scripturas-relay-address';
 // The deployed relay (server/relay.mjs on the Bluehost VPS, behind nginx +
-// Let's Encrypt TLS at relay.scripturastcg.com) — so "Play Online" works
+// Let's Encrypt TLS at relay.scripturastcg.com) — so "Play a Game" (online) works
 // out of the box for real matches. ws://localhost:8787 (server/relay.mjs
 // run locally via `npm run relay`) still works fine by typing it into the
 // relay-address field; it's just no longer what a fresh install defaults to.
