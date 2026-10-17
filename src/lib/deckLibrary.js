@@ -12,6 +12,19 @@ import { deriveDominantColor, getDeckIcon, pickRandomIconKey } from './deckLibra
 import { autoBuildEffigyCounts } from '../game/engine/deck.js';
 
 const LIBRARY_KEY = 'scripturas-deck-library';
+// Ids of decks removed on this device, with when — so a deck deleted here
+// isn't resurrected by the next account sync (deckSync.js merges against
+// these) and so the deletion can reach the account's other devices.
+const TOMBSTONE_KEY = 'scripturas-deck-tombstones';
+
+const changeListeners = new Set();
+// source: 'local' (this device edited the library) | 'sync' (an account
+// sync rewrote it). deckSync only reacts to 'local'; screens refresh on both.
+const notify = (source) => changeListeners.forEach((fn) => fn(source));
+export const onLibraryChange = (fn) => {
+  changeListeners.add(fn);
+  return () => changeListeners.delete(fn);
+};
 
 const read = () => {
   try {
@@ -30,6 +43,31 @@ const write = (decks) => {
     // Storage unavailable (private mode, quota, non-browser test env) —
     // saved decks just won't persist; nothing else in the app depends on it.
   }
+};
+
+const readTombstones = () => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(TOMBSTONE_KEY) || '{}');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const writeTombstones = (deleted) => {
+  try {
+    localStorage.setItem(TOMBSTONE_KEY, JSON.stringify(deleted));
+  } catch {
+    // Same best-effort contract as write() above.
+  }
+};
+
+export const getSyncSnapshot = () => ({ decks: read(), deleted: readTombstones() });
+
+export const applySyncSnapshot = ({ decks, deleted }) => {
+  write(decks);
+  writeTombstones(deleted);
+  notify('sync');
 };
 
 export const listSavedDecks = () => read();
@@ -51,6 +89,7 @@ export const saveDeck = ({ name, entries, effigyCounts }) => {
     updatedAt: now,
   };
   write([...decks, record]);
+  notify('local');
   return record;
 };
 
@@ -70,10 +109,15 @@ export const updateDeck = (id, { name, entries, effigyCounts }) => {
   };
   decks[idx] = updated;
   write(decks);
+  notify('local');
   return updated;
 };
 
-export const removeDeck = (id) => write(read().filter(d => d.id !== id));
+export const removeDeck = (id) => {
+  write(read().filter(d => d.id !== id));
+  writeTombstones({ ...readTombstones(), [id]: new Date().toISOString() });
+  notify('local');
+};
 
 // The Library's full deck list: static precons (unremovable) unioned with
 // whatever's currently saved (removable) — read fresh on every call so a

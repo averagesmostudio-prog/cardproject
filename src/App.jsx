@@ -6,6 +6,9 @@ import NetGameApp from './game/components/NetGameApp.jsx';
 import PackOpener from './screens/PackOpener.jsx';
 import Library from './screens/Library.jsx';
 import HowToPlay from './screens/HowToPlay.jsx';
+import { initDeckSync } from './lib/deckSync.js';
+
+initDeckSync();
 
 export default function App() {
   const [screen, setScreen] = useState('landing'); // 'landing' | 'library' | 'generator' | 'game' | 'netGame' | 'pack' | 'howToPlay'

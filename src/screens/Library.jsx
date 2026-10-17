@@ -4,6 +4,7 @@ import { parseCSV, toGameCard, EFFIGY_COLORS } from '../lib/cardData.js';
 import { getActiveCsvText } from '../lib/csvSource.js';
 import { removeDeck, buildDeckLibraryList, toDeckSeed, duplicateDeck } from '../lib/deckLibrary.js';
 import { LINEN_BG, PAGE_BG } from '../lib/deckBuilderStyle.js';
+import { useLibrarySyncRefresh } from '../lib/useAccount.js';
 import DeckBuilder from '../game/components/DeckBuilder.jsx';
 import DeckTiles from '../game/components/DeckTiles.jsx';
 
@@ -27,6 +28,7 @@ export default function Library({ onBack, onSelectGenerator }) {
   const [seed, setSeed] = useState(null);
   const [pool, setPool] = useState([]);
   const [, setVersion] = useState(0); // bumped to force the deck list to re-read the store
+  useLibrarySyncRefresh();
 
   useEffect(() => {
     getActiveCsvText().then(text => {

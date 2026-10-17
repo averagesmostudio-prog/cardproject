@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
-import { Settings, X, BookOpen, Maximize, Minimize } from 'lucide-react';
+import { Settings, X, BookOpen, Maximize, Minimize, User } from 'lucide-react';
 import { useFullscreen } from '../lib/useFullscreen.js';
 import FullscreenHint from '../game/components/FullscreenHint.jsx';
 import { getCustomCsvName, setCustomCsv, clearCustomCsv, CSV_PASSCODE } from '../lib/csvSource.js';
 import { LINEN_BG, PAGE_BG } from '../lib/deckBuilderStyle.js';
+import AccountDialog from './AccountDialog.jsx';
+import { useAccount } from '../lib/useAccount.js';
 
 // The coin's two faces (the same art the coin flip uses): front for Play
 // Test, back for Play a Game (online).
@@ -187,6 +189,8 @@ function SettingsModal({ onClose }) {
 
 export default function Landing({ onSelectLibrary, onSelectGame, onSelectNetGame, onSelectPack, onSelectHowToPlay }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const account = useAccount();
   const fullscreen = useFullscreen();
 
   return (
@@ -217,6 +221,14 @@ export default function Landing({ onSelectLibrary, onSelectGame, onSelectNetGame
         aria-label="How to play"
       >
         <BookOpen className="w-5 h-5 text-stone-300" />
+      </button>
+      <button
+        onClick={() => setAccountOpen(true)}
+        className="fixed top-4 left-16 z-40 h-9 px-3 flex items-center gap-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors text-sm text-stone-300"
+        aria-label={account ? `Account: ${account.user.displayName}` : 'Sign in'}
+      >
+        <User className="w-5 h-5" />
+        <span className="max-w-[10rem] truncate">{account ? account.user.displayName : 'Sign in'}</span>
       </button>
 
       <div className="max-w-3xl short:max-w-none w-full text-center border-[6px] border-black rounded-md p-6 sm:p-8 short:p-3" style={{ background: LINEN_BG }}>
@@ -258,6 +270,7 @@ export default function Landing({ onSelectLibrary, onSelectGame, onSelectNetGame
       </div>
 
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
+      <AccountDialog open={accountOpen} onClose={() => setAccountOpen(false)} />
     </div>
   );
 }

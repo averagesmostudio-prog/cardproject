@@ -478,7 +478,7 @@ function RevealPopup({ revealPopup, dispatch, cardArtProps, human }) {
   );
 }
 
-export default function Match({ initialState, onExit, onRematch, rematchStatus = 'idle', deckEntries, competitiveMode, aiDifficulty, netRole = null, mySeat = 'A', gameChannel = null, onOpponentDisconnected }) {
+export default function Match({ initialState, onExit, onRematch, rematchStatus = 'idle', deckEntries, competitiveMode, aiDifficulty, netRole = null, mySeat = 'A', opponentName = null, gameChannel = null, onOpponentDisconnected }) {
   // `HUMAN`/`AI` used to be module-level constants ('A'/'B') — shadowed here
   // instead so a net match can seat the local human as either player. Every
   // other read of HUMAN/AI in this file (still ~90 of them) resolves to
@@ -488,7 +488,10 @@ export default function Match({ initialState, onExit, onRematch, rematchStatus =
   // effect inside useGameEngine, which net mode disables via `netRole`).
   const HUMAN = mySeat;
   const AI = mySeat === 'A' ? 'B' : 'A';
-  const opponentLabel = netRole ? 'Opponent' : 'AI';
+  // A signed-in opponent's account name (relay 'paired' message); a guest, or
+  // a match against the AI, keeps the generic label.
+  const oppName = (netRole && opponentName) || 'Opponent';
+  const opponentLabel = netRole ? oppName : 'AI';
   const [opponentGone, setOpponentGone] = useState(false);
   // While a card's coin toss plays (CoinTossPopup), the screen keeps showing the board as it was
   // before the flip and the AI waits — the engine has already applied the flip's result, so
@@ -1793,7 +1796,7 @@ export default function Match({ initialState, onExit, onRematch, rematchStatus =
           )}
           <h2 className={`font-bold text-stone-800 ${compact ? 'text-base' : 'text-lg mb-1'}`}>Your opening hand</h2>
           <p className={`text-sm text-stone-500 ${compact ? 'mb-0' : 'mb-2'}`}>
-            {state.turnPlayer === HUMAN ? 'You go first.' : 'Opponent goes first.'}
+            {state.turnPlayer === HUMAN ? 'You go first.' : `${oppName} goes first.`}
           </p>
           {compact ? (
             <>
@@ -1958,7 +1961,7 @@ export default function Match({ initialState, onExit, onRematch, rematchStatus =
           <h2 className="text-2xl font-bold text-stone-800 mb-2">
             {state.loopWin
               ? (humanWonLoop ? 'You have presented a loop! Opponent loses!' : 'Your opponent has presented a loop! You Lose!')
-              : (state.winner ? `${state.winner === HUMAN ? 'You win!' : (netRole ? 'Opponent wins.' : 'The AI wins.')}` : 'Draw.')}
+              : (state.winner ? `${state.winner === HUMAN ? 'You win!' : (netRole ? `${oppName} wins.` : 'The AI wins.')}` : 'Draw.')}
           </h2>
           {state.loopWin && (
             <div className="flex gap-3 justify-center flex-wrap my-4">
@@ -1996,11 +1999,11 @@ export default function Match({ initialState, onExit, onRematch, rematchStatus =
                 disabled={rematchStatus === 'waiting'}
                 className={`px-4 py-2 text-white rounded-lg disabled:opacity-70 ${rematchStatus === 'incoming' ? 'bg-green-700 animate-pulse' : 'bg-amber-600'}`}
               >
-                {rematchStatus === 'waiting' ? 'Waiting for opponent…' : rematchStatus === 'incoming' ? 'Opponent wants a rematch — Accept' : 'Rematch'}
+                {rematchStatus === 'waiting' ? 'Waiting for opponent…' : rematchStatus === 'incoming' ? `${oppName} wants a rematch — Accept` : 'Rematch'}
               </button>
             )}
             {netRole && opponentGone && (
-              <span className="self-center text-xs text-stone-500">Opponent has left — no rematch.</span>
+              <span className="self-center text-xs text-stone-500">{oppName} has left — no rematch.</span>
             )}
           </div>
         </div>
@@ -2015,7 +2018,7 @@ export default function Match({ initialState, onExit, onRematch, rematchStatus =
     return (
       <div className="min-h-dvh flex items-center justify-center bg-black p-8 short:p-2">
         <div className="text-center bg-white rounded-lg shadow p-8 max-w-lg">
-          <h2 className="text-2xl font-bold text-stone-800 mb-2">Opponent disconnected</h2>
+          <h2 className="text-2xl font-bold text-stone-800 mb-2">{oppName} disconnected</h2>
           <p className="text-sm text-stone-500 mb-4">The connection to your opponent was lost.</p>
           <button onClick={onExit} className="px-4 py-2 border border-stone-300 rounded-lg">Back to menu</button>
         </div>
@@ -2055,8 +2058,8 @@ export default function Match({ initialState, onExit, onRematch, rematchStatus =
         >
           <div className="text-xl font-extrabold tracking-wide text-amber-300 uppercase">
             {prophecyReveal.current.kind === 'cast'
-              ? (prophecyReveal.current.ownerId === HUMAN ? 'You cast' : 'Opponent casts')
-              : (prophecyReveal.current.ownerId === HUMAN ? 'Your Prophecy flips up' : "Opponent's Prophecy flips up")}
+              ? (prophecyReveal.current.ownerId === HUMAN ? 'You cast' : `${oppName} casts`)
+              : (prophecyReveal.current.ownerId === HUMAN ? 'Your Prophecy flips up' : `${oppName}'s Prophecy flips up`)}
           </div>
           <div className="prophecy-reveal-card" style={{ width: 'min(60vw, 52dvh)' }}>
             <CardThumbnail
@@ -2081,7 +2084,7 @@ export default function Match({ initialState, onExit, onRematch, rematchStatus =
           <div className="absolute w-[420px] h-[420px] rounded-full turn-banner-glow" />
           <div className="relative turn-banner-text px-8 py-3 bg-stone-900/85 border-2 border-amber-400 rounded-full shadow-2xl">
             <span className="text-2xl font-extrabold tracking-wide text-amber-300 uppercase">
-              {turnBanner.player === HUMAN ? 'Your Turn' : "Opponent's Turn"}
+              {turnBanner.player === HUMAN ? 'Your Turn' : `${oppName}'s Turn`}
             </span>
           </div>
         </div>

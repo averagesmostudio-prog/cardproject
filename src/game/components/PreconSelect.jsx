@@ -3,6 +3,7 @@ import { Layers } from 'lucide-react';
 import { resolveDeckEntries, validateMainDeck } from '../engine/deck.js';
 import { buildDeckLibraryList, removeDeck, toDeckSeed, duplicateDeck } from '../../lib/deckLibrary.js';
 import { LINEN_BG, PAGE_BG } from '../../lib/deckBuilderStyle.js';
+import { useLibrarySyncRefresh } from '../../lib/useAccount.js';
 import DeckTiles from './DeckTiles.jsx';
 
 const SEG = 'px-3 py-1 text-xs font-bold transition-colors';
@@ -16,6 +17,7 @@ const segIdle = 'bg-white/60 text-stone-800 hover:bg-white/90';
 // Custom Deck" option below that routes into the existing DeckImport →
 // DeckBuilder flow unchanged.
 export default function PreconSelect({ pool, onStart, onCustom, onEdit, onBack, competitiveMode, onToggleCompetitiveMode, aiDifficulty, onChangeAiDifficulty }) {
+  useLibrarySyncRefresh();
   const [error, setError] = useState(null);
   const [, setVersion] = useState(0); // bumped to force the tiles to re-read the store after a remove/duplicate
 

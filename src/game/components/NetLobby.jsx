@@ -1,7 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createRelayClient, createGameChannel } from '../net/relayClient.js';
-import { getRelayAddress, setRelayAddress } from '../../lib/relayAddress.js';
+import { getRelayAddress } from '../../lib/relayAddress.js';
 import { LINEN_BG, PAGE_BG } from '../../lib/deckBuilderStyle.js';
+import { getAuthToken } from '../../lib/account.js';
+import { useAccount } from '../../lib/useAccount.js';
+import AccountDialog from '../../screens/AccountDialog.jsx';
 
 // Host/join/quick-match pairing screen for a two-player-over-the-network
 // match — the net-mode counterpart to picking "vs AI" in GameApp.jsx.
@@ -9,7 +12,7 @@ import { LINEN_BG, PAGE_BG } from '../../lib/deckBuilderStyle.js';
 // centered white rounded-lg shadow card, max-w-md).
 //
 // Three ways to pair up: host (get a code to share), join (enter a
-// friend's code), or quick match (the relay server auto-pairs you with
+// friend's code), or random opponent ("quick match" in the relay protocol) (the relay server auto-pairs you with
 // whoever else is looking right now — server/roomRegistry.mjs's
 // quickMatchQueue). Host/join let two people who already know each other
 // play; quick match doesn't need that, at the cost of playing a stranger
@@ -27,7 +30,11 @@ import { LINEN_BG, PAGE_BG } from '../../lib/deckBuilderStyle.js';
 // relay server reports both sides connected.
 export default function NetLobby({ onPaired, onBack }) {
   const [mode, setMode] = useState(null); // null | 'host' | 'join' | 'quick'
-  const [address, setAddress] = useState(getRelayAddress());
+  const account = useAccount();
+  const [accountOpen, setAccountOpen] = useState(false);
+  // Not shown in the UI anymore — the saved/default relay (relayAddress.js)
+  // is used as-is. A custom one can still be set through localStorage.
+  const address = getRelayAddress();
   const [joinCode, setJoinCode] = useState('');
   const [roomCode, setRoomCode] = useState(null); // host's own code, once created
   const [status, setStatus] = useState('idle'); // 'idle' | 'connecting' | 'waiting' | 'searching' | 'error'
@@ -52,14 +59,13 @@ export default function NetLobby({ onPaired, onBack }) {
   }, []);
 
   const startHost = () => {
-    setRelayAddress(address);
     setMode('host');
     setStatus('connecting');
     setError(null);
     const relayClient = createRelayClient(address);
     clientRef.current = relayClient;
     relayClient.onOpen(() => {
-      relayClient.send({ type: 'create-room' });
+      relayClient.send({ type: 'create-room', token: getAuthToken() });
     });
     relayClient.onMessage((msg) => {
       if (msg.type === 'room-created') {
@@ -69,7 +75,7 @@ export default function NetLobby({ onPaired, onBack }) {
       if (msg.type === 'paired') {
         handedOffRef.current = true;
         setStatus('paired');
-        onPaired({ gameChannel: createGameChannel(relayClient), relayClient, netRole: msg.role, mySeat: msg.role === 'host' ? 'A' : 'B' });
+        onPaired({ gameChannel: createGameChannel(relayClient), relayClient, netRole: msg.role, mySeat: msg.role === 'host' ? 'A' : 'B', opponentName: msg.opponentName || null });
       }
     });
     relayClient.onClose(() => {
@@ -79,7 +85,6 @@ export default function NetLobby({ onPaired, onBack }) {
   };
 
   const startJoin = () => {
-    setRelayAddress(address);
     setMode('join');
   };
 
@@ -91,7 +96,7 @@ export default function NetLobby({ onPaired, onBack }) {
     const relayClient = createRelayClient(address);
     clientRef.current = relayClient;
     relayClient.onOpen(() => {
-      relayClient.send({ type: 'join-room', code });
+      relayClient.send({ type: 'join-room', code, token: getAuthToken() });
     });
     relayClient.onMessage((msg) => {
       if (msg.type === 'join-error') {
@@ -101,7 +106,7 @@ export default function NetLobby({ onPaired, onBack }) {
       if (msg.type === 'paired') {
         handedOffRef.current = true;
         setStatus('paired');
-        onPaired({ gameChannel: createGameChannel(relayClient), relayClient, netRole: msg.role, mySeat: msg.role === 'host' ? 'A' : 'B' });
+        onPaired({ gameChannel: createGameChannel(relayClient), relayClient, netRole: msg.role, mySeat: msg.role === 'host' ? 'A' : 'B', opponentName: msg.opponentName || null });
       }
     });
     relayClient.onClose(() => {
@@ -111,14 +116,13 @@ export default function NetLobby({ onPaired, onBack }) {
   };
 
   const startQuickMatch = () => {
-    setRelayAddress(address);
     setMode('quick');
     setStatus('connecting');
     setError(null);
     const relayClient = createRelayClient(address);
     clientRef.current = relayClient;
     relayClient.onOpen(() => {
-      relayClient.send({ type: 'find-match' });
+      relayClient.send({ type: 'find-match', token: getAuthToken() });
     });
     relayClient.onMessage((msg) => {
       if (msg.type === 'searching') {
@@ -127,7 +131,7 @@ export default function NetLobby({ onPaired, onBack }) {
       if (msg.type === 'paired') {
         handedOffRef.current = true;
         setStatus('paired');
-        onPaired({ gameChannel: createGameChannel(relayClient), relayClient, netRole: msg.role, mySeat: msg.role === 'host' ? 'A' : 'B' });
+        onPaired({ gameChannel: createGameChannel(relayClient), relayClient, netRole: msg.role, mySeat: msg.role === 'host' ? 'A' : 'B', opponentName: msg.opponentName || null });
       }
     });
     relayClient.onClose(() => {
@@ -144,18 +148,15 @@ export default function NetLobby({ onPaired, onBack }) {
 
         {mode === null && (
           <>
-            <label className="block text-left text-xs font-bold text-stone-800 mb-1">Relay server address</label>
-            <input
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              className="w-full mb-6 short:mb-2 px-3 py-2 border-2 border-black bg-white/70 rounded-lg text-sm font-mono"
-              placeholder="ws://localhost:8787"
-            />
+            <p className="text-xs text-stone-800 mb-4">
+              {account ? <>Playing as <span className="font-bold">{account.user.displayName}</span> · </> : <>Playing as a guest · </>}
+              <button onClick={() => setAccountOpen(true)} className="font-bold underline hover:text-black">{account ? 'Account' : 'Sign in'}</button>
+            </p>
             <button
               onClick={startQuickMatch}
               className="w-full mb-5 px-5 py-2.5 border-2 border-black bg-[#393938] text-white rounded-lg font-bold hover:bg-black transition"
             >
-              Quick Match
+              Random Opponent
             </button>
             <div className="flex items-center gap-3 mb-5">
               <div className="flex-1 h-0.5 bg-black/40" />
@@ -164,10 +165,10 @@ export default function NetLobby({ onPaired, onBack }) {
             </div>
             <div className="flex gap-3 justify-center">
               <button onClick={startHost} className="px-5 py-2 border-2 border-black bg-white/60 text-stone-900 rounded-lg font-bold hover:bg-white/90 transition">
-                Host a match
+                Host Private
               </button>
               <button onClick={startJoin} className="px-5 py-2 border-2 border-black bg-white/60 text-stone-900 rounded-lg font-bold hover:bg-white/90 transition">
-                Join a match
+                Join Private
               </button>
             </div>
           </>
@@ -219,6 +220,7 @@ export default function NetLobby({ onPaired, onBack }) {
           <button onClick={onBack} className="text-xs text-stone-800 hover:text-black">← Menu</button>
         </div>
       </div>
+      <AccountDialog open={accountOpen} onClose={() => setAccountOpen(false)} />
     </div>
   );
 }

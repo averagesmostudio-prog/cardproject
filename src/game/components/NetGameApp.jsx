@@ -147,7 +147,7 @@ export default function NetGameApp({ onExitToMenu }) {
     return (
       <div className="min-h-dvh flex items-center justify-center p-8 short:p-2" style={{ background: PAGE_BG, fontFamily: 'Georgia, serif' }}>
         <div className="text-center border-[6px] border-black rounded-md p-8 max-w-lg" style={{ background: LINEN_BG }}>
-          <h2 className="text-2xl font-bold text-stone-900 mb-2">Opponent disconnected</h2>
+          <h2 className="text-2xl font-bold text-stone-900 mb-2">{net?.opponentName || 'Opponent'} disconnected</h2>
           <p className="text-sm text-stone-800 mb-4">The connection to your opponent was lost before the match started.</p>
           <button onClick={onExitToMenu} className="px-4 py-2 border-2 border-black bg-white/60 hover:bg-white/90 rounded-lg font-bold text-stone-900">Back to menu</button>
         </div>
@@ -210,6 +210,7 @@ export default function NetGameApp({ onExitToMenu }) {
       aiDifficulty="standard"
       netRole={net.netRole}
       mySeat={net.mySeat}
+      opponentName={net.opponentName}
       gameChannel={net.gameChannel}
       onOpponentDisconnected={() => {}}
     />
