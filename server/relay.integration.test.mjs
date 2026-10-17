@@ -164,6 +164,9 @@ describe('accounts over HTTP', () => {
     expect((await hit()).status).toBe(401);
     expect((await hit()).status).toBe(401);
     expect((await hit()).status).toBe(429);
+    // A different caller behind the same proxy (X-Real-IP) has its own budget.
+    const other = await fetch(`http://127.0.0.1:${limited.port}/auth/login`, { method: 'POST', headers: { 'X-Real-IP': '203.0.113.9' }, body: JSON.stringify({ username: 'x', password: 'y' }) });
+    expect(other.status).toBe(401);
     await limited.close();
   });
 });

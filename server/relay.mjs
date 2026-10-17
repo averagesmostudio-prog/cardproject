@@ -63,7 +63,12 @@ const bearer = (req) => {
   return header.startsWith('Bearer ') ? header.slice(7) : null;
 };
 
-const clientKey = (req) => (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || 'unknown';
+// Behind nginx every request arrives from 127.0.0.1, so the real caller comes
+// from the proxy's X-Real-IP (this box's nginx sets it) or X-Forwarded-For.
+const clientKey = (req) => req.headers['x-real-ip']
+  || (req.headers['x-forwarded-for'] || '').split(',')[0].trim()
+  || req.socket.remoteAddress
+  || 'unknown';
 
 export async function createRelayServer({
   port = process.env.RELAY_PORT || 8787,
