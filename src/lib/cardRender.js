@@ -26,7 +26,7 @@ export const CARDS_PER_SHEET = SHEET_COLS * SHEET_ROWS;
 export const EXPORT_DPI = 300;
 
 let crc32Table = null;
-const crc32 = (bytes) => {
+export const crc32 = (bytes) => {
   if (!crc32Table) {
     crc32Table = new Uint32Array(256);
     for (let n = 0; n < 256; n++) {

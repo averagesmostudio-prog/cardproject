@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Upload, Download, ChevronLeft, ChevronRight, ChevronDown, Settings2, LayoutGrid, Search, Plus, Minus, Trash2, X, Lock } from 'lucide-react';
 import { getColumnData, BORDER_IMAGE_SRC, BORDER_STYLES, getBorderTypeForCard, getCardKind, parseEffigyCost, parseCSV as sharedParseCSV, resolveCardArt } from '../lib/cardData.js';
 import { buildDeckExport, parseDeckImport } from '../lib/deckExport.js';
+import { buildZip } from '../lib/zip.js';
 import { getActiveCsvText, CSV_PASSCODE } from '../lib/csvSource.js';
 import {
   CARD_PX_WIDTH, CARD_PX_HEIGHT, ONBOARD_CARD_PX_WIDTH, ONBOARD_CARD_PX_HEIGHT, MPC_PX_WIDTH, MPC_PX_HEIGHT, DEFAULT_POSITIONS,
@@ -459,6 +460,7 @@ const TradingCardGenerator = () => {
 
     const cardCanvas = document.createElement('canvas');
     const totalPages = Math.ceil(flatDeck.length / CARDS_PER_SHEET);
+    const sheets = [];
 
     for (let page = 0; page < totalPages; page++) {
       const pageCanvas = document.createElement('canvas');
@@ -483,17 +485,21 @@ const TradingCardGenerator = () => {
         pctx.drawImage(cardCanvas, col * cardWidth, row * cardHeight, cardWidth, cardHeight);
       }
 
-      const blob = await pngBlobWithDpi(pageCanvas);
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.download = `deck_sheet_${page + 1}.png`;
-      link.href = url;
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      sheets.push({ name: `deck_sheet_${page + 1}.png`, blob: await pngBlobWithDpi(pageCanvas) });
 
       setDeckSheetProgress(page + 1);
-      await new Promise(resolve => setTimeout(resolve, 150));
+      await new Promise(resolve => setTimeout(resolve, 0));
     }
+
+    // One download instead of a click per page — browsers silently block the
+    // 2nd+ automatic download in a row, which left only the first sheet.
+    const zipBlob = await buildZip(sheets);
+    const url = URL.createObjectURL(zipBlob);
+    const link = document.createElement('a');
+    link.download = 'deck_print_sheets.zip';
+    link.href = url;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
 
     setIsExportingDeckSheets(false);
   };
@@ -1227,7 +1233,7 @@ const TradingCardGenerator = () => {
                 <LayoutGrid className="w-4 h-4" />
                 {isExportingDeckSheets
                   ? `Building sheet ${deckSheetProgress}/${deckTotalSheets}…`
-                  : `Download Deck Print Sheets (3×3, ${deckTotalSheets} page${deckTotalSheets === 1 ? '' : 's'})`}
+                  : `Download Deck Print Sheets (3×3, ${deckTotalSheets} page${deckTotalSheets === 1 ? '' : 's'}, .zip)`}
               </button>
               {deckTotal !== DECK_SIZE && (
                 <span className="text-sm text-stone-500">
