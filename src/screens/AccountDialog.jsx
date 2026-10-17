@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { LINEN_BG } from '../lib/deckBuilderStyle.js';
-import { login, register, loginWithGoogle, signOut, fetchAuthConfig } from '../lib/account.js';
+import { login, register, loginWithGoogle, signOut, fetchAuthConfig, refreshAccount, addPasswordLogin } from '../lib/account.js';
 import { useAccount } from '../lib/useAccount.js';
 import { syncDecks } from '../lib/deckSync.js';
 
@@ -34,6 +34,13 @@ export default function AccountDialog({ open, onClose }) {
   const [syncNote, setSyncNote] = useState('');
   const [googleClientId, setGoogleClientId] = useState(null);
   const googleButtonRef = useRef(null);
+  const [newUsername, setNewUsername] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+
+  const signedIn = !!account;
+  useEffect(() => {
+    if (open && signedIn) refreshAccount();
+  }, [open, signedIn]);
 
   useEffect(() => {
     if (!open || account || !canUseGoogle()) return undefined;
@@ -80,6 +87,20 @@ export default function AccountDialog({ open, onClose }) {
     }
   };
 
+  const submitPasswordLogin = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      await addPasswordLogin(newUsername.trim(), newPassword);
+      setNewPassword('');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const syncNow = async () => {
     setSyncNote('Syncing…');
     const result = await syncDecks();
@@ -103,6 +124,17 @@ export default function AccountDialog({ open, onClose }) {
             <p className="text-sm text-stone-800 mb-4">
               You're <span className="font-bold">{account.user.displayName}</span>. Opponents see this name in online matches, and your saved decks sync to this account.
             </p>
+            {account.user.hasPassword === false && (
+              <form onSubmit={submitPasswordLogin} className="mb-4 p-3 border-2 border-black rounded-lg bg-white/40">
+                <h3 className="text-sm font-bold text-stone-900 mb-1">Use this account in the desktop app</h3>
+                <p className="text-xs text-stone-800 mb-3">The desktop apps can't use Google sign-in. Pick a username and password and you can sign in to this same account there.</p>
+                <input className={`${inputClass} mb-2`} placeholder="Username" value={newUsername} onChange={(e) => setNewUsername(e.target.value)} autoComplete="username" maxLength={20} aria-label="New username" />
+                <input type="password" className={`${inputClass} mb-2`} placeholder="Password (8+ characters)" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} autoComplete="new-password" aria-label="New password" />
+                {error && <p className="text-xs font-bold text-red-800 mb-2">{error}</p>}
+                <button type="submit" disabled={busy || !newUsername || !newPassword} className={primaryClass}>{busy ? 'One moment…' : 'Create login'}</button>
+              </form>
+            )}
+            {account.user.username && <p className="text-xs text-stone-800 mb-3">Username: <span className="font-bold">{account.user.username}</span> — sign in with it on any device.</p>}
             <button onClick={syncNow} className={`${primaryClass} mb-2`}>Sync decks now</button>
             {syncNote && <p className="text-xs text-stone-800 mb-2">{syncNote}</p>}
             <button

@@ -10,6 +10,8 @@
 //   POST /auth/login     { username, password } -> { token, user }
 //   POST /auth/google    { credential }         -> { token, user }
 //   GET  /auth/me        (Bearer token)         -> { user }
+//   POST /auth/set-password (Bearer) { username, password } -> { user }
+//                        (a Google-only account adds a username + password)
 //   GET  /decks          (Bearer token)         -> { decks, deleted }
 //   PUT  /decks          (Bearer token) { decks, deleted } -> { ok }
 // Accounts are optional: a socket that sends no (or a bad) token plays as a
@@ -20,7 +22,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { RoomRegistry } from './roomRegistry.mjs';
-import { AuthService, AuthError, RateLimiter, UserStore, loadSecret, validateDecksPayload } from './auth.mjs';
+import { AuthService, AuthError, RateLimiter, UserStore, loadSecret, publicUser, validateDecksPayload } from './auth.mjs';
 
 const MAX_BODY_BYTES = 1024 * 1024;
 
@@ -101,11 +103,16 @@ export async function createRelayServer({
         if (url.pathname === '/auth/login') return sendJson(res, 200, await auth.login(body.username, body.password));
         return sendJson(res, 200, await auth.google(body.credential));
       }
-      if (url.pathname === '/auth/me' || url.pathname === '/decks') {
+      if (url.pathname === '/auth/me' || url.pathname === '/auth/set-password' || url.pathname === '/decks') {
         const user = auth.userFromToken(bearer(req));
         if (!user) throw new AuthError(401, 'unauthorized', 'Please sign in again.');
         if (req.method === 'GET' && url.pathname === '/auth/me') {
-          return sendJson(res, 200, { user: { id: user.id, username: user.username, displayName: user.displayName } });
+          return sendJson(res, 200, { user: publicUser(user) });
+        }
+        if (req.method === 'POST' && url.pathname === '/auth/set-password') {
+          if (!authLimiter.allow(clientKey(req))) throw new AuthError(429, 'rate-limited', 'Too many attempts — try again in a few minutes.');
+          const body = await readJson(req);
+          return sendJson(res, 200, await auth.setPassword(user, body.username, body.password));
         }
         if (req.method === 'GET') return sendJson(res, 200, { decks: user.decks, deleted: user.deleted });
         if (req.method === 'PUT') {

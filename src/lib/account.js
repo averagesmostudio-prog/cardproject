@@ -90,4 +90,26 @@ export const loginWithGoogle = async (credential) => {
 
 export const signOut = () => store(null);
 
+// Re-reads the account from the server so a stale stored copy (signed in
+// before a field existed, or changed on another device) catches up. An
+// expired/invalid token signs out; a network failure leaves things alone.
+export const refreshAccount = async () => {
+  const current = getAccount();
+  if (!current) return;
+  try {
+    const { user } = await apiRequest('GET', '/auth/me', { token: current.token });
+    store({ token: current.token, user });
+  } catch (err) {
+    if (err.status === 401) signOut();
+  }
+};
+
+// A Google-only account picks a username + password so it can also sign in
+// where Google sign-in isn't available (the desktop apps).
+export const addPasswordLogin = async (username, password) => {
+  const current = getAccount();
+  const { user } = await apiRequest('POST', '/auth/set-password', { token: current.token, body: { username, password } });
+  store({ token: current.token, user });
+};
+
 export const fetchAuthConfig = () => apiRequest('GET', '/auth/config');

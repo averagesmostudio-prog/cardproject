@@ -171,6 +171,39 @@ describe('accounts over HTTP', () => {
   });
 });
 
+describe('adding a password to a Google account', () => {
+  const googleToken = async (sub, name) => {
+    fakeGoogle[`cred-${sub}`] = { aud: 'client-123', iss: 'accounts.google.com', sub, exp: String(Math.floor(Date.now() / 1000) + 600), given_name: name };
+    return (await api('POST', '/auth/google', { body: { credential: `cred-${sub}` } })).body;
+  };
+
+  it('lets a Google-only account choose a username and password, then sign in with them', async () => {
+    const google = await googleToken('g-pw-1', 'Pia');
+    expect(google.user.hasPassword).toBe(false);
+    expect(google.user.username).toBeNull();
+
+    const set = await api('POST', '/auth/set-password', { token: google.token, body: { username: 'Pia_Desktop', password: 'longenough' } });
+    expect(set.status).toBe(200);
+    expect(set.body.user).toMatchObject({ username: 'Pia_Desktop', hasPassword: true, displayName: 'Pia' });
+    expect((await api('GET', '/auth/me', { token: google.token })).body.user.hasPassword).toBe(true);
+
+    const login = await api('POST', '/auth/login', { body: { username: 'pia_desktop', password: 'longenough' } });
+    expect(login.status).toBe(200);
+    expect(login.body.user.id).toBe(google.user.id);
+  });
+
+  it('refuses a taken username, bad input, no token, and an account that already has a password', async () => {
+    const google = await googleToken('g-pw-2', 'Quinn');
+    expect((await api('POST', '/auth/set-password', { token: google.token, body: { username: 'Ana_1', password: 'longenough' } })).status).toBe(409);
+    expect((await api('POST', '/auth/set-password', { token: google.token, body: { username: 'a b', password: 'longenough' } })).status).toBe(400);
+    expect((await api('POST', '/auth/set-password', { token: google.token, body: { username: 'Quinn_ok', password: 'short' } })).status).toBe(400);
+    expect((await api('POST', '/auth/set-password', { body: { username: 'Quinn_ok', password: 'longenough' } })).status).toBe(401);
+
+    const withPassword = (await api('POST', '/auth/login', { body: { username: 'Ana_1', password: 'longenough' } })).body;
+    expect((await api('POST', '/auth/set-password', { token: withPassword.token, body: { username: 'Another_1', password: 'longenough' } })).status).toBe(409);
+  });
+});
+
 describe('matchmaking with names', () => {
   it('tells each signed-in player their opponent\'s name (quick match)', async () => {
     const a = (await api('POST', '/auth/register', { body: { username: 'Alice', password: 'longenough' } })).body.token;

@@ -180,6 +180,20 @@ export class UserStore {
     return record;
   }
 
+  // Gives a Google-only account a username + password. False when the
+  // username is already taken (checked and claimed in one synchronous step,
+  // so two racing requests can't both win it).
+  async setCredentials(id, username, passwordHash) {
+    const record = this.users.get(id);
+    if (this.byName.has(username.toLowerCase())) return false;
+    record.username = username;
+    record.usernameLower = username.toLowerCase();
+    record.passwordHash = passwordHash;
+    this.byName.set(record.usernameLower, id);
+    await this.persist();
+    return true;
+  }
+
   async setDecks(id, { decks, deleted }) {
     const record = this.users.get(id);
     record.decks = decks;
@@ -216,7 +230,7 @@ export const verifyGoogleIdToken = async (idToken, { clientId, fetchImpl = fetch
   return { sub: String(info.sub), name: info.given_name || info.name || 'Player' };
 };
 
-const publicUser = (record) => ({ id: record.id, username: record.username, displayName: record.displayName });
+export const publicUser = (record) => ({ id: record.id, username: record.username, displayName: record.displayName, hasPassword: !!record.passwordHash });
 
 export class AuthService {
   constructor({ store, secret, googleClientId = null, fetchImpl = fetch, now = () => Date.now() }) {
@@ -234,13 +248,28 @@ export class AuthService {
     return { token: signToken(this.secret, record.id, this.now()), user: publicUser(record) };
   }
 
-  async register(username, password) {
+  validateCredentials(username, password) {
     if (typeof username !== 'string' || !USERNAME_RE.test(username)) {
       throw new AuthError(400, 'bad-username', 'Usernames are 3–20 letters, numbers, _ or -.');
     }
     if (typeof password !== 'string' || password.length < MIN_PASSWORD || password.length > MAX_PASSWORD) {
       throw new AuthError(400, 'bad-password', `Passwords need at least ${MIN_PASSWORD} characters.`);
     }
+  }
+
+  // Lets a signed-in account that has no password yet (a Google account)
+  // pick a username and password, so it can also sign in where Google
+  // sign-in isn't available — the desktop apps.
+  async setPassword(record, username, password) {
+    if (record.passwordHash) throw new AuthError(409, 'already-has-password', 'This account already has a username and password.');
+    this.validateCredentials(username, password);
+    const ok = await this.store.setCredentials(record.id, username, await hashPassword(password));
+    if (!ok) throw new AuthError(409, 'username-taken', 'That username is already taken.');
+    return { user: publicUser(record) };
+  }
+
+  async register(username, password) {
+    this.validateCredentials(username, password);
     const record = await this.store.createPasswordUser(username, await hashPassword(password));
     if (!record) throw new AuthError(409, 'username-taken', 'That username is already taken.');
     return this.issue(record);
